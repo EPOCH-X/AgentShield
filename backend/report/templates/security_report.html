@@ -1,0 +1,15 @@
+<!-- [R7] 보고서 HTML 템플릿 — Jinja2 -->
+<!-- TODO: [R7] 보고서 레이아웃 구현 -->
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>AgentShield 보안 테스트 보고서</title>
+</head>
+<body>
+    <h1>AgentShield 보안 테스트 보고서</h1>
+    <p>세션: {{ session.id }}</p>
+    <p>대상: {{ session.target_api_url }}</p>
+    <p>차단율: {{ block_rate }}</p>
+</body>
+</html>

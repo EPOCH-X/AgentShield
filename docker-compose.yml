@@ -1,0 +1,50 @@
+# [R7] Docker Compose — 개발 환경
+version: "3.9"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agentshield
+      POSTGRES_USER: agentshield
+      POSTGRES_PASSWORD: agentshield
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    depends_on:
+      - db
+    volumes:
+      - ./backend:/app/backend
+      - ./adapters:/app/adapters
+      - ./data:/app/data
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+
+  defense-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"
+    command: uvicorn defense_proxy.proxy_server:app --host 0.0.0.0 --port 8001 --reload
+
+  monitoring-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8002:8002"
+    command: uvicorn monitoring_proxy.monitor_server:app --host 0.0.0.0 --port 8002 --reload
+
+volumes:
+  pgdata:
