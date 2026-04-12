@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# 환경
+.env
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (용량 큰 파일)
+*.jsonl
+data/attack_patterns/*.csv
+data/attack_patterns/*.json
+!data/attack_patterns/README.md
+!data/defense_patterns/README.md
+!data/finetuning/README.md
+
+# Adapters (학습 결과)
+adapters/lora-red/*.bin
+adapters/lora-red/*.safetensors
+adapters/lora-judge/*.bin
+adapters/lora-judge/*.safetensors
+adapters/lora-blue/*.bin
+adapters/lora-blue/*.safetensors
+
+# ChromaDB
+chromadb_data/
+
+# Reports
+reports/*.pdf
+
+# Docker
+pgdata/
+
+# Node (dashboard)
+dashboard/node_modules/
+dashboard/.next/
+dashboard/out/
+
