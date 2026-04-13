@@ -12,6 +12,12 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentshield -d agentshield"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
   backend:
     build:
@@ -23,7 +29,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield
       OLLAMA_BASE_URL: http://host.docker.internal:11434
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
       - ./backend:/app/backend
       - ./adapters:/app/adapters

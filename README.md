@@ -119,6 +119,197 @@ npm install
 npm run dev
 ```
 
+### 처음부터 순서대로 (Windows · Docker 없이 · 백엔드+DB만)
+
+**준비물:** Python 3.11 이상, PostgreSQL 설치 완료(서비스가 떠 있어야 함).
+
+**1) PostgreSQL에서 유저·DB 만들기**  
+pgAdmin 또는 `psql`을 열고 *postgres* 슈퍼유저로 접속한 뒤 아래를 실행합니다.
+
+```sql
+CREATE USER agentshield WITH PASSWORD 'agentshield';
+CREATE DATABASE agentshield OWNER agentshield;
+```
+
+**주의 — `CREATE USER`를 cmd/ PowerShell에 그대로 치면 안 됩니다.**  
+`CREATE`는 Windows 명령이 아니라 **PostgreSQL용 SQL**입니다. 검은 화면(cmd)에 붙여넣으면 `'CREATE'은(는) 내부 또는 외부 명령...` 오류가 납니다.
+
+- **pgAdmin:** 왼쪽에서 서버 연결 → **Tools → Query Tool** → 위 SQL 두 줄 붙여넣기 → 실행(▶).
+- **psql:** 시작 메뉴에서 “SQL Shell (psql)” 실행 → 서버/포트/DB는 기본값(Enter) → **User name에 `postgres`** → 비밀번호 입력 후, 프롬프트 `postgres=#`에서 위 SQL 입력 후 세미콜론까지 입력하고 Enter.
+
+또는 PowerShell에서 한 번에 (설치 경로·비번은 본인 환경에 맞게):
+
+```powershell
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -c "CREATE USER agentshield WITH PASSWORD 'agentshield';"
+& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -c "CREATE DATABASE agentshield OWNER agentshield;"
+```
+
+**`docker` 명령이 안 될 때:** Docker Desktop이 설치되어 있지 않거나 PATH에 없는 상태입니다. **Docker 없이** 진행하려면 로컬 PostgreSQL만 설치하고 위처럼 `psql`/pgAdmin을 쓰면 됩니다. Docker를 쓰려면 [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) 설치 후 PC 재시작(또는 터미널 재실행)하세요. `docker compose`는 **`AgentShield` 폴더**(`docker-compose.yml` 있는 곳)에서 실행합니다. 지금 경로가 `...\agent`만 열려 있으면 `cd AgentShield` 후 실행합니다.
+
+**2) 프로젝트 폴더로 이동** (본인 경로에 맞게 수정)
+
+```powershell
+cd "C:\Users\user\Desktop\파이널 프로젝트\agent\AgentShield"
+```
+
+**3) 가상환경 + 패키지**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+실행 정책 오류가 나면 관리자 PowerShell에서 한 번만:  
+`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+
+**4) 환경 변수 파일**
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`localhost:5432`, 유저/DB `agentshield` 그대로 쓰면 `.env` 수정 없이 진행 가능합니다. 포트·비밀번호를 바꿨다면 `.env`의 `DATABASE_URL`만 고칩니다.
+
+**5) 테이블 생성 + 시드 데이터**
+
+```powershell
+python -m backend.dev_seed
+```
+
+**6) DB에 잘 붙었는지·행 수 확인**
+
+```powershell
+python -m backend.db_inspect
+```
+
+**7) API 서버 기동**
+
+```powershell
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+**8) 동작 확인**  
+브라우저에서 `http://127.0.0.1:8000/health` → `{"status":"ok"}`  
+또는 PowerShell:
+
+```powershell
+Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
+```
+
+로그인·스캔 API는 아직 스텁인 경우가 많으니, 위까지 되면 **DB + 백엔드 골격**은 정상입니다.
+
+---
+
+**Docker로 DB만 쓰고 싶을 때:** Docker Desktop 설치 후 `AgentShield`에서 `docker compose up -d db` → `.env`의 `DATABASE_URL`을 `postgresql+asyncpg://agentshield:agentshield@localhost:5432/agentshield`로 두고, **5)~8)** 을 같은 PowerShell에서 진행하면 됩니다.
+
+### Docker 없이 백엔드 + PostgreSQL만 실행
+
+1. **PostgreSQL**을 설치하고, `.env.example`과 맞는 DB·유저를 만듭니다. (기본값: DB 이름 `agentshield`, 유저/비밀번호 `agentshield`)
+
+   ```sql
+   CREATE USER agentshield WITH PASSWORD 'agentshield';
+   CREATE DATABASE agentshield OWNER agentshield;
+   ```
+
+2. **환경 변수**: `cp .env.example .env` 후 필요 시 `DATABASE_URL`만 본인 환경에 맞게 수정합니다.  
+   형식은 반드시 `postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DBNAME` 입니다.
+
+3. **의존성** (저장소 루트 `AgentShield/`에서):
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **서버 기동** — 반드시 `AgentShield/` 디렉터리에서 실행합니다 (`backend` 패키지 기준 경로).
+
+   ```bash
+   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+   앱이 뜰 때 `lifespan`에서 `init_db()`가 한 번 실행되며, **없는 테이블만** SQLAlchemy `create_all`로 생성됩니다.
+
+#### 테이블 생성 여부 확인
+
+- **API**: 브라우저나 `curl`로 `http://localhost:8000/health` → `{"status":"ok"}` 이면 서버는 기동된 상태입니다. (DB 연결 실패 시 여기까지 안 올라올 수 있으니 터미널 로그를 함께 봅니다.)
+
+- **PostgreSQL**에서 테이블 목록:
+
+  ```bash
+  psql -h localhost -U agentshield -d agentshield -c "\dt"
+  ```
+
+  다음 7개가 보이면 스키마가 반영된 것입니다:  
+  `attack_patterns`, `test_sessions`, `test_results`, `employees`, `usage_logs`, `violations`, `policy_rules`
+
+#### DATABASE_URL 맞추기
+
+- **형식:** `postgresql+asyncpg://사용자:비밀번호@호스트:포트/데이터베이스이름`
+- 로컬 기본 예: `postgresql+asyncpg://agentshield:agentshield@localhost:5432/agentshield`
+- PostgreSQL을 다른 포트로 띄웠다면 `5432`만 바꿉니다.
+- `.env`에만 두면 됩니다. `backend/config.py`가 자동으로 읽습니다.
+
+#### 개발용 초기 데이터(시드)
+
+Phase 1 등에서 테이블을 읽을 최소 데이터를 넣으려면, 테이블 생성 후 **한 번** 실행합니다.
+
+```bash
+# AgentShield/ 에서, venv 활성화 후
+python -m backend.dev_seed
+```
+
+- `attack_patterns`: 카테고리 LLM01/02/06/07 샘플 4건 (`source=seed_dev`)
+- `policy_rules`: 정규식 예시 1건
+- `employees`: `employee_id=dev-user-001` 테스트 직원 1명
+
+이미 `seed_dev` 패턴이 있으면 다시 넣지 않습니다. 대량 적재는 R2 파이프라인·별도 스크립트로 진행합니다.
+
+팀에 안내할 때는 위 «Docker 없이…» + «DATABASE_URL» + «dev_seed» 세 덩어리를 함께내면 됩니다.
+
+#### 공유 DB에서 “저장되는지” 확인하기
+
+- **같은 데이터를 보려면** 팀 전원의 `.env`에 **동일한 `DATABASE_URL`**이 있어야 합니다.  
+  각자 PC에만 PostgreSQL을 깔고 `localhost`로만 붙으면, **본인 DB에만** 쌓이고 서로 안 보입니다.
+- **공유하는 방법 예:** 한 대의 서버/클라우드(RDS, Supabase, 팀용 VM 등)에 DB 하나 두고, URL을 `postgresql+asyncpg://...@그서버주소:5432/agentshield` 형태로 공유합니다.
+
+저장·조회가 되는지 빠르게 보려면:
+
+```bash
+python -m backend.db_inspect
+```
+
+테이블별 **행 개수**가 나옵니다. 누군가 스캔/모니터링으로 데이터를 넣으면 `test_results`, `usage_logs` 등 숫자가 늘어납니다.  
+또는 `psql`로 `SELECT COUNT(*) FROM test_results;` 같이 직접 조회해도 됩니다.
+
+### 팀에 DB 스키마만 먼저 줄 때 (세부기획서 §6 그대로)
+
+저장소에 **`database/schema.sql`** 이 있습니다. 기획서와 동일한 DDL입니다.
+
+**R7이 팀에 전달할 순서:**
+
+1. **Git으로 공유:** `database/schema.sql` 이 포함된 브랜치/저장소를 팀원이 `git pull` 한다.
+2. **각자(또는 공용 서버에서) PostgreSQL에 DB·유저 준비** — 예: `agentshield` DB, 유저 `agentshield`.
+3. **스키마 적용 (한 번만):** `AgentShield` 폴더에서 아래 중 하나 실행.
+
+   ```powershell
+   # PostgreSQL bin 경로·비밀번호는 본인 환경에 맞게
+   & "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U agentshield -d agentshield -f database/schema.sql
+   ```
+
+   `postgres` 슈퍼유저로 `agentshield` DB에 넣을 때:
+
+   ```powershell
+   & "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -d agentshield -f database/schema.sql
+   ```
+
+4. **`.env`에 `DATABASE_URL`** 동일하게 맞추기.
+5. **(선택)** `python -m backend.dev_seed` — 샘플 행만 추가. 스키마는 이미 SQL로 있으므로 **필수는 아님**.
+6. **백엔드:** `uvicorn ...` 기동 시 `init_db()`의 `create_all`은 **이미 있는 테이블은 건드리지 않음**.
+
+**주의:** 같은 DB에 `schema.sql`을 **두 번** 실행하면 `already exists` 오류가 납니다. 초기화가 필요하면 DB를 드롭 후 재생성하거나, 팀 규칙으로 Alembic 마이그레이션으로 전환합니다.
+
+**ORM과의 관계:** `backend/models/*` 는 이 스키마와 맞춰 두었습니다. 스키마는 **이 SQL 파일이 기준**이면 됩니다.
+
 ## 담당자 가이드
 
 각 파일 상단에 `[R1]`~`[R7]` 태그로 담당자가 표시되어 있습니다.
