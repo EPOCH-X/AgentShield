@@ -57,7 +57,6 @@ id_rsa*
 # Data (용량 큰 파일)
 *.jsonl
 data/attack_patterns/*.csv
-data/attack_patterns/*.json
 !data/attack_patterns/README.md
 !data/defense_patterns/README.md
 !data/finetuning/README.md
