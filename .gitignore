@@ -9,8 +9,10 @@ dist/
 build/
 .eggs/
 
-# 환경
+# 환경 (비밀·로컬 설정 — .env.example 만 저장소에 둠)
 .env
+.env.*
+!.env.example
 .venv/
 venv/
 
@@ -23,6 +25,34 @@ venv/
 # OS
 .DS_Store
 Thumbs.db
+Desktop.ini
+
+# 로그·임시
+*.log
+logs/
+*.tmp
+*.temp
+.cache/
+
+# 테스트·커버리지
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# 인증서·키 (절대 커밋 금지)
+*.pem
+*.key
+id_rsa*
+*.p12
+
+# 로컬 DB 파일(덤프·SQLite 등 — SQL 스키마 스크립트는 별도로 커밋)
+*.sqlite
+*.sqlite3
+*.db
 
 # Data (용량 큰 파일)
 *.jsonl
@@ -53,4 +83,27 @@ pgdata/
 dashboard/node_modules/
 dashboard/.next/
 dashboard/out/
+dashboard/.turbo
+dashboard/.vercel
+dashboard/*.tsbuildinfo
+
+# Docker — 로컬 전용 오버라이드(포트·볼륨 등)
+docker-compose.override.yml
+
+# DB 백업·덤프
+*.dump
+*.sql.gz
+*.backup
+*.bak
+
+# 기타 도구·에디터
+.hypothesis/
+.dmypy.json
+*.orig
+*.rej
+*~
+.ipynb_checkpoints/
+
+# 프로세스·PID
+*.pid
 
