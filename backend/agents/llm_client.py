@@ -4,9 +4,15 @@
 기능별 파이프라인 섹션 8 참조.
 Ollama로 Gemma 4 E2B를 로컬 실행하고, 역할별 LoRA 어댑터를 전환한다.
 """
+
+import os
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../"))
+sys.path.append(project_root)
 import httpx
 import logging
-from config import settings
+from backend.config import settings
 
 # TODO: [R4] 구현
 # - Ollama API 연동 (generate, chat)

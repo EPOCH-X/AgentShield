@@ -66,8 +66,10 @@ class ChromaRAGClient:
         # 중복 체크: 거리가 0.3 미만이면 저장 안 함 (유사도 > 0.7)
         if results['distances'] and len(results['distances'][0]) > 0:
             distance = results['distances'][0][0]
-            if distance < 0.3:
-                print(f"유사한 공격 패턴 존재 (거리: {distance:.4f}). 저장을 생략합니다.")
+            similarity = 1 - distance
+            
+            if similarity > 0.7: 
+                print(f"유사한 공격 패턴 존재 (유사도: {similarity:.4f}). 저장을 생략합니다.")
                 return False
 
         # 새로운 공격 패턴 저장

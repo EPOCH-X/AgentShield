@@ -21,9 +21,11 @@ async def verify_databases():
         results = rag_client.search_defense("ignore 키워드 차단", n_results=1)
         
         if results['documents'] and len(results['documents'][0]) > 0:
+            distance = results['distances'][0][0]
+            similarity = 1 - distance
             print(f"찾은 문서: {results['documents'][0][0]}")
             print(f"메타데이터(원본): {results['metadatas'][0][0]}")
-            print(f"유사도 거리: {results['distances'][0][0]:.4f} (0에 가까울수록 유사함)")
+            print(f"유사도 거리: {similarity:.4f} (1에 가까울수록 유사함)")
     except Exception as e:
         print(f"ChromaDB 에러: {e}")
 

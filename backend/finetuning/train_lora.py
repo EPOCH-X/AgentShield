@@ -91,6 +91,15 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     # 데이터셋 로드
     dataset = load_dataset("json", data_files=train_file)
 
+    def formatting_prompts_func(example):
+        output_texts = []
+        for i in range(len(example['instruction'])):
+            # Gemma 전용 프롬프트 템플릿 적용 (2026년 기준 표준 가안)
+            text = f"<start_of_turn>user\n{example['instruction'][i]}\n{example['input'][i]}<end_of_turn>\n"
+            text += f"<start_of_turn>model\n{example['output'][i]}<end_of_turn>"
+            output_texts.append(text)
+        return output_texts
+
     # 학습 설정
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -114,6 +123,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         args=training_args,
         train_dataset=dataset["train"],
         dataset_text_field="text",   # JSONL 파일 내에서 학습할 텍스트가 있는 키 값 지정 필수
+        formatting_func=formatting_prompts_func,
         tokenizer=tokenizer,
         max_seq_length=2048,
         packing=False
@@ -127,7 +137,8 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
 
     # Ollama 자동 연동을 위한 Modelfile 생성
     modelfile_path = os.path.join(output_dir, "Modelfile")
-    absolute_adapter_path = os.path.abspath(os.path.join(output_dir, "adapter_model.safetensors"))
+    adapter_file = "adapter_model.safetensors" if os.path.exists(os.path.join(output_dir, "adapter_model.safetensors")) else "adapter_model.bin"
+    absolute_adapter_path = os.path.abspath(os.path.join(output_dir, adapter_file))
 
     modelfile_content = f"FROM {settings.OLLAMA_MODEL}\nADAPTER {absolute_adapter_path}"
 
