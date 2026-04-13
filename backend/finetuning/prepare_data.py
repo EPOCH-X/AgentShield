@@ -57,6 +57,11 @@ def prepare_blue_dataset():
     try:
         # ChromaDB에서 방어 패턴 가져오기
         results = rag_client.defense_col.get()
+        count = len(results['documents'])
+
+        if count == 0:
+            print("ChromaDB가 비어있습니다. ingest.py를 먼저 실행하세요.")
+            return
 
         dataset = []
         count = len(results['documents'])
@@ -68,7 +73,9 @@ def prepare_blue_dataset():
                 "output": f"```python\n{meta['defense_code']}\n```"
             })
 
-        final_dataset = dataset * (1500 // max(1, count))
+        repeat_factor = (1500 // count) + 1
+        final_dataset = (dataset * repeat_factor)[:1500]
+
         output_path = os.path.join(FINETUNING_DIR, "blue_train.jsonl")
         with open(output_path, "w", encoding="utf-8") as f:
             for item in final_dataset[:1500]:
@@ -118,3 +125,6 @@ async def main():
     prepare_judge_dataset()
     
     print("\n모든 데이터셋 준비가 완료되었습니다")
+
+if __name__ == "__main__":
+    asyncio.run(main())
