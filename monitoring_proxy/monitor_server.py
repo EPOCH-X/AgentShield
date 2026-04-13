@@ -45,6 +45,12 @@ class MonitorChatResponse(BaseModel):
     ]
     severity: Literal["high", "medium", "low"] | None
     reason: str | None
+    retry_after_seconds: int | None = None
+    limit_type: Literal[
+        "hourly",
+        "daily",
+        "repeated_query",
+    ] | None = None
     target_url: str | None = None
     message_count: int
 
@@ -83,6 +89,12 @@ class P3DetectionResult(BaseModel):
     blocked: bool
     severity: Literal["high", "medium", "low"] | None
     reason: str | None
+    retry_after_seconds: int | None = None
+    limit_type: Literal[
+        "hourly",
+        "daily",
+        "repeated_query",
+    ] | None = None
 
 
 @dataclass
@@ -253,8 +265,10 @@ DEFAULT_EMPLOYEE_ID = "demo-user"
 HOURLY_REQUEST_LIMIT = 3
 DAILY_REQUEST_LIMIT = 10
 REPEATED_QUERY_THRESHOLD = 3
+REPEATED_QUERY_WINDOW_SECONDS = 300
 HOURLY_WINDOW = timedelta(hours=1)
 DAILY_WINDOW = timedelta(days=1)
+REPEATED_QUERY_WINDOW = timedelta(seconds=REPEATED_QUERY_WINDOW_SECONDS)
 RATE_LIMIT_STATE: dict[str, EmployeeRateLimitState] = {}
 
 
@@ -382,15 +396,25 @@ def prune_rate_limit_state(
     while state.daily_requests and state.daily_requests[0] < daily_cutoff:
         state.daily_requests.popleft()
 
+    repeated_cutoff = now - REPEATED_QUERY_WINDOW
     stale_queries: list[str] = []
     for query, timestamps in state.query_timestamps.items():
-        while timestamps and timestamps[0] < daily_cutoff:
+        while timestamps and timestamps[0] < repeated_cutoff:
             timestamps.popleft()
         if not timestamps:
             stale_queries.append(query)
 
     for query in stale_queries:
         state.query_timestamps.pop(query, None)
+
+
+def calculate_retry_after_seconds(
+    oldest_timestamp: datetime,
+    window: timedelta,
+    now: datetime,
+) -> int:
+    retry_after = oldest_timestamp + window - now
+    return max(1, int(retry_after.total_seconds()))
 
 
 def detect_rate_limit(
@@ -408,27 +432,48 @@ def detect_rate_limit(
     query_timestamps.append(now)
 
     if len(state.daily_requests) > DAILY_REQUEST_LIMIT:
+        retry_after_seconds = calculate_retry_after_seconds(
+            oldest_timestamp=state.daily_requests[0],
+            window=DAILY_WINDOW,
+            now=now,
+        )
         return P3DetectionResult(
             category="p3_rate_limit_daily",
             blocked=True,
             severity="high",
             reason="daily request limit exceeded",
+            retry_after_seconds=retry_after_seconds,
+            limit_type="daily",
         )
 
     if len(state.hourly_requests) > HOURLY_REQUEST_LIMIT:
+        retry_after_seconds = calculate_retry_after_seconds(
+            oldest_timestamp=state.hourly_requests[0],
+            window=HOURLY_WINDOW,
+            now=now,
+        )
         return P3DetectionResult(
             category="p3_rate_limit_hourly",
             blocked=True,
             severity="medium",
             reason="hourly request limit exceeded",
+            retry_after_seconds=retry_after_seconds,
+            limit_type="hourly",
         )
 
     if len(query_timestamps) >= REPEATED_QUERY_THRESHOLD:
+        retry_after_seconds = calculate_retry_after_seconds(
+            oldest_timestamp=query_timestamps[0],
+            window=REPEATED_QUERY_WINDOW,
+            now=now,
+        )
         return P3DetectionResult(
             category="p3_repeated_query",
             blocked=True,
             severity="medium",
             reason="repeated query threshold exceeded",
+            retry_after_seconds=retry_after_seconds,
+            limit_type="repeated_query",
         )
 
     return P3DetectionResult(
@@ -436,6 +481,8 @@ def detect_rate_limit(
         blocked=False,
         severity=None,
         reason=None,
+        retry_after_seconds=None,
+        limit_type=None,
     )
 
 
@@ -472,6 +519,8 @@ async def monitor_chat(payload: MonitorChatRequest) -> MonitorChatResponse:
             stage="p1_confidential_scan",
             severity=p1_result.severity,
             reason=p1_result.reason,
+            retry_after_seconds=None,
+            limit_type=None,
             target_url=str(payload.target_url) if payload.target_url else None,
             message_count=len(payload.messages),
         )
@@ -490,6 +539,8 @@ async def monitor_chat(payload: MonitorChatRequest) -> MonitorChatResponse:
             stage="p2_inappropriate_use",
             severity=p2_result.severity,
             reason=p2_result.reason,
+            retry_after_seconds=None,
+            limit_type=None,
             target_url=str(payload.target_url) if payload.target_url else None,
             message_count=len(payload.messages),
         )
@@ -498,11 +549,21 @@ async def monitor_chat(payload: MonitorChatRequest) -> MonitorChatResponse:
     p3_result = detect_rate_limit(employee_id, latest_message)
     if p3_result.blocked:
         return MonitorChatResponse(
-            content="사용 한도를 초과했습니다. 잠시 후 다시 시도하세요.",
+            content=(
+                "일일 사용 한도를 초과했습니다. 내일 다시 시도하세요."
+                if p3_result.category == "p3_rate_limit_daily"
+                else (
+                    "동일한 요청이 반복되어 일시적으로 제한되었습니다."
+                    if p3_result.category == "p3_repeated_query"
+                    else "사용 한도를 초과했습니다. 잠시 후 다시 시도하세요."
+                )
+            ),
             blocked=True,
             stage="p3_rate_limit",
             severity=p3_result.severity,
             reason=p3_result.reason,
+            retry_after_seconds=p3_result.retry_after_seconds,
+            limit_type=p3_result.limit_type,
             target_url=str(payload.target_url) if payload.target_url else None,
             message_count=len(payload.messages),
         )
@@ -514,12 +575,15 @@ async def monitor_chat(payload: MonitorChatRequest) -> MonitorChatResponse:
             stage="p2_inappropriate_use",
             severity=p2_result.severity,
             reason=p2_result.reason,
+            retry_after_seconds=None,
+            limit_type=None,
             target_url=str(payload.target_url) if payload.target_url else None,
             message_count=len(payload.messages),
         )
 
     # TODO[R5]: P2 keyword rules should be replaced or augmented with policy_rules data
     # TODO[R5]: DB-backed rate limiting hook
+    # TODO[R5]: policy_rules integration hook
     # TODO[R5]: forward to target AI service
     # TODO[R5]: violation logging hook
     # TODO[R5]: escalation hook
@@ -531,6 +595,8 @@ async def monitor_chat(payload: MonitorChatRequest) -> MonitorChatResponse:
         stage="p1_confidential_scan" if p1_result.severity else "skeleton",
         severity=p1_result.severity,
         reason=p1_result.reason,
+        retry_after_seconds=None,
+        limit_type=None,
         target_url=str(payload.target_url) if payload.target_url else None,
         message_count=len(payload.messages),
     )
