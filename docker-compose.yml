@@ -30,6 +30,14 @@ services:
       - IS_PERSISTENT=TRUE
       - ALLOW_RESET=TRUE
 
+  # chroma-ui:
+  #   image: fengzhichao/chromadb-admin:latest
+  #   container_name: agentshield-chroma-ui
+  #   ports:
+  #     - "8004:3001" # 이 이미지는 내부적으로 3001 포트를 사용합니다.
+  #   depends_on:
+  #     - chromadb
+
   backend:
     build:
       context: .
