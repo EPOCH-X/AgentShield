@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_db
+import backend.models  # noqa: F401 — ORM 테이블을 Base.metadata에 등록
 from backend.api import scan, report, monitoring, auth
 
 
