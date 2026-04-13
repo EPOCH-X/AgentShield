@@ -21,5 +21,8 @@ async def get_db() -> AsyncSession:
 
 
 async def init_db():
+    # 모델 모듈을 import해야 Base.metadata에 테이블이 등록됨
+    import backend.models  # noqa: F401
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
