@@ -16,8 +16,13 @@
 # - argparse CLI
 
 import os
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_dir, "../../"))
+sys.path.append(project_root)
 import torch
 import argparse
+import subprocess
 from transformers import (
     AutoModelForCausalLM, 
     AutoTokenizer, 
@@ -32,12 +37,18 @@ from peft import (
 from trl import SFTTrainer
 from datasets import load_dataset
 
+from backend.config import settings
+
 def train_role_adapter(role: str, train_file: str, output_dir: str):
     """
-    역할별 LoRA 어댑터 학습 및 Ollama 연동 준비.
-    사용법: python train_lora.py --role red --data data/finetuning/red_train.jsonl --output adapters/lora-red
+    역할별 LoRA 어댑터 학습 및 Ollama 연동 자동화.
     """
-    print(f"[{role.upper()}] 파인튜닝 시작 | 데이터: {train_file}")
+    print(f"\n" + "="*50)
+    print(f"[{role.upper()}] 파인튜닝 시작")
+    print(f" - 데이터: {train_file}")
+    print(f" - 출력 경로: {output_dir}")
+    print(f" - GPU 활성 상태: {torch.cuda.is_available()}")
+    print("="*50 + "\n")
 
     # 모델 id 설정
     model_id = "google/gemma-4-E2B"
@@ -93,7 +104,8 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         optim="paged_adamw_32bit",   # QLoRA OOM 스파이크 방지용 필수 옵티마이저
         save_strategy="epoch",
         logging_steps=10,
-        max_grad_norm=0.3            # 그래디언트 폭발 방지
+        max_grad_norm=0.3,           # 그래디언트 폭발 방지
+        gradient_checkpointing=True  # 메모리 절약 체킹 포인트
     )
 
     # SFTTrainer로 학습
@@ -117,12 +129,32 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     modelfile_path = os.path.join(output_dir, "Modelfile")
     absolute_adapter_path = os.path.abspath(os.path.join(output_dir, "adapter_model.safetensors"))
 
-    modelfile_content = f"FROM gemma4:e2b\nADAPTER {absolute_adapter_path}"
+    modelfile_content = f"FROM {settings.OLLAMA_MODEL}\nADAPTER {absolute_adapter_path}"
 
     with open(modelfile_path, "w", encoding="utf-8") as f:
         f.write(modelfile_content)
 
-    print(f"\n[Ollama 연동 가이드]")
+    agent_name = f"agent-{role}"
+    print("=" * 50)
+    print(f"\n[Ollama {agent_name} 자동 저장 시작]\n")
+    try:
+        # subprocess.run을 사용해 터미널 명령어를 직접 실행합니다.
+        result = subprocess.run(
+            ["ollama", "create", agent_name, "-f", modelfile_path],
+            capture_output=True, # 실행 결과를 변수에 담음
+            text=True,           # 출력을 문자열로 처리
+            check=True           # 명령어 실패 시 예외 발생
+        )
+        print(f"[Ollama] 등록 성공: {result.stdout.strip()}")
+    except subprocess.CalledProcessError as e:
+        print(f"[Ollama] 등록 실패: {e.stderr}")
+    except FileNotFoundError:
+        print("[Ollama] 시스템에서 'ollama' 명령어를 찾을 수 없습니다. Ollama가 설치되어 있나요?")
+        
+    print(f"\n[완료 {role.upper()}] 아래의 수동버전은 실행할 필요 없습니다.\n")
+
+    print("=" * 50)
+    print(f"\n[Ollama 연동 가이드 - 수동]\n")
     print(f"다음 명령어를 터미널에 입력하여 '{role}' 에이전트를 Ollama에 등록하세요:")
     print(f"ollama create agent-{role} -f {modelfile_path}\n")
   
@@ -130,8 +162,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Role-based LoRA Fine-tuning")
     parser.add_argument("--role", choices=["red", "judge", "blue"], required=True, help="에이전트 역할")
     parser.add_argument("--data", required=True, help="학습용 JSONL 데이터 경로")
-    parser.add_argument("--output", required=True, help="어댑터 저장 경로")
+    parser.add_argument("--output", default=None, help="어댑터 저장 경로 (입력하지 않으면 settings 기본 경로 사용)")
     args = parser.parse_args()
     
-    os.makedirs(args.output, exist_ok=True)
-    train_role_adapter(args.role, args.data, args.output)
+    # 출력 경로 결정 (settings 기본값)
+    if args.output:
+        final_output = args.output
+    else:
+        path_map = {
+            "red": settings.LORA_RED_PATH,
+            "judge": settings.LORA_JUDGE_PATH,
+            "blue": settings.LORA_BLUE_PATH
+        }
+        final_output = path_map[args.role]
+
+    print(f"최종 저장 경로가 '{final_output}'(으)로 설정되었습니다.")
+
+    os.makedirs(final_output, exist_ok=True)
+    train_role_adapter(args.role, args.data, final_output)

@@ -6,6 +6,7 @@ Ollama로 Gemma 4 E2B를 로컬 실행하고, 역할별 LoRA 어댑터를 전환
 """
 import httpx
 import logging
+from config import settings
 
 # TODO: [R4] 구현
 # - Ollama API 연동 (generate, chat)
@@ -19,7 +20,7 @@ class AgentShieldLLM:
     R1의 LangGraph에서 호출할 비동기 LLM 클라이언트.
     요청된 role에 따라 Ollama에 로드된 에이전트를 스위칭하여 호출합니다.
     """
-    def __init__(self, host: str = "http://localhost:11434"):
+    def __init__(self, host: str = settings.OLLAMA_BASE_URL):
         self.api_url = f"{host}/api/chat"
 
     async def generate(self, prompt: str, role: str = "base", max_tokens: int = 2048) -> str:
