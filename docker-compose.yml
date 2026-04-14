@@ -19,6 +19,17 @@ services:
       retries: 10
       start_period: 5s
 
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: agentshield-chroma
+    ports:
+      - "8003:8000" # 호스트의 8003번 포트로 연결 (포트 충돌 방지)
+    volumes:
+      - chromadata:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+
   backend:
     build:
       context: .
@@ -28,9 +39,13 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      CHROMADB_HOST: chromadb
+      CHROMADB_PORT: 8000
     depends_on:
       db:
         condition: service_healthy
+      chromadb:
+        condition: service_started
     volumes:
       - ./backend:/app/backend
       - ./adapters:/app/adapters
@@ -55,3 +70,4 @@ services:
 
 volumes:
   pgdata:
+  chromadata:

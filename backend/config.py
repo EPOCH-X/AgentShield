@@ -24,6 +24,8 @@ class Settings(BaseSettings):
 
     # ChromaDB
     CHROMADB_PERSIST_PATH: str = os.getenv("CHROMADB_PERSIST_PATH", "./chromadb_data")
+    CHROMADB_HOST: str = os.getenv("CHROMADB_HOST", "localhost")
+    CHROMADB_PORT: int = int(os.getenv("CHROMADB_PORT", 8003))
 
     # Defense Proxy
     DEFENSE_PROXY_URL: str = os.getenv(
