@@ -23,6 +23,8 @@ judge_train.jsonl (또는 다른 JSONL 학습 데이터)를 정제하여
   python scripts/clean_train_data.py --input data/finetuning/some_other.jsonl  # 다른 파일
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import re
