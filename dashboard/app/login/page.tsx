@@ -132,6 +132,20 @@ export default function LoginPage() {
                 "로그인"
               )}
             </button>
+
+            {/* Signup link */}
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <span className="text-xs text-on-surface-variant/50">
+                계정이 없으신가요?
+              </span>
+              <button
+                type="button"
+                onClick={() => router.push("/signup")}
+                className="text-xs font-bold text-primary hover:text-primary/80 transition-colors"
+              >
+                회원가입
+              </button>
+            </div>
           </form>
         </div>
 
