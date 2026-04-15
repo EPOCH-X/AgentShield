@@ -119,9 +119,46 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
         if start != -1 and end != -1 and end > start:
             text = text[start : end + 1]
 
-    data: dict[str, Any] = json.loads(text)
-    return BlueDefenseBundle(
-        input_filter=str(data["input_filter"]),
-        output_filter=str(data["output_filter"]),
-        system_prompt_patch=str(data["system_prompt_patch"]),
-    )
+    try:
+        data: dict[str, Any] = json.loads(text)
+        return BlueDefenseBundle(
+            input_filter=str(data["input_filter"]),
+            output_filter=str(data["output_filter"]),
+            system_prompt_patch=str(data["system_prompt_patch"]),
+        )
+    except json.JSONDecodeError:
+        # LLM이 JSON-ish를 내지만 \s 같은 잘못된 escape로 strict JSON 파싱이 실패할 수 있다.
+        # 핵심 3개 필드를 정규식으로 추출해 폴백한다.
+        def _extract_field_value(key: str, src: str) -> str | None:
+            # JSON string body: (?:\\.|[^"\\])*
+            m = re.search(
+                rf'"{re.escape(key)}"\s*:\s*"((?:\\.|[^"\\])*)"',
+                src,
+                re.DOTALL,
+            )
+            if not m:
+                return None
+            value = m.group(1)
+            try:
+                # JSON 문자열 unescape 시도
+                return json.loads(f'"{value}"')
+            except Exception:
+                # 최소한의 폴백 치환
+                return (
+                    value.replace('\\"', '"')
+                    .replace("\\n", "\n")
+                    .replace("\\t", "\t")
+                )
+
+        input_filter = _extract_field_value("input_filter", text)
+        output_filter = _extract_field_value("output_filter", text)
+        system_prompt_patch = _extract_field_value("system_prompt_patch", text)
+
+        if input_filter is None or output_filter is None or system_prompt_patch is None:
+            raise
+
+        return BlueDefenseBundle(
+            input_filter=input_filter,
+            output_filter=output_filter,
+            system_prompt_patch=system_prompt_patch,
+        )
