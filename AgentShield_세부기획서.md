@@ -41,7 +41,8 @@
     - Phase 2 Red Agent 구현 (변형 공격 생성, Self-Play, RAG 연동)
     - Judge 판정 로직 구현 (3-Layer: 규칙 + LLM Judge + 수동 검토)
     - LangGraph 워크플로우 설계 (Phase 1→2→3→4 상태 그래프)
-    - LoRA-Red 학습 + LoRA-Judge 학습 (E2B)
+    - Red Agent 시스템 프롬프트/런타임 모델 전략 관리 (기본 26B, 미설치 시 e2b 폴백)
+    - LoRA-Judge 학습
   추가:
     - 전체 아키텍처 관리, 코드 리럖, Git 관리
   담당 폴더:
