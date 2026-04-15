@@ -85,6 +85,7 @@ dashboard/out/
 dashboard/.turbo
 dashboard/.vercel
 dashboard/*.tsbuildinfo
+dashboard/note/
 
 # Docker — 로컬 전용 오버라이드(포트·볼륨 등)
 docker-compose.override.yml
