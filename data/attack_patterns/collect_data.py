@@ -13,7 +13,7 @@
 import json
 import os
 import sys
-
+from make_custom_attacks import LLM02_ATTACKS, LLM06_ATTACKS, LLM07_ATTACKS, build_item
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 
@@ -74,16 +74,19 @@ def collect_jailbreakbench() -> list[dict]:
         return []
 
 
-# ── 2. HarmBench 수집 (추후 구현) 
-def collect_harmbench() -> list[dict]:
-    print("📥 HarmBench 수집 중... (미구현, 추후 추가)")
-    return []
+# make_custom_attacks.py 파일에서 가져옴
+def collect_custom_attacks() -> list[dict]:
+      print("📥 커스텀 공격 프롬프트 수집 중...")
+      results = []
+      for item in LLM02_ATTACKS:
+          results.append(build_item(item["prompt"], "LLM02", item.get("sub", "custom")))
+      for item in LLM06_ATTACKS:
+          results.append(build_item(item["prompt"], "LLM06", item.get("sub", "custom")))
+      for item in LLM07_ATTACKS:
+          results.append(build_item(item["prompt"], "LLM07", item.get("sub", "custom")))
+      print(f"  ✅ 커스텀: {len(results)}건 수집")
+      return results
 
-
-# ── 3. Necent 수집 (추후 구현) 
-def collect_necent() -> list[dict]:
-    print("📥 Necent 수집 중... (미구현, 추후 추가)")
-    return []
 
 
 # 중복 제거
@@ -98,7 +101,7 @@ def remove_duplicates(attacks: list[dict]) -> list[dict]:
     return unique
 
 
-# ── 메인 실행
+# ── 메인 실행 
 def main():
     print("=" * 50)
     print("AgentShield 공격 프롬프트 수집 시작")
@@ -106,8 +109,8 @@ def main():
 
     all_attacks = []
     all_attacks.extend(collect_jailbreakbench())
-    all_attacks.extend(collect_harmbench())
-    all_attacks.extend(collect_necent())
+
+    all_attacks.extend(collect_custom_attacks())
 
     # 중복 제거
     before = len(all_attacks)

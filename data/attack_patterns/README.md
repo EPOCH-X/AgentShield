@@ -9,6 +9,7 @@
 - JailbreakBench 200건 (GitHub) -> 100건 확보(대부분LLM01)
 - HarmBench ~400건 (LLM01은 많아서 추후 확보예정)
 - LLM07 → gabrielchua/system-prompt-leakage
+  ( ! 사용자가 시스템 프롬프트를 빼내려는 질문 데이터셋을 찾아야하는데 이 데이터셋은 유출된 응답이 있음 )
 
 - LLM02 → 직접 제작 ~200건
 - LLM06 → 직접 제작 ~200건

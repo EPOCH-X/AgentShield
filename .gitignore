@@ -106,3 +106,4 @@ docker-compose.override.yml
 # 프로세스·PID
 *.pid
 
+CLAUDE.md
