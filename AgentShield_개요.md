@@ -65,7 +65,8 @@ AgentShield
     → P1: 기밀 정보 유출 방지 (PII, 소스코드, API키 입력 차단)
     → P2: 부적절 사용 탐지 (업무 무관, 유해 콘텐츠)
     → P3: 과도한 사용 제한 (Rate Limit)
-    → P4: 사용 통계 + 위반 이력 대시보드
+    → P4: 애매한 요청에 대한 LLM 기반 2차 의도 판정
+    → P5: 사용 통계 + 위반 이력 대시보드
     기능 A의 Defense Proxy 아키텍처를 재활용
 ```
 
@@ -183,7 +184,7 @@ QLoRA 학습이 ~8GB VRAM이면 가능하다. 로컬 GPU가 없으면 Google Col
 | R2        | Phase 1 DB 스캐너 + 데이터 적재                        |
 | R3        | Phase 3 Blue Agent + Phase 4 Defense Proxy             |
 | R4        | RAG 구축 + Ollama 연동 + 학습 코드 작성                |
-| R5        | 기능 B: 모니터링 Proxy + 정책 엔진                     |
+| R5        | 기능 B: 모니터링 Proxy + 정책 엔진 + 2차 LLM 의도 판정 |
 | R6        | 프론트엔드 전체 (기능 A + B 화면)                      |
 | R7        | 백엔드 API + DB + 보고서 + 테스트                      |
 
