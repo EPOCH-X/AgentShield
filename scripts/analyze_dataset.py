@@ -411,7 +411,7 @@ def main():
                         help="Enable Layer 2 LLM judge (gemma4:e2b via Ollama)")
     args = parser.parse_args()
 
-    dataset_path = Path(__file__).resolve().parent.parent / "data" / "attack_patterns" / "collected_attacks.json"
+    dataset_path = Path(__file__).resolve().parent.parent / "data" / "attack_patterns" / "colla_v1.json"
 
     if not dataset_path.exists():
         print(f"ERROR: {dataset_path} not found")
