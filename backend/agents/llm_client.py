@@ -69,6 +69,7 @@ class AgentShieldLLM:
             "model": model_name,
             "messages": self._build_messages(prompt, role),
             "stream": False,
+            "think": False,
             "options": {
                 "num_predict": resolved_max_tokens,
                 "temperature": temperature
