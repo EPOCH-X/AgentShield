@@ -67,6 +67,25 @@ export async function login(
   return res.json();
 }
 
+export async function register(data: {
+  email: string;
+  username: string;
+  password: string;
+}): Promise<{ message: string }> {
+  const res = await fetch("/api/v1/auth/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "회원가입에 실패했습니다.");
+  }
+
+  return res.json();
+}
+
 export async function getMe(): Promise<{ username: string; role: string }> {
   const res = await apiFetch("/api/v1/auth/me");
   if (!res.ok) throw new Error("사용자 정보를 가져올 수 없습니다.");
