@@ -1,10 +1,18 @@
-// [R6] 랜딩 페이지 → /scan 또는 /monitoring으로 리다이렉트
+"use client";
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
 export default function Home() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/scan");
+  }, [router]);
+
   return (
-    <div>
-      <h1>AgentShield</h1>
-      <p>AI Agent 보안 테스트 + 직원 AI 사용 모니터링 플랫폼</p>
-      {/* TODO: [R6] 로그인 후 역할에 따라 리다이렉트 */}
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
     </div>
   );
 }

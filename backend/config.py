@@ -38,8 +38,8 @@ class Settings(BaseSettings):
     )
 
     # Phase 1
-    PHASE1_CONCURRENCY: int = 10
-    PHASE1_TIMEOUT: int = 30
+    PHASE1_CONCURRENCY: int = 5
+    PHASE1_TIMEOUT: int = 120
 
     # Phase 2
     PHASE2_MAX_ROUNDS: int = 10
