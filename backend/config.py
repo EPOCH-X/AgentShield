@@ -42,10 +42,14 @@ class Settings(BaseSettings):
 
     # Phase 1
     PHASE1_CONCURRENCY: int = 5
-    PHASE1_TIMEOUT: int = 120
+    PHASE1_TIMEOUT: int = int(os.getenv("PHASE1_TIMEOUT", 120))
 
     # Phase 2
-    PHASE2_MAX_ROUNDS: int = 10
+    PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 10))
+    PHASE2_TIMEOUT: int = int(os.getenv("PHASE2_TIMEOUT", 300))
+
+    # LLM requests
+    LLM_REQUEST_TIMEOUT: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300))
 
     # Phase 4
     PHASE4_MAX_ITERATIONS: int = 3

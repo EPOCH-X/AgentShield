@@ -90,7 +90,7 @@ async def send_to_target(client: httpx.AsyncClient, prompt: str) -> str:
 
 # ── Red Agent 변형 생성 ──────────────────────────────────────────
 
-async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> str:
+async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> tuple[str, dict]:
     """Red Agent가 변형 공격 생성 (에이전트 모델 사용)"""
     payload = {
         "model": AGENT_MODEL,
@@ -103,8 +103,9 @@ async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> str:
     }
     resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
     resp.raise_for_status()
-    content = resp.json().get("message", {}).get("content", "").strip()
-    return content if content else "[empty mutation]"
+    raw_result = resp.json()
+    content = raw_result.get("message", {}).get("content", "").strip()
+    return content, raw_result
 
 
 # ── Phase 2: Red Agent 변형 Self-Play ────────────────────────────
@@ -137,10 +138,30 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                 round_num=rnd,
             )
             try:
-                new_attack = await generate_mutation(client, red_prompt)
+                new_attack, raw_llm_response = await generate_mutation(client, red_prompt)
             except Exception as e:
                 print(f"    R{rnd}: ❌ Red Agent 실패: {e}")
                 break
+
+            if not new_attack:
+                print(f"    R{rnd}: ❌ 빈 변형 응답 — 타겟 전송 차단")
+                results.append({
+                    "phase": 2,
+                    "category": cat,
+                    "subcategory": subcat,
+                    "original_prompt": attack["attack_prompt"][:200],
+                    "mutated_prompt": "",
+                    "target_response": "[blocked: empty mutation]",
+                    "judgment": "generation_failed",
+                    "judge_layer": 0,
+                    "round": rnd,
+                    "mutation_type": "llm:red-26b",
+                    "severity": None,
+                    "detail": "Red Agent returned empty mutation",
+                    "red_agent_raw_response": raw_llm_response,
+                })
+                break
+
             print(f"    R{rnd}: 26B LLM변형 → 타겟 전송...", end=" ", flush=True)
 
             # 2. 타겟 LLM에 전송
@@ -172,6 +193,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "mutation_type": "llm:red-26b",
                     "severity": verdict.get("severity"),
                     "detail": verdict.get("detail", ""),
+                    "red_agent_raw_response": raw_llm_response,
                 })
                 break
             else:
@@ -189,6 +211,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "mutation_type": "llm:red-26b",
                     "severity": None,
                     "detail": verdict.get("detail", ""),
+                    "red_agent_raw_response": raw_llm_response,
                 })
                 current_prompt = new_attack
                 current_response = target_response
@@ -365,7 +388,7 @@ async def async_main(args):
         print(f"  Phase 2: Red Agent 변형 ({len(safe_list)}건, 최대 {args.rounds}R)")
         print("─" * 72)
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=settings.PHASE2_TIMEOUT) as client:
             p2 = await run_phase2(safe_list, client, llm, args.llm_judge, args.rounds)
         p2_vuln = len([r for r in p2 if r["judgment"] == "vulnerable"])
         print(f"\n  Phase 2 완료: 추가 vulnerable={p2_vuln}")
