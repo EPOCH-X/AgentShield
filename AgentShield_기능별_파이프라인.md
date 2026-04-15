@@ -220,7 +220,7 @@ R1 (리드 — Phase 2 Red Agent)
   [R2] Phase 1 완료 → test_results에 "safe" 판정 결과가 있어야 함
   [R4] ChromaDB attack_results 컬렉션 생성 (빈 상태)
   [R4] llm_client.py의 generate(prompt, role="red") 동작
-  [R4] llm_client.py에서 LoRA-Red 어댑터 로드 가능 (R1이 adapters/lora-red/ 제공)
+    [R4] llm_client.py에서 RED 모델(기본 gemma4:26b, 미설치 시 e2b 폴백) 호출 가능
   [R1] judge.py의 llm_judge(category, attack, response) 제공
 
 후행 의존:
@@ -283,7 +283,7 @@ for each attack in Phase1_safe_attacks:
             new_attack, strategy = apply_code_mutation(attack.attack_prompt, round+1)
 
         # ── 짝수 라운드: LLM 기반 변형 (Red Agent) ──
-        # AGENT_MODEL(e2b) + REDSTRIKE 페르소나로 창의적 우회 생성
+        # RED_MODEL(기본 26B) + REDSTRIKE 페르소나로 창의적 우회 생성
         else:
             similar = chromadb.attack_results.query(
                 query = f"{attack.category} bypass {attack.attack_prompt[:100]}",
@@ -305,9 +305,9 @@ for each attack in Phase1_safe_attacks:
             break
 ```
 
-> **모델 분리**: AGENT_MODEL(gemma4:e2b)은 Red Agent/Judge 등 내부 도구용,
-> TARGET_MODEL(CLI `--target`으로 변경 가능)은 보안 테스트 대상.
-> 26b 모델은 `backend/core/generate_attacks.py`로 오프라인 공격 데이터 사전 생성에만 사용.
+> **모델 분리**: `TARGET_MODEL`은 보안 테스트 대상이고, `RED_MODEL`은 Phase 2의 LLM 기반 공격 변형용이다.
+> 기본값은 `TARGET_MODEL=gemma4:e2b`, `RED_MODEL=gemma4:26b`이며, 26B가 없는 환경에서는 `llm_client.py`가 자동으로 e2b로 폴백한다.
+> 시드 데이터 생성은 R2가 담당하며, Phase 2 품질 향상을 위한 26B 사용 지점은 오프라인 생성이 아니라 런타임 변형이다.
 
 ### RAG 연동 상세
 
