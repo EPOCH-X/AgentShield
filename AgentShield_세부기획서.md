@@ -99,12 +99,14 @@
 
 [R5] 모니터링 Proxy + 정책 엔진
   주 담당:
-    - 모니터링 Proxy 구현 (P1 기밀유출 + P2 부적절사용 + P3 Rate Limit)
+    - 모니터링 Proxy 구현 (P1 기밀유출 + P2 부적절사용 + P3 Rate Limit + P4 LLM 의도 판정)
     - policy_rules 테이블 관리 + 정책 판정 로직
+    - 애매한 직원 요청에 대한 2차 LLM 판단 로직 설계 (초기 base 모델, 추후 agent-monitor 분리 가능)
     - 제재 에스컬레이션 (경고→제한→정지→HR보고)
     - 사용 로그 저장/조회 API, 위반 기록 API
   추가:
     - R3의 Defense Proxy 코드를 참고해서 Monitoring Proxy를 만든다
+    - 기능 A의 judge.py를 그대로 재사용하지 않고, 직원 입력 의도 판정용 프롬프트/기준을 별도로 설계한다
   담당 폴더:
     monitoring_proxy/
     backend/api/monitoring.py
