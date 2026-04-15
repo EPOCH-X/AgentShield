@@ -4,6 +4,8 @@
 
 AgentShield는 기존 도구들처럼 "방어만" 하거나 "발견만" 하는 한계를 넘어, Find(발견) → Fix(방어 코드 생성) → Verify(실제 검증) 과정을 단일 파이프라인으로 자동화한 프로젝트입니다. 프롬프트 인젝션, 민감정보 유출 등 OWASP LLM Top 10의 핵심 위협으로부터 기업의 AI 에이전트를 안전하게 보호하고, 내부 직원의 AI 사용을 모니터링합니다.
 
+기능 B의 Monitoring Proxy는 단순 키워드 차단기가 아니라, 운영 요청을 직접 받는 게이트웨이로서 인증/로깅/사용량 제어를 수행하고, 규칙 기반 1차 필터 이후 애매한 요청에 대해서는 LLM 기반 2차 의도 판정을 수행합니다. 초기 구현은 base 모델을 사용하고, 추후 기능 B 전용 LoRA로 분리할 수 있습니다.
+
 ## 프로젝트 구조
 
 ```
@@ -349,6 +351,6 @@ grep -rn "TODO.*\[R1\]" backend/
 | R2   | Phase 1 정적 스캐너, 공격 패턴 DB, OWASP 분류              |
 | R3   | Blue Agent, Defense Proxy, Phase 3-4, LoRA-Blue            |
 | R4   | RAG 파이프라인, Ollama 통합, QLoRA 학습 코드               |
-| R5   | Monitoring Proxy, 정책 엔진, 위반 탐지                     |
+| R5   | Monitoring Proxy, 정책 엔진, 위반 탐지, 2차 LLM 의도 판정 |
 | R6   | Next.js 대시보드 (프론트엔드 전체)                         |
 | R7   | 보고서 생성, DB 스키마, API 통합                           |
