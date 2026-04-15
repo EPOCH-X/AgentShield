@@ -66,7 +66,7 @@ class AgentShieldLLM:
             }
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=settings.LLM_REQUEST_TIMEOUT) as client:
             try:
                 response = await client.post(self.api_url, json=payload)
 

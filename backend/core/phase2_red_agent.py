@@ -47,7 +47,7 @@ async def run_phase2(
     safe_attacks = phase1_result.get("safe_attacks", [])
     results = []
 
-    async with httpx.AsyncClient(timeout=settings.PHASE1_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=settings.PHASE2_TIMEOUT) as client:
         for attack in safe_attacks:
             category = attack["category"]
             original_prompt = attack["attack_prompt"]
