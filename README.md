@@ -31,7 +31,6 @@ AgentShield/
 │   │   ├── phase4_verify.py      # [R3] 방어 검증
 │   │   ├── judge.py              # [R1] 판정 로직
 │   │   ├── mutation_engine.py    # [R1] 코드 기반 공격 변형 엔진
-│   │   └── generate_attacks.py   # [R1] 26b 오프라인 공격 생성 도구
 │   ├── agents/
 │   │   ├── llm_client.py         # [R4] Ollama LLM 클라이언트
 │   │   ├── red_agent.py          # [R1] Red Agent
@@ -101,7 +100,7 @@ AgentShield/
 
 | 계층          | 기술                                               |
 | ------------- | -------------------------------------------------- |
-| LLM           | Gemma 4 E2B (2.3B effective / 5.1B PLE) via Ollama |
+| LLM           | Gemma 4 E2B + Gemma 4 26B via Ollama |
 | Backend       | FastAPI + async SQLAlchemy + PostgreSQL 16         |
 | RAG           | ChromaDB + all-MiniLM-L6-v2 (384d)                 |
 | Orchestration | LangGraph StateGraph                               |
@@ -115,6 +114,10 @@ AgentShield/
 # 1. 환경 변수 설정
 cp .env.example .env
 
+# 1-1. 모델 준비
+ollama pull gemma4:e2b
+ollama pull gemma4:26b
+
 # 2. 컨테이너 기동
 docker-compose up -d
 
@@ -123,6 +126,8 @@ cd dashboard
 npm install
 npm run dev
 ```
+
+Red Agent의 런타임 공격 변형은 기본적으로 `OLLAMA_RED_MODEL=gemma4:26b`를 사용한다. 팀원이 26B를 로컬에 두지 않은 경우에는 `OLLAMA_MODEL=gemma4:e2b` 폴백 경로로 계속 개발/테스트할 수 있다.
 
 ### 처음부터 순서대로 (Windows · Docker 없이 · 백엔드+DB만)
 

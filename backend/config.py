@@ -20,7 +20,10 @@ class Settings(BaseSettings):
 
     # Ollama
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_MODEL: str = "gemma4:e2b"
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
+    OLLAMA_RED_MODEL: str = os.getenv("OLLAMA_RED_MODEL", "gemma4:26b")
+    OLLAMA_JUDGE_MODEL: str = os.getenv("OLLAMA_JUDGE_MODEL", "agent-judge")
+    OLLAMA_BLUE_MODEL: str = os.getenv("OLLAMA_BLUE_MODEL", "agent-blue")
 
     # ChromaDB
     CHROMADB_PERSIST_PATH: str = os.getenv("CHROMADB_PERSIST_PATH", "./chromadb_data")
