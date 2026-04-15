@@ -9,11 +9,11 @@ Phase 1 로직: backend/core/phase1_scanner.py
 Phase 2 로직: 이 스크립트 (Red Agent 변형 생성 + Judge 판정)
 
 사용법:
-  python -m scripts.run_pipeline                          # 전체 (80건)
-  python -m scripts.run_pipeline -c LLM01 -m 3            # LLM01 3건 빠른 테스트
-  python -m scripts.run_pipeline -c LLM01 -m 1 -r 2       # 최소 테스트 (1건, 2라운드)
-  python -m scripts.run_pipeline --phase1-only             # Phase 1만
-  python -m scripts.run_pipeline --llm-judge               # Layer 2 LLM Judge 포함
+    python -m backend.graph.run_pipeline                     # 전체 (80건)
+    python -m backend.graph.run_pipeline -c LLM01 -m 3       # LLM01 3건 빠른 테스트
+    python -m backend.graph.run_pipeline -c LLM01 -m 1 -r 2  # 최소 테스트 (1건, 2라운드)
+    python -m backend.graph.run_pipeline --phase1-only        # Phase 1만
+    python -m backend.graph.run_pipeline --llm-judge          # Layer 2 LLM Judge 포함
 """
 
 import argparse
@@ -29,7 +29,6 @@ import httpx
 from backend.agents.red_agent import build_red_prompt, RED_AGENT_SYSTEM_PROMPT
 from backend.config import settings
 from backend.core.judge import full_judge
-from backend.core.mutation_engine import apply_code_mutation
 from backend.core.phase1_scanner import run_phase1
 
 
@@ -113,9 +112,8 @@ async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> str:
 async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
     """Phase 2: safe 결과에 대해 Red Agent 변형 공격 (최대 N 라운드)
 
-    홀수 라운드: 코드 기반 변형 (결정적, LLM 불필요)
-    짝수 라운드: LLM 기반 변형 (Red Agent)
-    → 코드 변형으로 공격 품질 보장 + LLM으로 창의성 추가
+    모든 라운드는 Red Agent LLM 변형으로 진행한다.
+    Red Agent 모델은 settings.OLLAMA_RED_MODEL(기본 26B)을 사용한다.
     """
     results = []
 
@@ -124,8 +122,6 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         subcat = attack.get("subcategory", "?")
         current_prompt = attack["attack_prompt"]
         current_response = attack["target_response"]
-        # 코드 변형은 원본 공격으로 항상 변형 (누적 변형 방지)
-        original_prompt = attack["attack_prompt"]
 
         print(f"\n  [{i}/{len(safe_attacks)}] Red Agent: {cat}/{subcat}")
         print(f"    원본: {current_prompt[:80]}...")
@@ -133,26 +129,19 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
 
-            # ── 홀수 라운드: 코드 변형 / 짝수 라운드: LLM 변형 ──
-            use_code = (rnd % 2 == 1)
-
-            if use_code:
-                new_attack, mutation_name = apply_code_mutation(original_prompt, round_num=rnd)
-                print(f"    R{rnd}: 코드변형({mutation_name}) → 타겟 전송...", end=" ", flush=True)
-            else:
-                red_prompt = build_red_prompt(
-                    attack_prompt=current_prompt,
-                    target_response=current_response,
-                    category=cat,
-                    similar_cases=None,
-                    round_num=rnd,
-                )
-                try:
-                    new_attack = await generate_mutation(client, red_prompt)
-                except Exception as e:
-                    print(f"    R{rnd}: ❌ Red Agent 실패: {e}")
-                    break
-                print(f"    R{rnd}: LLM변형 → 타겟 전송...", end=" ", flush=True)
+            red_prompt = build_red_prompt(
+                attack_prompt=current_prompt,
+                target_response=current_response,
+                category=cat,
+                similar_cases=None,
+                round_num=rnd,
+            )
+            try:
+                new_attack = await generate_mutation(client, red_prompt)
+            except Exception as e:
+                print(f"    R{rnd}: ❌ Red Agent 실패: {e}")
+                break
+            print(f"    R{rnd}: 26B LLM변형 → 타겟 전송...", end=" ", flush=True)
 
             # 2. 타겟 LLM에 전송
             try:
@@ -168,8 +157,6 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
             )
             elapsed = time.time() - t0
 
-            mutation_type = f"code:{mutation_name}" if use_code else "llm"
-
             if verdict["judgment"] == "vulnerable":
                 print(f"🔴 vulnerable! (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
                 results.append({
@@ -182,7 +169,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "judgment": "vulnerable",
                     "judge_layer": verdict["layer"],
                     "round": rnd,
-                    "mutation_type": mutation_type,
+                    "mutation_type": "llm:red-26b",
                     "severity": verdict.get("severity"),
                     "detail": verdict.get("detail", ""),
                 })
@@ -199,7 +186,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "judgment": verdict["judgment"],
                     "judge_layer": verdict["layer"],
                     "round": rnd,
-                    "mutation_type": mutation_type,
+                    "mutation_type": "llm:red-26b",
                     "severity": None,
                     "detail": verdict.get("detail", ""),
                 })
