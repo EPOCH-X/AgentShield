@@ -306,6 +306,29 @@ python -m backend.db_inspect
 5. **(선택)** `python -m backend.dev_seed` — 샘플 행만 추가. 스키마는 이미 SQL로 있으므로 **필수는 아님**.
 6. **백엔드:** `uvicorn ...` 기동 시 `init_db()`의 `create_all`은 **이미 있는 테이블은 건드리지 않음**.
 
+### Docker DB 초기화/재생성 (팀원 로컬)
+
+`docker compose`로 올린 Postgres는 **처음 볼륨이 생성될 때만** `database/schema.sql`이 자동 적용됩니다. (이미 `pgdata` 볼륨이 있으면 새 스키마가 반영되지 않을 수 있음)
+
+**PowerShell 기준**
+
+```powershell
+cd "C:\Users\user\Desktop\파이널 프로젝트\agent\AgentShield"
+
+# DB만 기동 (처음 1회면 schema.sql 자동 실행)
+docker compose up -d db
+
+# 스키마 변경 후 "완전 초기화"가 필요하면 (데이터/볼륨 삭제)
+docker compose down -v
+docker compose up -d db
+```
+
+**테이블 생성 확인**
+
+```powershell
+docker compose exec db psql -U agentshield -d agentshield -c "\dt"
+```
+
 **주의:** 같은 DB에 `schema.sql`을 **두 번** 실행하면 `already exists` 오류가 납니다. 초기화가 필요하면 DB를 드롭 후 재생성하거나, 팀 규칙으로 Alembic 마이그레이션으로 전환합니다.
 
 **ORM과의 관계:** `backend/models/*` 는 이 스키마와 맞춰 두었습니다. 스키마는 **이 SQL 파일이 기준**이면 됩니다.
