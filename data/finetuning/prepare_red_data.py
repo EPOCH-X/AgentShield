@@ -40,7 +40,7 @@ CONCURRENCY = 3  # 동시 요청 수
 
 ATTACKS_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "attack_patterns", "collected_attacks.json",
+    "attack_patterns", "colla_v1.json",
 )
 OUTPUT_FILE = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),

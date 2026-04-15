@@ -113,28 +113,26 @@ async def ingest_attack_patterns():
             CREATE TABLE attack_patterns (
                 id SERIAL PRIMARY KEY,
                 prompt_text TEXT NOT NULL,
+                intention TEXT,
                 category VARCHAR(10) NOT NULL,
                 subcategory VARCHAR(50),
-                severity VARCHAR(10) DEFAULT 'Medium',
-                source VARCHAR(50),
-                language VARCHAR(10) DEFAULT 'en'
+                severity VARCHAR(10) DEFAULT 'Medium'
             )
         """)
 
         records = [
             (
                 a.get("prompt_text", ""),
+                a.get("intention"),
                 a.get("category", "Unknown")[:10],
                 a.get("subcategory"),
                 a.get("severity", "Medium")[:10],
-                a.get("source", "unknown")[:50],
-                a.get("language", "en")[:10]
             ) for a in all_attacks
         ]
 
         await conn.executemany("""
-            INSERT INTO attack_patterns (prompt_text, category, subcategory, severity, source, language)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO attack_patterns (prompt_text, intention, category, subcategory, severity)
+            VALUES ($1, $2, $3, $4, $5)
         """, records)
 
         print(f"{len(all_attacks)}건의 공격 패턴 적재 성공!")
