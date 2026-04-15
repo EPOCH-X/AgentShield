@@ -72,7 +72,8 @@ class AgentShieldLLM:
             "think": False,
             "options": {
                 "num_predict": resolved_max_tokens,
-                "temperature": temperature
+                "temperature": temperature,
+                "repeat_penalty": 1.2,
             }
         }
 
