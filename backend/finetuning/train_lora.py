@@ -39,34 +39,60 @@ from datasets import load_dataset
 
 from backend.config import settings
 
+
+def detect_device():
+    """
+    학습 환경 자동 감지.
+    CUDA(NVIDIA GPU) > MPS(Apple Silicon) > CPU 순으로 우선 선택.
+    """
+    if torch.cuda.is_available():
+        return "cuda"
+    elif torch.backends.mps.is_available():
+        return "mps"
+    else:
+        return "cpu"
+
+
 def train_role_adapter(role: str, train_file: str, output_dir: str):
     """
     역할별 LoRA 어댑터 학습 및 Ollama 연동 자동화.
+    CUDA / MPS / CPU 환경을 자동 감지하여 설정을 분기한다.
     """
+    device_type = detect_device()
+    use_quantization = (device_type == "cuda")  # QLoRA(bitsandbytes)는 CUDA 전용
+
     print(f"\n" + "="*50)
     print(f"[{role.upper()}] 파인튜닝 시작")
     print(f" - 데이터: {train_file}")
     print(f" - 출력 경로: {output_dir}")
-    print(f" - GPU 활성 상태: {torch.cuda.is_available()}")
+    print(f" - 감지된 디바이스: {device_type}")
+    print(f" - QLoRA 4-bit 양자화: {'ON' if use_quantization else 'OFF (bitsandbytes는 CUDA 전용)'}")
     print("="*50 + "\n")
 
     # 모델 id 설정
     model_id = "google/gemma-4-E2B"
 
-    # 양자화, 4-bit
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.float16
-    )
-
-    # 기반 모델: Gemma 4 E2B
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id,
-        quantization_config=bnb_config,
-        device_map="auto"
-    )
+    # 기반 모델 로드 — CUDA는 QLoRA 4-bit, MPS/CPU는 float16 전체 로드
+    if use_quantization:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            quantization_config=bnb_config,
+            device_map="auto"
+        )
+    else:
+        model = AutoModelForCausalLM.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            device_map="auto" if device_type == "cpu" else None
+        )
+        if device_type == "mps":
+            model = model.to("mps")
 
     # 토그나이저
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -84,7 +110,8 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         bias="none"
     )
 
-    model = prepare_model_for_kbit_training(model)
+    if use_quantization:
+        model = prepare_model_for_kbit_training(model)
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
@@ -100,22 +127,41 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
             output_texts.append(text)
         return output_texts
 
-    # 학습 설정
-    training_args = TrainingArguments(
-        output_dir=output_dir,
-        per_device_train_batch_size=4,
-        gradient_accumulation_steps=4,
-        num_train_epochs=3,
-        learning_rate=2e-4,
-        lr_scheduler_type="cosine", # 보폭을 코사인 곡선 모양으로 부드럽게 줄임
-        warmup_ratio=0.03,          # 전체 학습량의 3% 구간 동안 천천히 보폭 상승
-        fp16=True,
-        optim="paged_adamw_32bit",   # QLoRA OOM 스파이크 방지용 필수 옵티마이저
-        save_strategy="epoch",
-        logging_steps=10,
-        max_grad_norm=0.3,           # 그래디언트 폭발 방지
-        gradient_checkpointing=True  # 메모리 절약 체킹 포인트
-    )
+    # 학습 설정 — 디바이스별 분기
+    if device_type == "cuda":
+        training_args = TrainingArguments(
+            output_dir=output_dir,
+            per_device_train_batch_size=4,
+            gradient_accumulation_steps=4,
+            num_train_epochs=3,
+            learning_rate=2e-4,
+            lr_scheduler_type="cosine",
+            warmup_ratio=0.03,
+            fp16=True,
+            optim="paged_adamw_32bit",
+            save_strategy="epoch",
+            logging_steps=10,
+            max_grad_norm=0.3,
+            gradient_checkpointing=True
+        )
+    else:
+        # MPS / CPU — fp16 OFF, 표준 optimizer, 배치 축소
+        training_args = TrainingArguments(
+            output_dir=output_dir,
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
+            num_train_epochs=3,
+            learning_rate=2e-4,
+            lr_scheduler_type="cosine",
+            warmup_ratio=0.03,
+            fp16=False,
+            optim="adamw_torch",
+            save_strategy="epoch",
+            logging_steps=10,
+            max_grad_norm=0.3,
+            gradient_checkpointing=True,
+            use_mps_device=(device_type == "mps")
+        )
 
     # SFTTrainer로 학습
     trainer = SFTTrainer(
