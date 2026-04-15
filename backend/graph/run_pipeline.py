@@ -99,6 +99,7 @@ async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> tuple
             {"role": "user", "content": red_prompt},
         ],
         "stream": False,
+        "think": False,
         "options": {"num_predict": settings.RED_AGENT_NUM_PREDICT, "temperature": 1.0},
     }
     resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
