@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"C:\\\\Nami\\\\막프_보안잡았으\\\\AgentShield\\\\dashboard\\\\note\" -name \"*.html\" -exec wc -l {} \\\\;)",
+      "Bash(grep -E \"\\\\.tsx$\")"
+    ]
+  }
+}
