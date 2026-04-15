@@ -24,15 +24,22 @@ from backend.core.judge import rule_based_judge, full_judge
 
 logger = logging.getLogger(__name__)
 
-DATA_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "attack_patterns" / "colla_v1.json"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "attack_patterns"
 
 
 # ── 데이터 로딩 (나중에 DB 전환 시 이 부분만 교체) ────────────────
 
 def _load_attacks_from_file(category: Optional[str] = None) -> list[dict]:
-    """로컬 JSON 파일에서 공격 패턴 로드 (현재 사용)"""
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        attacks = json.load(f)
+    """로컬 JSON 파일에서 공격 패턴 로드 (colla_v1 + generated_*.json 병합)"""
+    attacks = []
+    for json_file in sorted(DATA_DIR.glob("*.json")):
+        if json_file.name == "README.md":
+            continue
+        with open(json_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # prompt_text 키가 있는 항목만 (attack pattern 형식)
+        valid = [a for a in data if "prompt_text" in a and "category" in a]
+        attacks.extend(valid)
     if category:
         attacks = [a for a in attacks if a["category"] == category]
     return attacks

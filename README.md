@@ -29,7 +29,9 @@ AgentShield/
 │   │   ├── phase2_red_agent.py   # [R1] Red Agent 공격
 │   │   ├── phase3_blue_agent.py  # [R3] Blue Agent 방어
 │   │   ├── phase4_verify.py      # [R3] 방어 검증
-│   │   └── judge.py              # [R1] 판정 로직
+│   │   ├── judge.py              # [R1] 판정 로직
+│   │   ├── mutation_engine.py    # [R1] 코드 기반 공격 변형 엔진
+│   │   └── generate_attacks.py   # [R1] 26b 오프라인 공격 생성 도구
 │   ├── agents/
 │   │   ├── llm_client.py         # [R4] Ollama LLM 클라이언트
 │   │   ├── red_agent.py          # [R1] Red Agent
@@ -40,7 +42,8 @@ AgentShield/
 │   │   ├── embedder.py           # [R4] 임베딩 생성
 │   │   └── ingest.py             # [R4] 데이터 수집
 │   ├── graph/
-│   │   └── llm_security_graph.py # [R1] LangGraph 오케스트레이션
+│   │   ├── llm_security_graph.py # [R1] LangGraph 오케스트레이션
+│   │   └── run_pipeline.py       # [R1] Phase 1+2 파이프라인 실행기
 │   ├── report/
 │   │   ├── generator.py          # [R7] 보고서 생성
 │   │   └── templates/

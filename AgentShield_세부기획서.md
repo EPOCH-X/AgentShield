@@ -846,7 +846,8 @@ agentshield/
 │   │   ├── phase2_red_agent.py    #                               [R1]
 │   │   ├── phase3_blue_agent.py   #                               [R3]
 │   │   ├── phase4_verify.py       #                               [R3]
-│   │   └── judge.py               #                               [R1]
+│   │   ├── judge.py               #                               [R1]
+│   │   └── mutation_engine.py     # 코드 기반 공격 변형 엔진       [R1]
 │   ├── agents/                    # LLM 래퍼                      [R4]
 │   │   ├── llm_client.py          # Ollama + 어댑터 전환
 │   │   ├── red_agent.py           #                               [R1]
@@ -857,7 +858,8 @@ agentshield/
 │   │   ├── embedder.py
 │   │   └── ingest.py
 │   ├── graph/                     # LangGraph                     [R1]
-│   │   └── llm_security_graph.py
+│   │   ├── llm_security_graph.py
+│   │   └── run_pipeline.py        # Phase 1+2 파이프라인 실행기
 │   ├── report/                    #                               [R7]
 │   │   ├── templates/
 │   │   └── generator.py
