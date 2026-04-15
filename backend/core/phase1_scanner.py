@@ -20,19 +20,26 @@ from typing import Optional, Callable, Any
 import httpx
 
 from backend.config import settings
-from backend.core.judge import rule_based_judge
+from backend.core.judge import rule_based_judge, full_judge
 
 logger = logging.getLogger(__name__)
 
-DATA_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "attack_patterns" / "colla_v1.json"
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "attack_patterns"
 
 
 # ── 데이터 로딩 (나중에 DB 전환 시 이 부분만 교체) ────────────────
 
 def _load_attacks_from_file(category: Optional[str] = None) -> list[dict]:
-    """로컬 JSON 파일에서 공격 패턴 로드 (현재 사용)"""
-    with open(DATA_PATH, "r", encoding="utf-8") as f:
-        attacks = json.load(f)
+    """로컬 JSON 파일에서 공격 패턴 로드 (colla_v1 + generated_*.json 병합)"""
+    attacks = []
+    for json_file in sorted(DATA_DIR.glob("*.json")):
+        if json_file.name == "README.md":
+            continue
+        with open(json_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # prompt_text 키가 있는 항목만 (attack pattern 형식)
+        valid = [a for a in data if "prompt_text" in a and "category" in a]
+        attacks.extend(valid)
     if category:
         attacks = [a for a in attacks if a["category"] == category]
     return attacks
@@ -59,12 +66,13 @@ async def run_phase1(
     target_url: str,
     category: Optional[str] = None,
     send_fn: Optional[Callable] = None,
+    llm: Any = None,
 ) -> dict:
     """Phase 1 — 공격 프롬프트 대량 스캔
 
     1. 공격 패턴 로드 (현재: colla_v1.json / TODO: DB)
     2. send_fn(client, prompt_text) 또는 기본 HTTP POST로 타겟 호출
-    3. Judge Layer 1 (규칙) 판정
+    3. Judge 판정 (llm 있으면 full_judge, 없으면 rule_based_judge)
     4. safe / vulnerable 분류 반환
 
     Args:
@@ -73,6 +81,7 @@ async def run_phase1(
         category: 특정 카테고리만 필터 (None이면 전체)
         send_fn: async (client, prompt_text) -> str  커스텀 타겟 호출 함수
                  None이면 기획서 규격 POST {"messages": [...]} 사용
+        llm: LLM Judge 인스턴스 (None이면 규칙만 사용)
 
     Returns:
         {"safe_attacks": [...], "vulnerable_attacks": [...],
@@ -83,10 +92,13 @@ async def run_phase1(
     vulnerable_attacks: list[dict] = []
     ambiguous_attacks: list[dict] = []
     error_attacks: list[dict] = []
+    total = len(attacks)
+    done_count = 0
 
     sem = asyncio.Semaphore(settings.PHASE1_CONCURRENCY)
 
     async def scan_one(attack: dict) -> None:
+        nonlocal done_count
         async with sem:
             prompt_text = attack["prompt_text"]
             cat = attack["category"]
@@ -117,9 +129,11 @@ async def run_phase1(
                     "detail": "Target request failed (timeout or network error)",
                 }
                 error_attacks.append(error_entry)
+                done_count += 1
+                print(f"  [{done_count}/{total}] {cat}/{attack.get('subcategory', '?')} → ❌ error", flush=True)
                 return
 
-            verdict = rule_based_judge(cat, prompt_text, target_response)
+            verdict = await full_judge(cat, prompt_text, target_response, llm)
 
             entry = {
                 "category": cat,
@@ -129,6 +143,7 @@ async def run_phase1(
                 "judgment": verdict["judgment"],
                 "severity": verdict.get("severity"),
                 "detail": verdict.get("detail", ""),
+                "judge_layer": verdict.get("layer", 1),
             }
 
             if verdict["judgment"] == "vulnerable":
@@ -139,6 +154,10 @@ async def run_phase1(
                 # ambiguous → Phase 2에서 다시 시도
                 safe_attacks.append(entry)
                 ambiguous_attacks.append(entry)
+
+            done_count += 1
+            icon = "🔴" if verdict["judgment"] == "vulnerable" else "🟢"
+            print(f"  [{done_count}/{total}] {cat}/{attack.get('subcategory', '?')} → {icon} {verdict['judgment']}", flush=True)
 
     # TODO: [R7] DB 연결 후 → test_results 테이블에 결과 INSERT
     # 현재는 반환값만 Phase 2에 전달

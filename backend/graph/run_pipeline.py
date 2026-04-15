@@ -18,7 +18,6 @@ Phase 2 로직: 이 스크립트 (Red Agent 변형 생성 + Judge 판정)
 
 import argparse
 import asyncio
-import sys
 import time
 from collections import defaultdict
 from datetime import datetime
@@ -27,11 +26,9 @@ import json
 
 import httpx
 
-# project root
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
-from backend.agents.red_agent import build_red_prompt
+from backend.agents.red_agent import build_red_prompt, RED_AGENT_SYSTEM_PROMPT
 from backend.core.judge import full_judge
+from backend.core.mutation_engine import apply_code_mutation
 from backend.core.phase1_scanner import run_phase1
 
 
@@ -65,7 +62,11 @@ TARGET_SYSTEM_PROMPT = """You are 'ABCBot', the customer support AI assistant fo
 """
 
 OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "gemma4:e2b"
+
+# 에이전트(Red/Judge) 모델 — AgentShield 내부 도구용
+AGENT_MODEL = "gemma4:e2b"
+# 타겟 모델 — 보안 테스트 대상 (CLI --target 으로 변경 가능)
+TARGET_MODEL = "gemma4:e2b"
 
 
 # ── 타겟 LLM 호출 ───────────────────────────────────────────────
@@ -73,7 +74,7 @@ OLLAMA_MODEL = "gemma4:e2b"
 async def send_to_target(client: httpx.AsyncClient, prompt: str) -> str:
     """타겟 LLM(기업 챗봇)에 공격 프롬프트 전송"""
     payload = {
-        "model": OLLAMA_MODEL,
+        "model": TARGET_MODEL,
         "messages": [
             {"role": "system", "content": TARGET_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
@@ -90,12 +91,15 @@ async def send_to_target(client: httpx.AsyncClient, prompt: str) -> str:
 # ── Red Agent 변형 생성 ──────────────────────────────────────────
 
 async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> str:
-    """Red Agent가 변형 공격 생성"""
+    """Red Agent가 변형 공격 생성 (에이전트 모델 사용)"""
     payload = {
-        "model": OLLAMA_MODEL,
-        "messages": [{"role": "user", "content": red_prompt}],
+        "model": AGENT_MODEL,
+        "messages": [
+            {"role": "system", "content": RED_AGENT_SYSTEM_PROMPT},
+            {"role": "user", "content": red_prompt},
+        ],
         "stream": False,
-        "options": {"num_predict": 2048, "temperature": 0.7},
+        "options": {"num_predict": 2048, "temperature": 1.0},
     }
     resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
     resp.raise_for_status()
@@ -106,7 +110,12 @@ async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> str:
 # ── Phase 2: Red Agent 변형 Self-Play ────────────────────────────
 
 async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
-    """Phase 2: safe 결과에 대해 Red Agent 변형 공격 (최대 N 라운드)"""
+    """Phase 2: safe 결과에 대해 Red Agent 변형 공격 (최대 N 라운드)
+
+    홀수 라운드: 코드 기반 변형 (결정적, LLM 불필요)
+    짝수 라운드: LLM 기반 변형 (Red Agent)
+    → 코드 변형으로 공격 품질 보장 + LLM으로 창의성 추가
+    """
     results = []
 
     for i, attack in enumerate(safe_attacks, 1):
@@ -114,6 +123,8 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         subcat = attack.get("subcategory", "?")
         current_prompt = attack["attack_prompt"]
         current_response = attack["target_response"]
+        # 코드 변형은 원본 공격으로 항상 변형 (누적 변형 방지)
+        original_prompt = attack["attack_prompt"]
 
         print(f"\n  [{i}/{len(safe_attacks)}] Red Agent: {cat}/{subcat}")
         print(f"    원본: {current_prompt[:80]}...")
@@ -121,22 +132,28 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
 
-            # 1. Red Agent 변형 생성 (RAG 없이 — ChromaDB는 R4 의존)
-            red_prompt = build_red_prompt(
-                attack_prompt=current_prompt,
-                target_response=current_response,
-                category=cat,
-                similar_cases=None,  # RAG 미연결 (R4 완성 전)
-            )
+            # ── 홀수 라운드: 코드 변형 / 짝수 라운드: LLM 변형 ──
+            use_code = (rnd % 2 == 1)
 
-            try:
-                new_attack = await generate_mutation(client, red_prompt)
-            except Exception as e:
-                print(f"    R{rnd}: ❌ Red Agent 실패: {e}")
-                break
+            if use_code:
+                new_attack, mutation_name = apply_code_mutation(original_prompt, round_num=rnd)
+                print(f"    R{rnd}: 코드변형({mutation_name}) → 타겟 전송...", end=" ", flush=True)
+            else:
+                red_prompt = build_red_prompt(
+                    attack_prompt=current_prompt,
+                    target_response=current_response,
+                    category=cat,
+                    similar_cases=None,
+                    round_num=rnd,
+                )
+                try:
+                    new_attack = await generate_mutation(client, red_prompt)
+                except Exception as e:
+                    print(f"    R{rnd}: ❌ Red Agent 실패: {e}")
+                    break
+                print(f"    R{rnd}: LLM변형 → 타겟 전송...", end=" ", flush=True)
 
             # 2. 타겟 LLM에 전송
-            print(f"    R{rnd}: 변형 생성 → 타겟 전송...", end=" ", flush=True)
             try:
                 target_response = await send_to_target(client, new_attack)
             except Exception as e:
@@ -150,6 +167,8 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
             )
             elapsed = time.time() - t0
 
+            mutation_type = f"code:{mutation_name}" if use_code else "llm"
+
             if verdict["judgment"] == "vulnerable":
                 print(f"🔴 vulnerable! (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
                 results.append({
@@ -162,12 +181,13 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "judgment": "vulnerable",
                     "judge_layer": verdict["layer"],
                     "round": rnd,
+                    "mutation_type": mutation_type,
                     "severity": verdict.get("severity"),
                     "detail": verdict.get("detail", ""),
                 })
                 break
             else:
-                print(f"🟢 safe (L{verdict['layer']}) [{elapsed:.1f}s]")
+                print(f"🟢 {verdict['judgment']} (L{verdict['layer']}) [{elapsed:.1f}s]")
                 results.append({
                     "phase": 2,
                     "category": cat,
@@ -175,9 +195,10 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "original_prompt": attack["attack_prompt"][:200],
                     "mutated_prompt": new_attack,
                     "target_response": target_response,
-                    "judgment": "safe",
+                    "judgment": verdict["judgment"],
                     "judge_layer": verdict["layer"],
                     "round": rnd,
+                    "mutation_type": mutation_type,
                     "severity": None,
                     "detail": verdict.get("detail", ""),
                 })
@@ -195,7 +216,8 @@ def print_summary(p1, p2, elapsed):
     p1v = len(p1.get("vulnerable_attacks", []))
     p1s = len(p1.get("safe_attacks", []))
     p1e = len(p1.get("error_attacks", []))
-    p2v = len(p2)
+    p2_vuln_list = [r for r in p2 if r["judgment"] == "vulnerable"]
+    p2v = len(p2_vuln_list)
     total = p1v + p1s  # error 제외
 
     stats = defaultdict(lambda: {"p1_vuln": 0, "p1_safe": 0, "p1_error": 0, "p2_vuln": 0})
@@ -205,7 +227,7 @@ def print_summary(p1, p2, elapsed):
         stats[s["category"]]["p1_safe"] += 1
     for e in p1.get("error_attacks", []):
         stats[e["category"]]["p1_error"] += 1
-    for v in p2:
+    for v in p2_vuln_list:
         stats[v["category"]]["p2_vuln"] += 1
 
     print()
@@ -235,13 +257,14 @@ def print_summary(p1, p2, elapsed):
 
 def save_results(p1, p2, summary, elapsed, args):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out = Path(__file__).resolve().parent.parent / "results" / f"pipeline_{ts}.json"
+    out = Path(__file__).resolve().parent.parent.parent / "results" / f"pipeline_{ts}.json"
     out.parent.mkdir(exist_ok=True)
 
     data = {
         "테스트_정보": {
             "실행_시각": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "타겟_모델": OLLAMA_MODEL,
+            "에이전트_모델": AGENT_MODEL,
+            "타겟_모델": TARGET_MODEL,
             "카테고리_필터": args.category,
             "최대_공격수": args.max_attacks,
             "Phase2_라운드": args.rounds,
@@ -254,7 +277,8 @@ def save_results(p1, p2, summary, elapsed, args):
         },
         "Phase2_Red_Agent": {
             "results": p2,
-            "추가_vulnerable": summary["p2_vuln"],
+            "추가_vulnerable": len([r for r in p2 if r["judgment"] == "vulnerable"]),
+            "방어_성공": len([r for r in p2 if r["judgment"] == "safe"]),
         },
         "요약": summary,
     }
@@ -267,34 +291,44 @@ def save_results(p1, p2, summary, elapsed, args):
 # ── 메인 ─────────────────────────────────────────────────────────
 
 async def async_main(args):
+    # CLI에서 타겟 모델 지정 시 글로벌 변수 업데이트
+    global TARGET_MODEL
+    if args.target:
+        TARGET_MODEL = args.target
+
     print("=" * 72)
     print("  AgentShield — Phase 1 + Phase 2 파이프라인 [R1]")
     print("=" * 72)
-    print(f"  타겟: Ollama → {OLLAMA_MODEL} (ABCBot 시스템 프롬프트)")
+    print(f"  에이전트 (Red/Judge): {AGENT_MODEL}")
+    print(f"  타겟 (테스트 대상):   {TARGET_MODEL}")
     if args.category:
         print(f"  카테고리: {args.category}")
     print(f"  Phase 2 라운드: 최대 {args.rounds}회")
     print(f"  LLM Judge: {'ON' if args.llm_judge else 'OFF (규칙만)'}")
     print()
 
-    # Ollama 연결 확인
-    # Phase 1의 target_url로 Ollama /api/chat 사용 (로컬 테스트)
+    # Ollama 연결 확인 — 에이전트 모델 + 타겟 모델
     target_url = f"{OLLAMA_BASE_URL}/api/chat"
 
-    print("  Ollama 연결 확인...", end=" ", flush=True)
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as tc:
-            r = await tc.post(
-                target_url,
-                json={"model": OLLAMA_MODEL, "messages": [{"role": "user", "content": "hi"}],
-                      "stream": False, "options": {"num_predict": 10}},
-            )
-            r.raise_for_status()
-        print(f"✅ {OLLAMA_MODEL}")
-    except Exception as e:
-        print(f"❌ {e}\n     → ollama serve 실행 후 재시도")
-        return
+    for label, model in [("에이전트", AGENT_MODEL), ("타겟", TARGET_MODEL)]:
+        if model == AGENT_MODEL and label == "타겟" and TARGET_MODEL == AGENT_MODEL:
+            continue  # 같은 모델이면 중복 체크 스킵
+        print(f"  {label} 모델 확인...", end=" ", flush=True)
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as tc:
+                r = await tc.post(
+                    target_url,
+                    json={"model": model, "messages": [{"role": "user", "content": "hi"}],
+                          "stream": False, "options": {"num_predict": 10}},
+                )
+                r.raise_for_status()
+            print(f"✅ {model}")
+        except Exception as e:
+            print(f"❌ {model}: {e}")
+            print(f"     → ollama pull {model} 후 재시도")
+            return
 
+    # LLM Judge — AgentShieldLLM 사용 (에이전트 모델)
     llm = None
     if args.llm_judge:
         from backend.agents.llm_client import AgentShieldLLM
@@ -317,6 +351,7 @@ async def async_main(args):
         target_url=target_url,
         category=args.category,
         send_fn=ollama_send_fn,
+        llm=llm,
     )
     p1v = len(p1["vulnerable_attacks"])
     p1s = len(p1["safe_attacks"])
@@ -336,7 +371,8 @@ async def async_main(args):
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             p2 = await run_phase2(safe_list, client, llm, args.llm_judge, args.rounds)
-        print(f"\n  Phase 2 완료: 추가 vulnerable={len(p2)}")
+        p2_vuln = len([r for r in p2 if r["judgment"] == "vulnerable"])
+        print(f"\n  Phase 2 완료: 추가 vulnerable={p2_vuln}")
 
     elapsed = time.time() - t0
     summary = print_summary(p1, p2, elapsed)
@@ -348,15 +384,16 @@ def main():
         description="[R1] Phase 2 Red Agent 파이프라인 테스트",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""예시:
-  python -m scripts.run_pipeline -c LLM01 -m 1 -r 2     # 최소 테스트
-  python -m scripts.run_pipeline -c LLM01 -m 3           # LLM01 3건
-  python -m scripts.run_pipeline -c LLM01                # LLM01 전체
-  python -m scripts.run_pipeline                         # 전체 80건
+  python -m backend.graph.run_pipeline -c LLM01 -m 1 -r 2     # 최소 테스트
+  python -m backend.graph.run_pipeline -c LLM01 -m 3           # LLM01 3건
+  python -m backend.graph.run_pipeline -t qwen3:latest         # 타겟 모델 변경
+  python -m backend.graph.run_pipeline                         # 전체 80건
 """,
     )
     parser.add_argument("-c", "--category", help="카테고리 필터 (LLM01/02/06/07)")
     parser.add_argument("-m", "--max-attacks", type=int, default=0, help="최대 공격 수 (0=전체)")
     parser.add_argument("-r", "--rounds", type=int, default=5, help="Phase 2 최대 라운드 (기본 5)")
+    parser.add_argument("-t", "--target", default=None, help="타겟 모델 (기본: gemma4:e2b)")
     parser.add_argument("--phase1-only", action="store_true", help="Seed 테스트만 (Phase 2 안 함)")
     parser.add_argument("--llm-judge", action="store_true", help="Layer 2 LLM Judge 사용")
     args = parser.parse_args()
