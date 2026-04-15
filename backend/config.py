@@ -50,6 +50,8 @@ class Settings(BaseSettings):
 
     # LLM requests
     LLM_REQUEST_TIMEOUT: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300))
+    LLM_DEFAULT_NUM_PREDICT: int = int(os.getenv("LLM_DEFAULT_NUM_PREDICT", 2048))
+    RED_AGENT_NUM_PREDICT: int = int(os.getenv("RED_AGENT_NUM_PREDICT", 4096))
 
     # Phase 4
     PHASE4_MAX_ITERATIONS: int = 3
