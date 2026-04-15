@@ -195,7 +195,8 @@ def print_summary(p1, p2, elapsed):
     p1v = len(p1.get("vulnerable_attacks", []))
     p1s = len(p1.get("safe_attacks", []))
     p1e = len(p1.get("error_attacks", []))
-    p2v = len(p2)
+    p2_vuln_list = [r for r in p2 if r["judgment"] == "vulnerable"]
+    p2v = len(p2_vuln_list)
     total = p1v + p1s  # error 제외
 
     stats = defaultdict(lambda: {"p1_vuln": 0, "p1_safe": 0, "p1_error": 0, "p2_vuln": 0})
@@ -205,7 +206,7 @@ def print_summary(p1, p2, elapsed):
         stats[s["category"]]["p1_safe"] += 1
     for e in p1.get("error_attacks", []):
         stats[e["category"]]["p1_error"] += 1
-    for v in p2:
+    for v in p2_vuln_list:
         stats[v["category"]]["p2_vuln"] += 1
 
     print()
@@ -254,7 +255,8 @@ def save_results(p1, p2, summary, elapsed, args):
         },
         "Phase2_Red_Agent": {
             "results": p2,
-            "추가_vulnerable": summary["p2_vuln"],
+            "추가_vulnerable": len([r for r in p2 if r["judgment"] == "vulnerable"]),
+            "방어_성공": len([r for r in p2 if r["judgment"] == "safe"]),
         },
         "요약": summary,
     }
@@ -297,8 +299,21 @@ async def async_main(args):
 
     llm = None
     if args.llm_judge:
-        from backend.agents.llm_client import AgentShieldLLM
-        llm = AgentShieldLLM()
+        # R4 AgentShieldLLM 대신 직접 Ollama를 사용하는 간단한 wrapper
+        # 파인튜닝 전이므로 base gemma4를 judge로 사용
+        class OllamaJudgeLLM:
+            async def generate(self, prompt: str, role: str = "judge", max_tokens: int = 2048) -> str:
+                async with httpx.AsyncClient(timeout=120.0) as c:
+                    payload = {
+                        "model": OLLAMA_MODEL,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False,
+                        "options": {"num_predict": max_tokens, "temperature": 0.1},
+                    }
+                    resp = await c.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+                    resp.raise_for_status()
+                    return resp.json().get("message", {}).get("content", "").strip()
+        llm = OllamaJudgeLLM()
 
     t0 = time.time()
     p2 = []
@@ -317,6 +332,7 @@ async def async_main(args):
         target_url=target_url,
         category=args.category,
         send_fn=ollama_send_fn,
+        llm=llm,
     )
     p1v = len(p1["vulnerable_attacks"])
     p1s = len(p1["safe_attacks"])
