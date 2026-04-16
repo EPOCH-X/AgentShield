@@ -23,6 +23,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 import json
+from typing import Optional
 
 import httpx
 
@@ -30,6 +31,98 @@ from backend.agents.red_agent import build_red_prompt, RED_AGENT_SYSTEM_PROMPT
 from backend.config import settings
 from backend.core.judge import full_judge
 from backend.core.phase1_scanner import run_phase1
+from backend.rag.chromadb_client import add_attack, get_rag_status, search_attacks
+
+
+# ── 성공 사례 시드 로더 ─────────────────────────────────────────
+
+def _load_success_seeds() -> dict[str, list[str]]:
+    """data/attack_patterns/success_seeds.json에서 카테고리별 성공 전략 로드
+
+    Returns:
+        {"LLM01": ["strategy description...", ...], ...}
+    """
+    seed_path = Path(__file__).resolve().parent.parent.parent / "data" / "attack_patterns" / "success_seeds.json"
+    if not seed_path.exists():
+        return {}
+    try:
+        with open(seed_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+    result: dict[str, list[str]] = {}
+    for cat, strategies in data.items():
+        if cat.startswith("_"):
+            continue
+        if not isinstance(strategies, list):
+            continue
+        texts = []
+        for s in strategies:
+            if isinstance(s, dict) and "strategy" in s:
+                entry = f"[{s['strategy']}] {s.get('description', '')}"
+                if s.get("example_attack"):
+                    entry += f"\nExample: {s['example_attack'][:300]}"
+                texts.append(entry)
+        if texts:
+            result[cat] = texts
+    return result
+
+
+_SUCCESS_SEEDS: dict[str, list[str]] = {}
+
+
+def _load_dynamic_attack_refs(category: str, attack_prompt: str, limit: int = 3) -> list[str]:
+    """ChromaDB에서 카테고리별 유사 성공 공격을 불러온다."""
+    query = f"{category} {attack_prompt[:300]}"
+    results = search_attacks(query=query, n_results=limit)
+
+    refs = []
+    for item in results:
+        metadata = item.get("metadata", {})
+        if metadata.get("category") and metadata.get("category") != category:
+            continue
+        refs.append(item.get("attack_prompt", ""))
+    return [ref for ref in refs if ref]
+
+
+def _merge_similar_cases(static_cases: Optional[list[str]], dynamic_cases: list[str]) -> Optional[list[str]]:
+    """정적 시드와 동적 RAG 검색 결과를 합쳐 Red Agent reference로 전달한다."""
+    merged = []
+    for case in (static_cases or []) + dynamic_cases:
+        if case and case not in merged:
+            merged.append(case)
+    return merged or None
+
+
+def _store_success_case(category: str, attack_prompt: str, target_response: str, metadata: dict) -> bool:
+    """성공 공격을 ChromaDB attack_results 컬렉션에 저장한다."""
+    return add_attack(
+        attack_prompt=attack_prompt,
+        metadata={
+            "category": category,
+            "target_response": target_response[:1500],
+            **metadata,
+        },
+    )
+
+
+def _persist_phase1_vulnerable_attacks(p1: dict) -> int:
+    """Phase 1에서 바로 성공한 공격을 RAG에 적재한다."""
+    stored = 0
+    for attack in p1.get("vulnerable_attacks", []):
+        saved = _store_success_case(
+            category=attack["category"],
+            attack_prompt=attack["attack_prompt"],
+            target_response=attack.get("target_response", ""),
+            metadata={
+                "source": "phase1",
+                "subcategory": attack.get("subcategory", ""),
+                "judgment": attack.get("judgment", "vulnerable"),
+            },
+        )
+        stored += int(bool(saved))
+    return stored
 
 
 # ── 타겟 LLM 시스템 프롬프트 ────────────────────────────────────
@@ -123,6 +216,19 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
     모든 라운드는 Red Agent LLM 변형으로 진행한다.
     Red Agent 모델은 settings.OLLAMA_RED_MODEL(기본 26B)을 사용한다.
     """
+    # 성공 사례 시드 로드 (Cold Start Bootstrap)
+    global _SUCCESS_SEEDS
+    if not _SUCCESS_SEEDS:
+        _SUCCESS_SEEDS = _load_success_seeds()
+        if _SUCCESS_SEEDS:
+            print(f"  📋 성공 사례 시드 로드: {', '.join(f'{k}({len(v)})' for k, v in _SUCCESS_SEEDS.items())}")
+
+    rag_status = get_rag_status()
+    if rag_status["available"]:
+        print(f"  🧠 ChromaDB 연결됨: {rag_status['host']}:{rag_status['port']}")
+    else:
+        print(f"  ⚠ ChromaDB 미사용: {rag_status['error']}")
+
     results = []
 
     for i, attack in enumerate(safe_attacks, 1):
@@ -136,12 +242,14 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
 
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
+            dynamic_refs = _load_dynamic_attack_refs(cat, current_prompt)
+            similar_cases = _merge_similar_cases(_SUCCESS_SEEDS.get(cat), dynamic_refs)
 
             red_prompt = build_red_prompt(
                 attack_prompt=current_prompt,
                 target_response=current_response,
                 category=cat,
-                similar_cases=None,
+                similar_cases=similar_cases,
                 round_num=rnd,
             )
             try:
@@ -187,6 +295,18 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
 
             if verdict["judgment"] == "vulnerable":
                 print(f"🔴 vulnerable! (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
+                _store_success_case(
+                    category=cat,
+                    attack_prompt=new_attack,
+                    target_response=target_response,
+                    metadata={
+                        "source": "phase2",
+                        "subcategory": subcat,
+                        "judgment": "vulnerable",
+                        "round": rnd,
+                        "judge_layer": verdict["layer"],
+                    },
+                )
                 results.append({
                     "phase": 2,
                     "category": cat,
@@ -383,6 +503,10 @@ async def async_main(args):
     p1s = len(p1["safe_attacks"])
     p1e = len(p1.get("error_attacks", []))
     print(f"\n  Phase 1 완료: vulnerable={p1v}, safe={p1s}, error={p1e}, total={p1['total_scanned']}")
+
+    p1_rag_stored = _persist_phase1_vulnerable_attacks(p1)
+    if p1_rag_stored:
+        print(f"  🧠 Phase 1 성공 사례 RAG 적재: {p1_rag_stored}건")
 
     # ── Phase 2: Red Agent 변형 ──
     if not args.phase1_only and p1["safe_attacks"]:
