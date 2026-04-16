@@ -119,6 +119,7 @@ def _persist_phase1_vulnerable_attacks(p1: dict) -> int:
                 "source": "phase1",
                 "subcategory": attack.get("subcategory", ""),
                 "judgment": attack.get("judgment", "vulnerable"),
+                "seed_id": attack.get("seed_id", ""),
             },
         )
         stored += int(bool(saved))
@@ -267,6 +268,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                 print(f"    R{rnd}: ❌ 빈 변형 응답 — 타겟 전송 차단")
                 results.append({
                     "phase": 2,
+                    "seed_id": attack.get("seed_id", ""),
                     "category": cat,
                     "subcategory": subcat,
                     "original_prompt": attack["attack_prompt"][:200],
@@ -310,10 +312,12 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                         "judgment": "vulnerable",
                         "round": rnd,
                         "judge_layer": verdict["layer"],
+                        "seed_id": attack.get("seed_id", ""),
                     },
                 )
                 results.append({
                     "phase": 2,
+                    "seed_id": attack.get("seed_id", ""),
                     "category": cat,
                     "subcategory": subcat,
                     "original_prompt": attack["attack_prompt"][:200],
@@ -332,6 +336,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                 print(f"🟢 {verdict['judgment']} (L{verdict['layer']}) [{elapsed:.1f}s]")
                 results.append({
                     "phase": 2,
+                    "seed_id": attack.get("seed_id", ""),
                     "category": cat,
                     "subcategory": subcat,
                     "original_prompt": attack["attack_prompt"][:200],
@@ -429,6 +434,82 @@ def save_results(p1, p2, summary, elapsed, args):
     with open(out, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"\n  결과 저장: {out}")
+
+
+async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline") -> int:
+    """파이프라인 결과를 PostgreSQL에 비동기 저장한다.
+
+    TestSession 1건 + TestResult N건 (Phase 1 vulnerable/safe + Phase 2)을 bulk insert.
+    DB 연결 실패 시 경고만 출력하고 0을 반환한다.
+    """
+    import uuid as _uuid
+    try:
+        from backend.database import async_session
+        from backend.models.test_session import TestSession
+        from backend.models.test_result import TestResult
+    except Exception as e:
+        print(f"  ⚠ DB 모듈 로드 실패 (DB 저장 건너뜀): {e}")
+        return 0
+
+    session_id = _uuid.uuid4()
+    saved = 0
+
+    try:
+        async with async_session() as db:
+            # 세션 생성
+            ts = TestSession(
+                id=session_id,
+                project_name=session_name,
+                target_api_url=f"ollama:{TARGET_MODEL}",
+                status="completed",
+            )
+            db.add(ts)
+
+            # Phase 1 결과 저장
+            for bucket_name in ("vulnerable_attacks", "safe_attacks", "error_attacks"):
+                for attack in p1.get(bucket_name, []):
+                    tr = TestResult(
+                        session_id=session_id,
+                        phase=1,
+                        seed_id=attack.get("seed_id", ""),
+                        attack_prompt=attack.get("attack_prompt", ""),
+                        target_response=attack.get("target_response", ""),
+                        judgment=attack.get("judgment", ""),
+                        judgment_layer=attack.get("judge_layer", 1),
+                        severity=attack.get("severity"),
+                        category=attack.get("category", ""),
+                        subcategory=attack.get("subcategory", ""),
+                        detail=attack.get("detail", ""),
+                    )
+                    db.add(tr)
+                    saved += 1
+
+            # Phase 2 결과 저장
+            for result in p2:
+                tr = TestResult(
+                    session_id=session_id,
+                    phase=2,
+                    seed_id=result.get("seed_id", ""),
+                    round=result.get("round"),
+                    attack_prompt=result.get("mutated_prompt", ""),
+                    target_response=result.get("target_response", ""),
+                    judgment=result.get("judgment", ""),
+                    judgment_layer=result.get("judge_layer"),
+                    severity=result.get("severity"),
+                    category=result.get("category", ""),
+                    subcategory=result.get("subcategory", ""),
+                    detail=result.get("detail", ""),
+                )
+                db.add(tr)
+                saved += 1
+
+            await db.commit()
+        print(f"  💾 DB 저장 완료: session={session_id}, {saved}건")
+    except Exception as e:
+        print(f"  ⚠ DB 저장 실패 (JSON 저장은 정상): {e}")
+        saved = 0
+
+    return saved
 
 
 # ── 메인 ─────────────────────────────────────────────────────────
@@ -533,6 +614,9 @@ async def async_main(args):
     elapsed = time.time() - t0
     summary = print_summary(p1, p2, elapsed)
     save_results(p1, p2, summary, elapsed, args)
+
+    # DB 저장 (PostgreSQL 연결 시에만, 실패해도 JSON은 이미 저장됨)
+    await save_results_to_db(p1, p2, session_name=f"pipeline-{args.category or 'all'}")
 
 
 def main():
