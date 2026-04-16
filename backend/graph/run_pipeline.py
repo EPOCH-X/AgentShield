@@ -225,7 +225,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
 
     rag_status = get_rag_status()
     if rag_status["available"]:
-        print(f"  🧠 ChromaDB 연결됨: {rag_status['host']}:{rag_status['port']}")
+        print(f"  🧠 ChromaDB 연결됨: {rag_status['persist_path']}")
     else:
         print(f"  ⚠ ChromaDB 미사용: {rag_status['error']}")
 

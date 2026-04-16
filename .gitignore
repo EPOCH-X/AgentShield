@@ -111,3 +111,4 @@ docker-compose.override.yml
 
 results/
 scripts/calibrate_result.txt
+chromadb_data/

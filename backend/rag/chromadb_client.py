@@ -29,11 +29,12 @@ class ChromaRAGClient:
 
         from backend.rag.embedder import MiniLMEmbeddingFunction
 
-        # HTTP 클라이언트 연결
-        self.client = chromadb.HttpClient(
-            host=settings.CHROMADB_HOST, 
-            port=settings.CHROMADB_PORT
-        )
+        import os
+        persist_dir = os.path.abspath(settings.CHROMADB_PERSIST_PATH)
+        os.makedirs(persist_dir, exist_ok=True)
+
+        # 로컬 PersistentClient (Docker 불필요)
+        self.client = chromadb.PersistentClient(path=persist_dir)
 
         self.embed_fn = MiniLMEmbeddingFunction()
 
@@ -111,7 +112,7 @@ def get_rag_client() -> ChromaRAGClient:
     except Exception as exc:
         _rag_init_error = str(exc)
         raise RuntimeError(
-            f"ChromaDB initialization failed ({settings.CHROMADB_HOST}:{settings.CHROMADB_PORT}): {exc}"
+            f"ChromaDB initialization failed (persist={settings.CHROMADB_PERSIST_PATH}): {exc}"
         ) from exc
 
 
@@ -121,15 +122,13 @@ def get_rag_status() -> dict:
         get_rag_client()
         return {
             "available": True,
-            "host": settings.CHROMADB_HOST,
-            "port": settings.CHROMADB_PORT,
+            "persist_path": settings.CHROMADB_PERSIST_PATH,
             "error": None,
         }
     except RuntimeError as exc:
         return {
             "available": False,
-            "host": settings.CHROMADB_HOST,
-            "port": settings.CHROMADB_PORT,
+            "persist_path": settings.CHROMADB_PERSIST_PATH,
             "error": str(exc),
         }
 
