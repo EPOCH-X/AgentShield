@@ -115,7 +115,7 @@ export default function AdminPage() {
           </div>
           <button
             onClick={() => setShowModal(true)}
-            className="bg-gradient-to-br from-primary via-primary-container to-[#007acc] text-on-primary px-8 py-4 rounded-2xl font-bold flex items-center gap-3 shadow-2xl shadow-primary/30 hover:shadow-primary/40 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-300"
+            className="bg-gradient-to-br from-primary via-primary-container to-[#7B5FCC] text-on-primary px-8 py-4 rounded-2xl font-bold flex items-center gap-3 shadow-2xl shadow-primary/30 hover:shadow-primary/40 hover:-translate-y-0.5 active:translate-y-0 transition-all duration-300"
           >
             <span className="material-symbols-outlined text-xl">add_moderator</span>
             새 정책 생성
@@ -264,7 +264,7 @@ export default function AdminPage() {
                             <span className="material-symbols-outlined text-on-surface-variant">person</span>
                           </div>
                           <span
-                            className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#1e293b] ${
+                            className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#221840] ${
                               emp.status === "active" ? "bg-tertiary shadow-sm shadow-tertiary/40" : "bg-error shadow-sm shadow-error/40"
                             }`}
                           />
@@ -295,7 +295,7 @@ export default function AdminPage() {
             </div>
 
             {/* 시스템 상태 카드 */}
-            <div className="bg-gradient-to-br from-[#0d1c32] via-[#1c2a41] to-background p-8 rounded-2xl shadow-2xl border border-primary/20 relative overflow-hidden group">
+            <div className="bg-gradient-to-br from-[#221840] via-[#2A1F4A] to-background p-8 rounded-2xl shadow-2xl border border-primary/20 relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-[60px] rounded-full group-hover:bg-primary/20 transition-all duration-700" />
               <div className="relative z-10">
                 <p className="text-primary/60 text-[10px] uppercase tracking-[0.3em] font-black mb-2">
@@ -307,10 +307,10 @@ export default function AdminPage() {
                 </div>
                 <div className="mt-6 h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
                   <div
-                    className="h-full rounded-full shadow-[0_0_15px_rgba(152,203,255,0.6)]"
+                    className="h-full rounded-full shadow-[0_0_15px_rgba(57,255,20,0.6)]"
                     style={{
                       width: "99.9%",
-                      background: "linear-gradient(to right, #98cbff, #3ce36a)",
+                      background: "linear-gradient(to right, #39FF14, #A084E8)",
                     }}
                   />
                 </div>
@@ -455,7 +455,7 @@ export default function AdminPage() {
                 >
                   {saving ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
+                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
                       생성 중...
                     </span>
                   ) : (
