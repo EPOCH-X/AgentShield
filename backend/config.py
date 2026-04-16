@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
     OLLAMA_RED_MODEL: str = os.getenv("OLLAMA_RED_MODEL", "gemma4:26b")
     OLLAMA_JUDGE_MODEL: str = os.getenv("OLLAMA_JUDGE_MODEL", "agent-judge")
+    OLLAMA_GUARD_MODEL: str = os.getenv("OLLAMA_GUARD_MODEL", "qwen2.5:0.5b")
     OLLAMA_BLUE_MODEL: str = os.getenv("OLLAMA_BLUE_MODEL", "agent-blue")
 
     # ChromaDB
