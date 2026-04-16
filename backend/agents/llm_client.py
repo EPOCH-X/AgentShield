@@ -13,6 +13,7 @@ sys.path.append(project_root)
 import httpx
 import logging
 from backend.config import settings
+from backend.agents.red_agent import RED_AGENT_SYSTEM_PROMPT
 
 # TODO: [R4] 구현
 # - Ollama API 연동 (generate, chat)
@@ -29,36 +30,61 @@ class AgentShieldLLM:
     def __init__(self, host: str = settings.OLLAMA_BASE_URL):
         self.api_url = f"{host}/api/chat"
 
-    async def generate(self, prompt: str, role: str = "base", max_tokens: int = 2048) -> str:
-        # role에 따른 Ollama 모델명 맵핑
-        if role == "base":
-            model_name = "gemma4:e2b"
-        else:
-            model_name = f"agent-{role}"
+    @staticmethod
+    def _resolve_model_name(role: str) -> str:
+        role_models = {
+            "base": settings.OLLAMA_MODEL,
+            "red": settings.OLLAMA_RED_MODEL,
+            "judge": settings.OLLAMA_JUDGE_MODEL,
+            "blue": settings.OLLAMA_BLUE_MODEL,
+        }
+        return role_models.get(role, f"agent-{role}")
+
+    @staticmethod
+    def _build_messages(prompt: str, role: str) -> list[dict[str, str]]:
+        if role == "red":
+            return [
+                {"role": "system", "content": RED_AGENT_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ]
+
+        return [{"role": "user", "content": prompt}]
+
+    @staticmethod
+    def _resolve_max_tokens(role: str, max_tokens: int | None) -> int:
+        if max_tokens is not None:
+            return max_tokens
+        if role == "red":
+            return settings.RED_AGENT_NUM_PREDICT
+        return settings.LLM_DEFAULT_NUM_PREDICT
+
+    async def generate(self, prompt: str, role: str = "base", max_tokens: int | None = None) -> str:
+        model_name = self._resolve_model_name(role)
+        resolved_max_tokens = self._resolve_max_tokens(role, max_tokens)
 
         # Judge는 엄격하게(0.1), 생성 에이전트들은 약간의 창의성 허용(0.6)
         temperature = 0.1 if role == "judge" else 0.6
 
         payload = {
             "model": model_name,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
+            "messages": self._build_messages(prompt, role),
             "stream": False,
+            "think": False,
             "options": {
-                "num_predict": max_tokens,
-                "temperature": temperature
+                "num_predict": resolved_max_tokens,
+                "temperature": temperature,
+                "repeat_penalty": 1.2,
             }
         }
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=settings.LLM_REQUEST_TIMEOUT) as client:
             try:
                 response = await client.post(self.api_url, json=payload)
 
                 # 어댑터(모델)가 아직 등록되지 않은 경우 (404 에러 시 폴백)
                 if response.status_code == 404 and role != "base":
-                    logger.warning(f"'{model_name}' 모델이 없습니다. 기본 'gemma4:e2b'로 폴백하여 진행합니다.")
-                    return await self.generate(prompt, role="base", max_tokens=max_tokens)
+                    logger.warning(f"'{model_name}' 모델이 없습니다. 기본 '{settings.OLLAMA_MODEL}'로 폴백하여 진행합니다.")
+                    return await self.generate(prompt, role="base", max_tokens=resolved_max_tokens)
                 
                 response.raise_for_status()
                 result = response.json()
