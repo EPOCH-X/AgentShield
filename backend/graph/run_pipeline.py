@@ -456,7 +456,7 @@ async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline")
 
     try:
         async with async_session() as db:
-            # 세션 생성
+            # 세션 생성 — FK 보장을 위해 flush로 먼저 DB에 반영
             ts = TestSession(
                 id=session_id,
                 project_name=session_name,
@@ -464,6 +464,7 @@ async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline")
                 status="completed",
             )
             db.add(ts)
+            await db.flush()  # test_results INSERT 전에 test_sessions FK 보장
 
             # Phase 1 결과 저장
             for bucket_name in ("vulnerable_attacks", "safe_attacks", "error_attacks"):
