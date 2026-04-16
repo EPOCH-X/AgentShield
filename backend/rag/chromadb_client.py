@@ -9,7 +9,8 @@ cosine metric (hnsw:space=cosine) 사용.
 # TODO: [R4] 구현
 # - get_or_create_collection() with cosine metric
 # - search_defense(), search_attacks(), add_attack()
-# - 중복 체크: 코사인 거리 < 0.3 (유사도 > 0.7) 시 저장 안 함
+# - 중복 체크: 코사인 거리 < 0.1 (유사도 > 0.90) 시 저장 안 함
+#   → 보안 레드팀에서는 미세한 프레이밍 차이가 핵심이므로 거의 동일 문장만 제외
 
 import uuid
 from typing import Optional
@@ -74,9 +75,9 @@ class ChromaRAGClient:
         if results['distances'] and len(results['distances'][0]) > 0:
             distance = results['distances'][0][0]
             similarity = 1 - distance
-            
-            if similarity > 0.7: 
-                print(f"유사한 공격 패턴 존재 (유사도: {similarity:.4f}). 저장을 생략합니다.")
+
+            if similarity > 0.90:
+                print(f"거의 동일한 공격 패턴 존재 (유사도: {similarity:.4f}). 저장을 생략합니다.")
                 return False
 
         # 새로운 공격 패턴 저장
