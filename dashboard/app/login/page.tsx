@@ -33,7 +33,7 @@ export default function LoginPage() {
       className="min-h-screen bg-background flex items-center justify-center p-4"
       style={{
         backgroundImage:
-          "radial-gradient(circle at 50% 0%, #0d1c32 0%, #041329 100%)",
+          "radial-gradient(circle at 50% 0%, #221840 0%, #1A1026 100%)",
       }}
     >
       <div className="w-full max-w-md">
@@ -121,11 +121,11 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary via-[#4DA8FF] to-primary-container text-on-primary-container font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(0,163,255,0.3)] hover:shadow-[0_15px_40px_rgba(0,163,255,0.4)] hover:-translate-y-0.5 transition-all active:scale-[0.98] active:translate-y-0 neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+              className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary via-[#57FF35] to-primary-container text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(57,255,20,0.3)] hover:shadow-[0_15px_40px_rgba(57,255,20,0.45)] hover:-translate-y-0.5 transition-all active:scale-[0.98] active:translate-y-0 neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
             >
               {loading ? (
                 <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
+                  <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
                   인증 중...
                 </span>
               ) : (
