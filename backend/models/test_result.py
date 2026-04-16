@@ -15,14 +15,18 @@ class TestResult(Base):
     session_id = Column(UUID(as_uuid=True), ForeignKey("test_sessions.id"), index=True)
     phase = Column(Integer, nullable=False, index=True)  # 1/2/3/4
     attack_pattern_id = Column(Integer, ForeignKey("attack_patterns.id"), nullable=True)
+    seed_id = Column(String(36), index=True)  # DPO 쌍 매칭용 시드 UUID
+    round = Column(Integer, nullable=True)  # Phase 2 라운드 번호
     attack_prompt = Column(Text)
     target_response = Column(Text)
-    judgment = Column(String(20))  # vulnerable/safe/ambiguous
+    judgment = Column(String(20), index=True)  # vulnerable/safe/ambiguous
     judgment_layer = Column(Integer)  # 1(규칙)/2(LLM)/3(수동)
     judgment_confidence = Column(Float)
     manual_review_needed = Column(Boolean, default=False, index=True)
     severity = Column(String(10))
     category = Column(String(10))
+    subcategory = Column(String(50), nullable=True)
+    detail = Column(Text, nullable=True)  # Judge 판정 상세 사유
     defense_code = Column(Text, nullable=True)
     defense_reviewed = Column(Boolean, default=False)
     verify_result = Column(String(20), nullable=True)  # blocked/bypassed/mitigated

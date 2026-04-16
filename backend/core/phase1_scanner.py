@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from pathlib import Path
 from typing import Optional, Callable, Any
 
@@ -30,7 +31,10 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "attack_patt
 # ── 데이터 로딩 (나중에 DB 전환 시 이 부분만 교체) ────────────────
 
 def _load_attacks_from_file(category: Optional[str] = None) -> list[dict]:
-    """로컬 JSON 파일에서 공격 패턴 로드 (colla_v1 + generated_*.json 병합)"""
+    """로컬 JSON 파일에서 공격 패턴 로드 (colla_v1 + generated_*.json 병합)
+
+    각 시드에 고유 seed_id(UUID)를 발급하여 Phase 2에서 DPO 쌍 매칭에 활용한다.
+    """
     attacks = []
     for json_file in sorted(DATA_DIR.glob("*.json")):
         if json_file.name == "README.md":
@@ -39,6 +43,8 @@ def _load_attacks_from_file(category: Optional[str] = None) -> list[dict]:
             data = json.load(f)
         # prompt_text 키가 있는 항목만 (attack pattern 형식)
         valid = [a for a in data if "prompt_text" in a and "category" in a]
+        for a in valid:
+            a["seed_id"] = str(uuid.uuid4())
         attacks.extend(valid)
     if category:
         attacks = [a for a in attacks if a["category"] == category]
@@ -120,6 +126,7 @@ async def run_phase1(
             # 타겟 응답 실패 시 judge 호출 없이 error 분류
             if target_response in ("[ERROR]", ""):
                 error_entry = {
+                    "seed_id": attack.get("seed_id", ""),
                     "category": cat,
                     "subcategory": attack.get("subcategory", ""),
                     "attack_prompt": prompt_text,
@@ -136,6 +143,7 @@ async def run_phase1(
             verdict = await full_judge(cat, prompt_text, target_response, llm)
 
             entry = {
+                "seed_id": attack.get("seed_id", ""),
                 "category": cat,
                 "subcategory": attack.get("subcategory", ""),
                 "attack_prompt": prompt_text,
