@@ -13,6 +13,8 @@ Phase 2 로직: 이 스크립트 (Red Agent 변형 생성 + Judge 판정)
     python -m backend.graph.run_pipeline -c LLM01 -m 3       # LLM01 3건 빠른 테스트
     python -m backend.graph.run_pipeline -c LLM01 -m 1 -r 2  # 최소 테스트 (1건, 2라운드)
     python -m backend.graph.run_pipeline --phase1-only        # Phase 1만
+    python -m backend.graph.run_pipeline --phase2-only        # Phase 2만 (이전 Phase 1 결과 로드)
+    python -m backend.graph.run_pipeline --phase2-only --from-result results/pipeline_xxx.json
     python -m backend.graph.run_pipeline --llm-judge          # Layer 2 LLM Judge 포함
 """
 
@@ -449,6 +451,7 @@ def save_results(p1, p2, summary, elapsed, args):
         },
         "Phase1": {
             "vulnerable": p1.get("vulnerable_attacks", []),
+            "safe": p1.get("safe_attacks", []),
             "safe_count": summary["p1_safe"],
         },
         "Phase2_Red_Agent": {
@@ -540,6 +543,42 @@ async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline")
 
     return saved
 
+# ── Phase 1 결과 로드 (Phase 2 전용) ──────────────────────────────
+
+def _load_phase1_from_json(path: str = None, category: str = None) -> dict:
+    """이전 파이프라인 결과 JSON에서 Phase 1 결과를 로드"""
+    if path:
+        json_path = Path(path)
+    else:
+        results_dir = Path(__file__).resolve().parent.parent.parent / "results"
+        files = sorted(results_dir.glob("pipeline_*.json"), reverse=True)
+        if not files:
+            raise FileNotFoundError("results/ 디렉토리에 파이프라인 결과가 없습니다")
+        json_path = files[0]
+
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    safe_attacks = data.get("Phase1", {}).get("safe", [])
+    vulnerable_attacks = data.get("Phase1", {}).get("vulnerable", [])
+
+    if not safe_attacks:
+        raise ValueError(
+            f"Phase 1 safe attacks가 없습니다. "
+            f"이전 버전으로 실행한 결과 JSON일 수 있습니다 (safe 필드 없음): {json_path}"
+        )
+
+    if category:
+        safe_attacks = [a for a in safe_attacks if a.get("category") == category]
+        vulnerable_attacks = [a for a in vulnerable_attacks if a.get("category") == category]
+
+    return {
+        "safe_attacks": safe_attacks,
+        "vulnerable_attacks": vulnerable_attacks,
+        "error_attacks": [],
+        "total_scanned": len(safe_attacks) + len(vulnerable_attacks),
+        "source": str(json_path),
+    }
 
 # ── 메인 ─────────────────────────────────────────────────────────
 
@@ -599,30 +638,42 @@ async def async_main(args):
     t0 = time.time()
     p2 = []
 
-    # ── Phase 1: phase1_scanner.run_phase1() 호출 ──
-    print("─" * 72)
-    print("  Phase 1: Seed 공격 → 타겟 → Judge (phase1_scanner)")
-    print("─" * 72)
+    if args.phase2_only:
+        # ── Phase 1 결과를 이전 JSON에서 로드 ──
+        p1 = _load_phase1_from_json(args.from_result, args.category)
+        print("─" * 72)
+        print("  Phase 1 결과 로드 (Phase 2 전용 모드)")
+        print("─" * 72)
+        p1v = len(p1.get("vulnerable_attacks", []))
+        p1s = len(p1["safe_attacks"])
+        p1e = 0
+        print(f"  📂 소스: {p1['source']}")
+        print(f"  로드 완료: vulnerable={p1v}, safe={p1s}, total={p1v + p1s}")
+    else:
+        # ── Phase 1: phase1_scanner.run_phase1() 호출 ──
+        print("─" * 72)
+        print("  Phase 1: Seed 공격 → 타겟 → Judge (phase1_scanner)")
+        print("─" * 72)
 
-    async def ollama_send_fn(client, prompt_text):
-        """로컬 Ollama를 타겟 챗봇으로 사용하는 send_fn"""
-        return await send_to_target(client, prompt_text)
+        async def ollama_send_fn(client, prompt_text):
+            """로컬 Ollama를 타겟 챗봇으로 사용하는 send_fn"""
+            return await send_to_target(client, prompt_text)
 
-    p1 = await run_phase1(
-        session_id="local-test",
-        target_url=target_url,
-        category=args.category,
-        send_fn=ollama_send_fn,
-        llm=llm,
-    )
-    p1v = len(p1["vulnerable_attacks"])
-    p1s = len(p1["safe_attacks"])
-    p1e = len(p1.get("error_attacks", []))
-    print(f"\n  Phase 1 완료: vulnerable={p1v}, safe={p1s}, error={p1e}, total={p1['total_scanned']}")
+        p1 = await run_phase1(
+            session_id="local-test",
+            target_url=target_url,
+            category=args.category,
+            send_fn=ollama_send_fn,
+            llm=llm,
+        )
+        p1v = len(p1["vulnerable_attacks"])
+        p1s = len(p1["safe_attacks"])
+        p1e = len(p1.get("error_attacks", []))
+        print(f"\n  Phase 1 완료: vulnerable={p1v}, safe={p1s}, error={p1e}, total={p1['total_scanned']}")
 
-    p1_rag_stored = _persist_phase1_vulnerable_attacks(p1)
-    if p1_rag_stored:
-        print(f"  🧠 Phase 1 성공 사례 RAG 적재: {p1_rag_stored}건")
+        p1_rag_stored = _persist_phase1_vulnerable_attacks(p1)
+        if p1_rag_stored:
+            print(f"  🧠 Phase 1 성공 사례 RAG 적재: {p1_rag_stored}건")
 
     # ── Phase 2: Red Agent 변형 ──
     if not args.phase1_only and p1["safe_attacks"]:
@@ -655,8 +706,8 @@ def main():
         epilog="""예시:
   python -m backend.graph.run_pipeline -c LLM01 -m 1 -r 2     # 최소 테스트
   python -m backend.graph.run_pipeline -c LLM01 -m 3           # LLM01 3건
-  python -m backend.graph.run_pipeline -t qwen3:latest         # 타겟 모델 변경
-  python -m backend.graph.run_pipeline                         # 전체 80건
+  python -m backend.graph.run_pipeline -t qwen3:latest         # 타겟 모델 변경  python -m backend.graph.run_pipeline --phase2-only           # Phase 2만 (최신 결과 로드)
+  python -m backend.graph.run_pipeline --phase2-only -c LLM01  # Phase 2만, LLM01만  python -m backend.graph.run_pipeline                         # 전체 80건
 """,
     )
     parser.add_argument("-c", "--category", help="카테고리 필터 (LLM01/02/06/07)")
@@ -664,6 +715,8 @@ def main():
     parser.add_argument("-r", "--rounds", type=int, default=5, help="Phase 2 최대 라운드 (기본 5)")
     parser.add_argument("-t", "--target", default=None, help="타겟 모델 (기본: gemma4:e2b)")
     parser.add_argument("--phase1-only", action="store_true", help="Seed 테스트만 (Phase 2 안 함)")
+    parser.add_argument("--phase2-only", action="store_true", help="Phase 1 건너뛰고 Phase 2만 (이전 결과 로드)")
+    parser.add_argument("--from-result", default=None, help="--phase2-only용: 로드할 결과 JSON 경로 (미지정 시 최신)")
     parser.add_argument("--llm-judge", action="store_true", help="Layer 2 LLM Judge 사용")
     args = parser.parse_args()
     asyncio.run(async_main(args))
