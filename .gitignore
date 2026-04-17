@@ -57,6 +57,7 @@ id_rsa*
 # Data (용량 큰 파일)
 *.jsonl
 data/attack_patterns/*.csv
+data/phase3_defenses/
 !data/attack_patterns/README.md
 !data/defense_patterns/README.md
 !data/finetuning/README.md
@@ -68,6 +69,11 @@ adapters/lora-judge/*.bin
 adapters/lora-judge/*.safetensors
 adapters/lora-blue/*.bin
 adapters/lora-blue/*.safetensors
+
+# 분석·연구 문서 (개인 작업용, 커밋 불필요)
+gemma4_26b_baseline_분석.md
+LLM_Judge_분석_및_업계동향.md
+남은_과제_로드맵.md
 
 # ChromaDB
 chromadb_data/
@@ -110,3 +116,4 @@ docker-compose.override.yml
 
 results/
 scripts/calibrate_result.txt
+chromadb_data/

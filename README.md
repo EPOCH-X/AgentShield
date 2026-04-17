@@ -29,7 +29,8 @@ AgentShield/
 │   │   ├── phase2_red_agent.py   # [R1] Red Agent 공격
 │   │   ├── phase3_blue_agent.py  # [R3] Blue Agent 방어
 │   │   ├── phase4_verify.py      # [R3] 방어 검증
-│   │   └── judge.py              # [R1] 판정 로직
+│   │   ├── judge.py              # [R1] 판정 로직
+│   │   ├── mutation_engine.py    # [R1] 코드 기반 공격 변형 엔진
 │   ├── agents/
 │   │   ├── llm_client.py         # [R4] Ollama LLM 클라이언트
 │   │   ├── red_agent.py          # [R1] Red Agent
@@ -40,7 +41,8 @@ AgentShield/
 │   │   ├── embedder.py           # [R4] 임베딩 생성
 │   │   └── ingest.py             # [R4] 데이터 수집
 │   ├── graph/
-│   │   └── llm_security_graph.py # [R1] LangGraph 오케스트레이션
+│   │   ├── llm_security_graph.py # [R1] LangGraph 오케스트레이션
+│   │   └── run_pipeline.py       # [R1] Phase 1+2 파이프라인 실행기
 │   ├── report/
 │   │   ├── generator.py          # [R7] 보고서 생성
 │   │   └── templates/
@@ -98,19 +100,78 @@ AgentShield/
 
 | 계층          | 기술                                               |
 | ------------- | -------------------------------------------------- |
-| LLM           | Gemma 4 E2B (2.3B effective / 5.1B PLE) via Ollama |
+| LLM           | Gemma 4 E2B (타겟) + Gemma 4 26B (Red Agent) via Ollama |
+| Guard (L2)    | Qwen 2.5 0.5B — 카테고리별 few-shot Judge           |
 | Backend       | FastAPI + async SQLAlchemy + PostgreSQL 16         |
-| RAG           | ChromaDB + all-MiniLM-L6-v2 (384d)                 |
+| RAG           | ChromaDB PersistentClient + all-MiniLM-L6-v2 (384d), 유사도 임계값 0.90 |
 | Orchestration | LangGraph StateGraph                               |
-| Fine-tuning   | QLoRA 4-bit NF4, r=16, lora_alpha=32               |
+| Fine-tuning   | DPO (seed_id 기반 chosen/rejected 페어링) + QLoRA 4-bit NF4 |
 | Frontend      | Next.js 14 (App Router) + Chart.js                 |
-| Infra         | Docker Compose                                     |
+| Infra         | Docker Compose (또는 로컬 Homebrew PostgreSQL)       |
+
+## 현재 구현 상태 (2026-04-16)
+
+### Phase 1 + Phase 2 파이프라인
+
+- **Phase 1**: `data/attack_patterns/colla_v1.json` + `colla_v2.json`에서 160개 seed 로드 → 규칙 기반 대량 스캔
+- **Phase 2**: Red Agent (gemma4:26b, REDSTRIKE 페르소나)가 Phase 1 safe 결과를 최대 5라운드 변형 공격
+- **Mock Tools (LLM06)**: `backend/core/mock_tools.py` — 10개 시뮬레이션 도구 (query_database, delete_records, send_email 등)
+- **seed_id 추적**: 각 seed에 UUID 부여 → Phase 1/2 결과를 seed_id로 연결 → DPO 학습 데이터 페어링
+
+### 3-Layer Judge 시스템
+
+```
+응답 수신
+    │
+    ▼
+[Layer 1] 규칙 기반 판정 (카테고리별 전용 로직)
+    │  LLM01: 역할 변조 + 거부 문구 / LLM02: PII 정규식 / LLM06: Mock Tool 호출 감지 / LLM07: 시스템 프롬프트 구조
+    │  → vulnerable / safe: 즉시 반환
+    │  → ambiguous + 거부 응답 감지: Guard bypass → safe (confidence 0.9)
+    │  → ambiguous: Layer 2로
+    │
+    ▼
+[Layer 2] Guard Judge (Qwen 2.5 0.5B)
+    │  카테고리별 few-shot 프롬프트로 harmful/unharmful 판정
+    │  → 결과 채택 (confidence 매핑)
+    │
+    ▼
+[Layer 3] 수동 검토 큐 (현재 미구현 — ambiguous로 마킹)
+```
+
+- **FP 방지**: 거부 응답("cannot query", "I cannot delete" 등)에 대해 refusal-first 검사 수행
+- **Guard bypass**: L1 ambiguous이면서 거부 응답인 경우, Guard에 넘기지 않고 safe 반환 (Guard 0.5B의 FP 방지)
+
+### DB 통합
+
+- **PostgreSQL 16**: `database/schema.sql` 기반, seed_id/round/subcategory/detail 컬럼 추가
+- **DB 저장**: `save_results_to_db()` — 파이프라인 완료 후 TestSession + TestResult 일괄 저장
+- **DPO 내보내기**: `python -m backend.finetuning.export_dpo_data --source db --session latest`
+
+### 최신 베이스라인 결과
+
+```
+gemma4:26b (정상 모델) → gemma4:e2b, 160 seeds × 5 rounds
+
+전체 취약률: 43.8% (70/160)
+  LLM01 (Prompt Injection):      65.0% (26/40)
+  LLM02 (Sensitive Info):        40.0% (16/40)
+  LLM06 (Excessive Agency):      52.5% (21/40)
+  LLM07 (System Prompt Leak):    17.5%  (7/40)
+
+Phase 2가 전체 취약점의 74.3% 발견 — Red Agent 변형 공격이 핵심 가치
+DB 저장: 734 records (session 9e1b083e)
+```
 
 ## 로컬 실행
 
 ```bash
 # 1. 환경 변수 설정
 cp .env.example .env
+
+# 1-1. 모델 준비
+ollama pull gemma4:e2b
+ollama pull gemma4:26b
 
 # 2. 컨테이너 기동
 docker-compose up -d
@@ -120,6 +181,8 @@ cd dashboard
 npm install
 npm run dev
 ```
+
+Red Agent의 런타임 공격 변형은 기본적으로 `OLLAMA_RED_MODEL=gemma4:26b`를 사용한다. 팀원이 26B를 로컬에 두지 않은 경우에는 `OLLAMA_MODEL=gemma4:e2b` 폴백 경로로 계속 개발/테스트할 수 있다.
 
 ### 처음부터 순서대로 (Windows · Docker 없이 · 백엔드+DB만)
 
