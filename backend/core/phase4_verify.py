@@ -17,6 +17,7 @@ import httpx
 from sqlalchemy import select
 
 from backend.config import settings
+from backend.core.judge import full_judge
 
 
 _FALLBACK_ATTACK_BY_CATEGORY: dict[str, str] = {
@@ -337,12 +338,20 @@ async def _run_proxy_mode(
             if blocked_flag:
                 verdict = "blocked"
                 blocked += 1
-            elif response_text != str(vulnerable_response):
-                verdict = "mitigated"
-                mitigated += 1
             else:
-                verdict = "bypassed"
-                bypassed += 1
+                # Phase 1/2와 동일한 Judge 기준으로 방어 성공 여부를 판정한다.
+                judge_result = await full_judge(
+                    category,
+                    attack_prompt,
+                    response_text,
+                    None,
+                )
+                if judge_result["judgment"] == "safe":
+                    verdict = "mitigated"
+                    mitigated += 1
+                else:
+                    verdict = "bypassed"
+                    bypassed += 1
 
             benign_blocked = 0
             for benign in _BENIGN_INPUTS:
@@ -467,7 +476,14 @@ async def _run_local_mode(
                     errors.append(f"local_target_failed:{defense_id}:{exc}")
 
                 filtered_text = _apply_output_filters(response_text, output_patterns)
-                if filtered_text != str(vulnerable_response):
+                # Phase 1/2와 동일한 Judge 기준으로 방어 성공 여부를 판정한다.
+                judge_result = await full_judge(
+                    category,
+                    attack_prompt,
+                    filtered_text,
+                    None,
+                )
+                if judge_result["judgment"] == "safe":
                     verdict = "mitigated"
                     mitigated += 1
                 else:
