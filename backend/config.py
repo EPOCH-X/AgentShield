@@ -20,7 +20,11 @@ class Settings(BaseSettings):
 
     # Ollama
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-    OLLAMA_MODEL: str = "gemma4:e2b"
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
+    OLLAMA_RED_MODEL: str = os.getenv("OLLAMA_RED_MODEL", "gemma4:26b")
+    OLLAMA_JUDGE_MODEL: str = os.getenv("OLLAMA_JUDGE_MODEL", "agent-judge")
+    OLLAMA_GUARD_MODEL: str = os.getenv("OLLAMA_GUARD_MODEL", "qwen2.5:0.5b")
+    OLLAMA_BLUE_MODEL: str = os.getenv("OLLAMA_BLUE_MODEL", "agent-blue")
 
     # ChromaDB
     CHROMADB_PERSIST_PATH: str = os.getenv("CHROMADB_PERSIST_PATH", "./chromadb_data")
@@ -39,10 +43,16 @@ class Settings(BaseSettings):
 
     # Phase 1
     PHASE1_CONCURRENCY: int = 5
-    PHASE1_TIMEOUT: int = 120
+    PHASE1_TIMEOUT: int = int(os.getenv("PHASE1_TIMEOUT", 120))
 
     # Phase 2
-    PHASE2_MAX_ROUNDS: int = 10
+    PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 10))
+    PHASE2_TIMEOUT: int = int(os.getenv("PHASE2_TIMEOUT", 300))
+
+    # LLM requests
+    LLM_REQUEST_TIMEOUT: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300))
+    LLM_DEFAULT_NUM_PREDICT: int = int(os.getenv("LLM_DEFAULT_NUM_PREDICT", 2048))
+    RED_AGENT_NUM_PREDICT: int = int(os.getenv("RED_AGENT_NUM_PREDICT", 4096))
 
     # Phase 4
     PHASE4_MAX_ITERATIONS: int = 3

@@ -47,7 +47,7 @@ async def run_phase2(
     safe_attacks = phase1_result.get("safe_attacks", [])
     results = []
 
-    async with httpx.AsyncClient(timeout=settings.PHASE1_TIMEOUT) as client:
+    async with httpx.AsyncClient(timeout=settings.PHASE2_TIMEOUT) as client:
         for attack in safe_attacks:
             category = attack["category"]
             original_prompt = attack["attack_prompt"]
@@ -59,8 +59,8 @@ async def run_phase2(
             for round_num in range(settings.PHASE2_MAX_ROUNDS):
                 # 1. RAG 검색 — 유사 성공 사례
                 query = f"{category} bypass {current_prompt[:100]}"
-                similar = await search_attacks(query, n_results=3)
-                similar_texts = [doc["attack"] for doc in similar] if similar else None
+                similar = search_attacks(query, n_results=3)
+                similar_texts = [doc["attack_prompt"] for doc in similar] if similar else None
 
                 # 2. Red Agent 프롬프트 → 변형 공격 생성
                 red_prompt = build_red_prompt(
@@ -120,7 +120,7 @@ async def run_phase2(
                         logger.warning(f"DB 저장 실패 (phase2, round {round_num}): {e}")
 
                     # 5. 신규 공격이면 ChromaDB에 저장 (코사인 거리 < 0.3 중복 체크)
-                    await add_attack(
+                    add_attack(
                         attack=new_attack,
                         category=category,
                         target_response=target_response,

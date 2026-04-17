@@ -46,6 +46,8 @@ CREATE TABLE test_results (
     session_id UUID REFERENCES test_sessions(id),
     phase INT NOT NULL,
     attack_pattern_id INT REFERENCES attack_patterns(id),
+    seed_id VARCHAR(36),
+    round INT,
     attack_prompt TEXT,
     target_response TEXT,
     judgment VARCHAR(20),
@@ -54,6 +56,8 @@ CREATE TABLE test_results (
     manual_review_needed BOOLEAN DEFAULT FALSE,
     severity VARCHAR(10),
     category VARCHAR(10),
+    subcategory VARCHAR(50),
+    detail TEXT,
     defense_code TEXT,
     defense_reviewed BOOLEAN DEFAULT FALSE,
     verify_result VARCHAR(20),
@@ -64,6 +68,8 @@ CREATE INDEX idx_attack_category ON attack_patterns(category);
 CREATE INDEX idx_results_session ON test_results(session_id);
 CREATE INDEX idx_results_phase ON test_results(phase);
 CREATE INDEX idx_results_review ON test_results(manual_review_needed);
+CREATE INDEX idx_results_seed ON test_results(seed_id);
+CREATE INDEX idx_results_judgment ON test_results(judgment);
 
 -- ── 기능 B ──
 
