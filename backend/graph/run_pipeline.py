@@ -27,7 +27,7 @@ from typing import Optional
 
 import httpx
 
-from backend.agents.red_agent import build_red_prompt, RED_AGENT_SYSTEM_PROMPT
+from backend.agents.red_agent import build_red_prompt, get_system_prompt, _is_abliterated_model, extract_techniques
 from backend.config import settings
 from backend.core.judge import full_judge
 from backend.core.phase1_scanner import run_phase1
@@ -162,8 +162,12 @@ TARGET_SYSTEM_PROMPT = _BASE_TARGET_PROMPT + build_tool_prompt_section()
 
 OLLAMA_BASE_URL = settings.OLLAMA_BASE_URL
 
-# Red Agent 모델 — 런타임 변형 생성용 (기본 26B, 없으면 e2b 사용)
+# Red Agent 모델 — 런타임 변형 생성용
 AGENT_MODEL = settings.OLLAMA_RED_MODEL
+# 모델에 따라 시스템 프롬프트 자동 선택 (abliterated → 공격 특화, 일반 → 우회 프레이밍)
+RED_AGENT_SYSTEM_PROMPT = get_system_prompt(AGENT_MODEL)
+# Red Agent 짧은 라벨 (로그/메타데이터용)
+_AGENT_LABEL = AGENT_MODEL.split("/")[-1].split(":")[0][:20]
 # 타겟 모델 — 보안 테스트 대상 (CLI --target 으로 변경 가능)
 TARGET_MODEL = settings.OLLAMA_MODEL
 
@@ -201,10 +205,10 @@ async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> tuple
         "think": False,
         "options": {
             "num_predict": settings.RED_AGENT_NUM_PREDICT,
-            "temperature": 1.0,
-            "top_p": 0.95,
-            "top_k": 64,
-            "repeat_penalty": 1.3,
+            "temperature": 0.85,
+            "top_p": 0.9,
+            "top_k": 50,
+            "repeat_penalty": 1.15,
         },
     }
     resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
@@ -220,7 +224,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
     """Phase 2: safe 결과에 대해 Red Agent 변형 공격 (최대 N 라운드)
 
     모든 라운드는 Red Agent LLM 변형으로 진행한다.
-    Red Agent 모델은 settings.OLLAMA_RED_MODEL(기본 26B)을 사용한다.
+    Red Agent 모델은 settings.OLLAMA_RED_MODEL을 사용한다.
     """
     # 성공 사례 시드 로드 (Cold Start Bootstrap)
     global _SUCCESS_SEEDS
@@ -237,6 +241,9 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
 
     results = []
 
+    # C: 크로스 카테고리 인텔리전스 — 카테고리별 성공 공격 요약 공유
+    cross_category_intel: dict[str, str] = {}
+
     for i, attack in enumerate(safe_attacks, 1):
         cat = attack["category"]
         subcat = attack.get("subcategory", "?")
@@ -244,7 +251,10 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         current_response = attack["target_response"]
 
         print(f"\n  [{i}/{len(safe_attacks)}] Red Agent: {cat}/{subcat}")
-        print(f"    원본: {current_prompt[:80]}...")
+        print(f"    원본: {current_prompt}")
+
+        # B: 라운드 간 사용된 기법 추적
+        used_techniques: list[str] = []
 
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
@@ -257,12 +267,19 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                 category=cat,
                 similar_cases=similar_cases,
                 round_num=rnd,
+                prev_techniques=used_techniques if used_techniques else None,
+                cross_category_intel=cross_category_intel if cross_category_intel else None,
             )
             try:
                 new_attack, raw_llm_response = await generate_mutation(client, red_prompt)
             except Exception as e:
                 print(f"    R{rnd}: ❌ Red Agent 실패: {e}")
                 break
+
+            # B: 생성된 공격에서 사용된 기법 추출 → 다음 라운드에서 차단
+            if new_attack:
+                round_techniques = extract_techniques(new_attack)
+                used_techniques.extend(round_techniques)
 
             if not new_attack:
                 print(f"    R{rnd}: ❌ 빈 변형 응답 — 타겟 전송 차단")
@@ -271,20 +288,22 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "seed_id": attack.get("seed_id", ""),
                     "category": cat,
                     "subcategory": subcat,
-                    "original_prompt": attack["attack_prompt"][:200],
+                    "original_prompt": attack["attack_prompt"],
                     "mutated_prompt": "",
                     "target_response": "[blocked: empty mutation]",
                     "judgment": "generation_failed",
                     "judge_layer": 0,
                     "round": rnd,
-                    "mutation_type": "llm:red-26b",
+                    "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": None,
                     "detail": "Red Agent returned empty mutation",
                     "red_agent_raw_response": raw_llm_response,
                 })
                 break
 
-            print(f"    R{rnd}: 26B LLM변형 → 타겟 전송...", end=" ", flush=True)
+            print(f"    R{rnd}: {_AGENT_LABEL} LLM변형 생성완료")
+            print(f"      🗡️ 공격: {new_attack}")
+            print(f"      → 타겟 전송...", end=" ", flush=True)
 
             # 2. 타겟 LLM에 전송
             try:
@@ -302,6 +321,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
 
             if verdict["judgment"] == "vulnerable":
                 print(f"🔴 vulnerable! (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
+                print(f"      🎯 응답: {target_response}")
                 _store_success_case(
                     category=cat,
                     attack_prompt=new_attack,
@@ -320,32 +340,40 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "seed_id": attack.get("seed_id", ""),
                     "category": cat,
                     "subcategory": subcat,
-                    "original_prompt": attack["attack_prompt"][:200],
+                    "original_prompt": attack["attack_prompt"],
                     "mutated_prompt": new_attack,
                     "target_response": target_response,
                     "judgment": "vulnerable",
                     "judge_layer": verdict["layer"],
                     "round": rnd,
-                    "mutation_type": "llm:red-26b",
+                    "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": verdict.get("severity"),
                     "detail": verdict.get("detail", ""),
                     "red_agent_raw_response": raw_llm_response,
                 })
+                # C: 성공 공격 정보를 다른 카테고리에 공유
+                techniques_used = extract_techniques(new_attack)
+                intel_summary = (
+                    f"R{rnd} bypass succeeded via {', '.join(techniques_used) if techniques_used else 'unknown technique'}. "
+                    f"Attack excerpt: {new_attack}"
+                )
+                cross_category_intel[cat] = intel_summary
                 break
             else:
                 print(f"🟢 {verdict['judgment']} (L{verdict['layer']}) [{elapsed:.1f}s]")
+                print(f"      🛡️ 응답: {target_response}")
                 results.append({
                     "phase": 2,
                     "seed_id": attack.get("seed_id", ""),
                     "category": cat,
                     "subcategory": subcat,
-                    "original_prompt": attack["attack_prompt"][:200],
+                    "original_prompt": attack["attack_prompt"],
                     "mutated_prompt": new_attack,
                     "target_response": target_response,
                     "judgment": verdict["judgment"],
                     "judge_layer": verdict["layer"],
                     "round": rnd,
-                    "mutation_type": "llm:red-26b",
+                    "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": None,
                     "detail": verdict.get("detail", ""),
                     "red_agent_raw_response": raw_llm_response,
