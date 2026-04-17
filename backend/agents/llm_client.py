@@ -28,9 +28,9 @@ class AgentShieldLLM:
         # 역할별 베이스 모델 (Ollama)
         self.ollama_base_models = {
             "base": os.getenv("OLLAMA_MODEL"),
-            "red": os.getenv("OLLAMA_MODEL"),
-            "blue": os.getenv("OLLAMA_MODEL"),  
-            "judge": os.getenv("OLLAMA_MODEL")
+            "red": os.getenv("OLLAMA_RED_MODEL", os.getenv("OLLAMA_MODEL")),
+            "blue": os.getenv("OLLAMA_BLUE_MODEL", os.getenv("OLLAMA_MODEL")),
+            "judge": os.getenv("OLLAMA_JUDGE_MODEL", os.getenv("OLLAMA_MODEL"))
         }
 
         # 역할별 베이스 모델 (Local PEFT)

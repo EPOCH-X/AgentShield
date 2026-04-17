@@ -78,6 +78,13 @@ LLM_Judge_분석_및_업계동향.md
 # ChromaDB
 chromadb_data/
 
+# GGUF 모델 파일 (대용량)
+models/
+*.gguf
+
+# harmful_behaviors raw (변환 전 원본)
+data/attack_patterns/harmful_behaviors_raw.json
+
 # Reports
 reports/*.pdf
 
