@@ -7,12 +7,25 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from pydantic import BaseModel
+import bcrypt
+from pydantic import BaseModel, EmailStr
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
+from backend.database import get_db
+from backend.models.user import User
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode(), hashed.encode())
 
 
 class TokenResponse(BaseModel):
@@ -23,6 +36,12 @@ class TokenResponse(BaseModel):
 class UserInfo(BaseModel):
     username: str
     role: str  # admin / auditor / user
+
+
+class RegisterRequest(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
 
 
 def create_access_token(data: dict) -> str:
@@ -56,13 +75,43 @@ async def get_current_admin(user: UserInfo = Depends(get_current_user)) -> UserI
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    # TODO: 실제 사용자 DB 검증으로 교체
-    # 현재는 개발용 하드코딩 (반드시 교체 필요)
-    if form_data.username == "admin" and form_data.password == "admin":
-        token = create_access_token({"sub": form_data.username, "role": "admin"})
-        return TokenResponse(access_token=token)
-    raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+async def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == form_data.username))
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(form_data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+
+    if user.status != "active":
+        raise HTTPException(status_code=403, detail="비활성화된 계정입니다")
+
+    user.last_login_at = datetime.utcnow()
+    await db.commit()
+
+    token = create_access_token({"sub": user.email, "role": "user"})
+    return TokenResponse(access_token=token)
+
+
+@router.post("/register", status_code=201)
+async def register(
+    body: RegisterRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(User).where(User.email == body.email))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="이미 사용 중인 이메일입니다")
+
+    new_user = User(
+        name=body.username,
+        email=body.email,
+        password_hash=hash_password(body.password),
+    )
+    db.add(new_user)
+    await db.commit()
+    return {"message": "회원가입이 완료되었습니다"}
 
 
 @router.get("/me", response_model=UserInfo)
