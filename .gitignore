@@ -70,8 +70,20 @@ adapters/lora-judge/*.safetensors
 adapters/lora-blue/*.bin
 adapters/lora-blue/*.safetensors
 
+# 분석·연구 문서 (개인 작업용, 커밋 불필요)
+gemma4_26b_baseline_분석.md
+LLM_Judge_분석_및_업계동향.md
+남은_과제_로드맵.md
+
 # ChromaDB
 chromadb_data/
+
+# GGUF 모델 파일 (대용량)
+models/
+*.gguf
+
+# harmful_behaviors raw (변환 전 원본)
+data/attack_patterns/harmful_behaviors_raw.json
 
 # Reports
 reports/*.pdf
