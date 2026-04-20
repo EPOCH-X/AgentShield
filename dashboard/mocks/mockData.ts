@@ -1,5 +1,5 @@
-// [R6] Mock 데이터 — 스캔 결과
-// 백엔드 미구현 시 프론트 독립 개발용
+// [R6] 레거시 샘플 (컴포넌트 단위 테스트용으로 남김)
+// 페이지 단위 오프라인 목은 `lib/devBackendMock.ts` + `app/api/[...path]/route.ts` 프록시 폴백을 사용합니다.
 
 export const mockScanResults = {
   session_id: "mock-session-001",

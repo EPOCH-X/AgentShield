@@ -1,8 +1,25 @@
--- AgentShield — 세부기획서 §6 DB 스키마 (기능 A + 기능 B)
 -- 빈 데이터베이스(예: agentshield)에 postgres 등 슈퍼유저 또는 DB 소유자로 접속한 뒤 한 번 실행합니다.
--- PostgreSQL 13+ 권장 (gen_random_uuid() 내장).
+-- UUID 생성: pgcrypto 확장(gen_random_uuid) 사용.
+
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ── 인증/회원 ──
+
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    last_login_at TIMESTAMP
+);
+
+CREATE INDEX idx_users_email ON users(email);
 
 -- ── 기능 A ──
+
 
 CREATE TABLE attack_patterns (
     id SERIAL PRIMARY KEY,
@@ -29,6 +46,8 @@ CREATE TABLE test_results (
     session_id UUID REFERENCES test_sessions(id),
     phase INT NOT NULL,
     attack_pattern_id INT REFERENCES attack_patterns(id),
+    seed_id VARCHAR(36),
+    round INT,
     attack_prompt TEXT,
     target_response TEXT,
     judgment VARCHAR(20),
@@ -37,6 +56,8 @@ CREATE TABLE test_results (
     manual_review_needed BOOLEAN DEFAULT FALSE,
     severity VARCHAR(10),
     category VARCHAR(10),
+    subcategory VARCHAR(50),
+    detail TEXT,
     defense_code TEXT,
     defense_reviewed BOOLEAN DEFAULT FALSE,
     verify_result VARCHAR(20),
@@ -47,6 +68,8 @@ CREATE INDEX idx_attack_category ON attack_patterns(category);
 CREATE INDEX idx_results_session ON test_results(session_id);
 CREATE INDEX idx_results_phase ON test_results(phase);
 CREATE INDEX idx_results_review ON test_results(manual_review_needed);
+CREATE INDEX idx_results_seed ON test_results(seed_id);
+CREATE INDEX idx_results_judgment ON test_results(judgment);
 
 -- ── 기능 B ──
 

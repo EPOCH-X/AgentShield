@@ -4,6 +4,8 @@
 
 AgentShield는 기존 도구들처럼 "방어만" 하거나 "발견만" 하는 한계를 넘어, Find(발견) → Fix(방어 코드 생성) → Verify(실제 검증) 과정을 단일 파이프라인으로 자동화한 프로젝트입니다. 프롬프트 인젝션, 민감정보 유출 등 OWASP LLM Top 10의 핵심 위협으로부터 기업의 AI 에이전트를 안전하게 보호하고, 내부 직원의 AI 사용을 모니터링합니다.
 
+기능 B의 Monitoring Proxy는 단순 키워드 차단기가 아니라, 운영 요청을 직접 받는 게이트웨이로서 인증/로깅/사용량 제어를 수행하고, 규칙 기반 1차 필터 이후 애매한 요청에 대해서는 LLM 기반 2차 의도 판정을 수행합니다. 초기 구현은 base 모델을 사용하고, 추후 기능 B 전용 LoRA로 분리할 수 있습니다.
+
 ## 프로젝트 구조
 
 ```
@@ -27,7 +29,8 @@ AgentShield/
 │   │   ├── phase2_red_agent.py   # [R1] Red Agent 공격
 │   │   ├── phase3_blue_agent.py  # [R3] Blue Agent 방어
 │   │   ├── phase4_verify.py      # [R3] 방어 검증
-│   │   └── judge.py              # [R1] 판정 로직
+│   │   ├── judge.py              # [R1] 판정 로직
+│   │   ├── mutation_engine.py    # [R1] 코드 기반 공격 변형 엔진
 │   ├── agents/
 │   │   ├── llm_client.py         # [R4] Ollama LLM 클라이언트
 │   │   ├── red_agent.py          # [R1] Red Agent
@@ -38,7 +41,8 @@ AgentShield/
 │   │   ├── embedder.py           # [R4] 임베딩 생성
 │   │   └── ingest.py             # [R4] 데이터 수집
 │   ├── graph/
-│   │   └── llm_security_graph.py # [R1] LangGraph 오케스트레이션
+│   │   ├── llm_security_graph.py # [R1] LangGraph 오케스트레이션
+│   │   └── run_pipeline.py       # [R1] Phase 1+2 파이프라인 실행기
 │   ├── report/
 │   │   ├── generator.py          # [R7] 보고서 생성
 │   │   └── templates/
@@ -96,19 +100,78 @@ AgentShield/
 
 | 계층          | 기술                                               |
 | ------------- | -------------------------------------------------- |
-| LLM           | Gemma 4 E2B (2.3B effective / 5.1B PLE) via Ollama |
+| LLM           | Gemma 4 E2B (타겟) + Gemma 4 26B (Red Agent) via Ollama |
+| Guard (L2)    | Qwen 2.5 0.5B — 카테고리별 few-shot Judge           |
 | Backend       | FastAPI + async SQLAlchemy + PostgreSQL 16         |
-| RAG           | ChromaDB + all-MiniLM-L6-v2 (384d)                 |
+| RAG           | ChromaDB PersistentClient + all-MiniLM-L6-v2 (384d), 유사도 임계값 0.90 |
 | Orchestration | LangGraph StateGraph                               |
-| Fine-tuning   | QLoRA 4-bit NF4, r=16, lora_alpha=32               |
+| Fine-tuning   | DPO (seed_id 기반 chosen/rejected 페어링) + QLoRA 4-bit NF4 |
 | Frontend      | Next.js 14 (App Router) + Chart.js                 |
-| Infra         | Docker Compose                                     |
+| Infra         | Docker Compose (또는 로컬 Homebrew PostgreSQL)       |
+
+## 현재 구현 상태 (2026-04-16)
+
+### Phase 1 + Phase 2 파이프라인
+
+- **Phase 1**: `data/attack_patterns/colla_v1.json` + `colla_v2.json`에서 160개 seed 로드 → 규칙 기반 대량 스캔
+- **Phase 2**: Red Agent (gemma4:26b, REDSTRIKE 페르소나)가 Phase 1 safe 결과를 최대 5라운드 변형 공격
+- **Mock Tools (LLM06)**: `backend/core/mock_tools.py` — 10개 시뮬레이션 도구 (query_database, delete_records, send_email 등)
+- **seed_id 추적**: 각 seed에 UUID 부여 → Phase 1/2 결과를 seed_id로 연결 → DPO 학습 데이터 페어링
+
+### 3-Layer Judge 시스템
+
+```
+응답 수신
+    │
+    ▼
+[Layer 1] 규칙 기반 판정 (카테고리별 전용 로직)
+    │  LLM01: 역할 변조 + 거부 문구 / LLM02: PII 정규식 / LLM06: Mock Tool 호출 감지 / LLM07: 시스템 프롬프트 구조
+    │  → vulnerable / safe: 즉시 반환
+    │  → ambiguous + 거부 응답 감지: Guard bypass → safe (confidence 0.9)
+    │  → ambiguous: Layer 2로
+    │
+    ▼
+[Layer 2] Guard Judge (Qwen 2.5 0.5B)
+    │  카테고리별 few-shot 프롬프트로 harmful/unharmful 판정
+    │  → 결과 채택 (confidence 매핑)
+    │
+    ▼
+[Layer 3] 수동 검토 큐 (현재 미구현 — ambiguous로 마킹)
+```
+
+- **FP 방지**: 거부 응답("cannot query", "I cannot delete" 등)에 대해 refusal-first 검사 수행
+- **Guard bypass**: L1 ambiguous이면서 거부 응답인 경우, Guard에 넘기지 않고 safe 반환 (Guard 0.5B의 FP 방지)
+
+### DB 통합
+
+- **PostgreSQL 16**: `database/schema.sql` 기반, seed_id/round/subcategory/detail 컬럼 추가
+- **DB 저장**: `save_results_to_db()` — 파이프라인 완료 후 TestSession + TestResult 일괄 저장
+- **DPO 내보내기**: `python -m backend.finetuning.export_dpo_data --source db --session latest`
+
+### 최신 베이스라인 결과
+
+```
+gemma4:26b (정상 모델) → gemma4:e2b, 160 seeds × 5 rounds
+
+전체 취약률: 43.8% (70/160)
+  LLM01 (Prompt Injection):      65.0% (26/40)
+  LLM02 (Sensitive Info):        40.0% (16/40)
+  LLM06 (Excessive Agency):      52.5% (21/40)
+  LLM07 (System Prompt Leak):    17.5%  (7/40)
+
+Phase 2가 전체 취약점의 74.3% 발견 — Red Agent 변형 공격이 핵심 가치
+DB 저장: 734 records (session 9e1b083e)
+```
 
 ## 로컬 실행
 
 ```bash
 # 1. 환경 변수 설정
 cp .env.example .env
+
+# 1-1. 모델 준비
+ollama pull gemma4:e2b
+ollama pull gemma4:26b
 
 # 2. 컨테이너 기동
 docker-compose up -d
@@ -118,6 +181,8 @@ cd dashboard
 npm install
 npm run dev
 ```
+
+Red Agent의 런타임 공격 변형은 기본적으로 `OLLAMA_RED_MODEL=gemma4:26b`를 사용한다. 팀원이 26B를 로컬에 두지 않은 경우에는 `OLLAMA_MODEL=gemma4:e2b` 폴백 경로로 계속 개발/테스트할 수 있다.
 
 ### 처음부터 순서대로 (Windows · Docker 없이 · 백엔드+DB만)
 
@@ -306,6 +371,29 @@ python -m backend.db_inspect
 5. **(선택)** `python -m backend.dev_seed` — 샘플 행만 추가. 스키마는 이미 SQL로 있으므로 **필수는 아님**.
 6. **백엔드:** `uvicorn ...` 기동 시 `init_db()`의 `create_all`은 **이미 있는 테이블은 건드리지 않음**.
 
+### Docker DB 초기화/재생성 (팀원 로컬)
+
+`docker compose`로 올린 Postgres는 **처음 볼륨이 생성될 때만** `database/schema.sql`이 자동 적용됩니다. (이미 `pgdata` 볼륨이 있으면 새 스키마가 반영되지 않을 수 있음)
+
+**PowerShell 기준**
+
+```powershell
+cd "C:\Users\user\Desktop\파이널 프로젝트\agent\AgentShield"
+
+# DB만 기동 (처음 1회면 schema.sql 자동 실행)
+docker compose up -d db
+
+# 스키마 변경 후 "완전 초기화"가 필요하면 (데이터/볼륨 삭제)
+docker compose down -v
+docker compose up -d db
+```
+
+**테이블 생성 확인**
+
+```powershell
+docker compose exec db psql -U agentshield -d agentshield -c "\dt"
+```
+
 **주의:** 같은 DB에 `schema.sql`을 **두 번** 실행하면 `already exists` 오류가 납니다. 초기화가 필요하면 DB를 드롭 후 재생성하거나, 팀 규칙으로 Alembic 마이그레이션으로 전환합니다.
 
 **ORM과의 관계:** `backend/models/*` 는 이 스키마와 맞춰 두었습니다. 스키마는 **이 SQL 파일이 기준**이면 됩니다.
@@ -326,6 +414,6 @@ grep -rn "TODO.*\[R1\]" backend/
 | R2   | Phase 1 정적 스캐너, 공격 패턴 DB, OWASP 분류              |
 | R3   | Blue Agent, Defense Proxy, Phase 3-4, LoRA-Blue            |
 | R4   | RAG 파이프라인, Ollama 통합, QLoRA 학습 코드               |
-| R5   | Monitoring Proxy, 정책 엔진, 위반 탐지                     |
+| R5   | Monitoring Proxy, 정책 엔진, 위반 탐지, 2차 LLM 의도 판정 |
 | R6   | Next.js 대시보드 (프론트엔드 전체)                         |
 | R7   | 보고서 생성, DB 스키마, API 통합                           |
