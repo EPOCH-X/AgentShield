@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
 import { startScan } from "../../lib/api";
 
@@ -40,15 +41,23 @@ export default function ScanPage() {
   }, []);
 
   function toggleVector(id: string) {
-    setSelectedVectors((prev) =>
-      prev.includes(id) ? prev.filter((v) => v !== id) : [...prev, id]
-    );
+    setSelectedVectors((prev) => {
+      if (prev.includes(id)) {
+        if (prev.length <= 1) return prev;
+        return prev.filter((v) => v !== id);
+      }
+      return [...prev, id];
+    });
   }
 
   async function handleStartScan(e: React.FormEvent) {
     e.preventDefault();
     if (!targetUrl.trim() || !projectName.trim()) {
       setError("프로젝트 이름과 대상 URL을 입력해 주세요.");
+      return;
+    }
+    if (selectedVectors.length === 0) {
+      setError("공격 벡터는 최소 1개 이상 선택해 주세요.");
       return;
     }
     setError("");
@@ -104,6 +113,15 @@ export default function ScanPage() {
             </h2>
             <p className="text-on-surface-variant/80 text-sm">
               심층적인 적대적 테스트를 위한 모델 엔드포인트를 구성하십시오.
+            </p>
+            <p className="text-[11px] text-outline">
+              <Link
+                href="/overview"
+                className="text-primary/90 hover:text-primary font-bold underline-offset-2 hover:underline"
+              >
+                플랫폼 개요
+              </Link>
+              에서 기능 A·B와 공유 컴포넌트 관계를 확인할 수 있습니다.
             </p>
           </div>
 
@@ -161,16 +179,18 @@ export default function ScanPage() {
                   <div className="grid grid-cols-2 gap-3">
                     {ATTACK_VECTORS.map((v) => {
                       const active = selectedVectors.includes(v.id);
+                      const onlyOne = active && selectedVectors.length === 1;
                       return (
                         <button
                           key={v.id}
                           type="button"
+                          title={onlyOne ? "최소 1개 벡터가 필요합니다" : undefined}
                           onClick={() => toggleVector(v.id)}
                           className={`p-4 rounded-2xl flex flex-col items-start gap-3 transition-all ${
                             active
                               ? "bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20"
                               : "bg-white/3 border border-white/10 text-on-surface-variant hover:text-on-surface hover:border-primary/30"
-                          }`}
+                          } ${onlyOne ? "ring-1 ring-primary/20" : ""}`}
                         >
                           <span
                             className="material-symbols-outlined text-2xl"
@@ -187,6 +207,10 @@ export default function ScanPage() {
                       );
                     })}
                   </div>
+                  <p className="text-[10px] text-on-surface-variant/70 leading-relaxed">
+                    현재 스캔 API는 URL·프로젝트명만 받습니다. 벡터 선택은 UI 정렬용이며, 백엔드에 옵션으로
+                    붙는 즉시 같은 요청에 반영할 수 있게 준비된 상태입니다.
+                  </p>
                 </div>
               </div>
 
@@ -201,7 +225,7 @@ export default function ScanPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-5 rounded-[1.25rem] bg-gradient-to-r from-primary via-[#57FF35] to-primary-container text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(57,255,20,0.3)] hover:shadow-[0_15px_40px_rgba(57,255,20,0.45)] hover:-translate-y-0.5 transition-all active:scale-[0.98] neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-5 rounded-[1.25rem] bg-gradient-to-r from-primary-container via-primary to-[#FF3535] text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(230,32,36,0.35)] hover:shadow-[0_15px_40px_rgba(230,32,36,0.5)] hover:-translate-y-0.5 transition-all active:scale-[0.98] neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? (
                   <span className="flex items-center justify-center gap-2">
