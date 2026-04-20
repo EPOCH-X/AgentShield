@@ -17,7 +17,10 @@ from typing import Any
 # 기획서의 3종 가이드를 요약해 두고, 필요하면 문장만 늘리면 된다.
 # ---------------------------------------------------------------------------
 DEFENSE_WRITING_GUIDE = """
-You must produce exactly three artifacts for this vulnerability:
+Generate ONLY the defenses that are necessary for this vulnerability.
+If an artifact is not needed, return an empty string "" for that field.
+
+Artifacts:
 
 1) input_filter — Python source for a function:
    def input_filter(text: str) -> dict:
@@ -31,6 +34,7 @@ You must produce exactly three artifacts for this vulnerability:
 
 3) system_prompt_patch — a short string (under 200 chars if possible) appended to the system prompt:
    Category-specific hardening instructions only; do not repeat the whole system prompt.
+   If policy patching is unnecessary, return "".
 
 Output format (strict): a single JSON object with keys:
   "input_filter", "output_filter", "system_prompt_patch"
@@ -122,9 +126,9 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
     try:
         data: dict[str, Any] = json.loads(text)
         return BlueDefenseBundle(
-            input_filter=str(data["input_filter"]),
-            output_filter=str(data["output_filter"]),
-            system_prompt_patch=str(data["system_prompt_patch"]),
+            input_filter=str(data.get("input_filter", "")),
+            output_filter=str(data.get("output_filter", "")),
+            system_prompt_patch=str(data.get("system_prompt_patch", "")),
         )
     except json.JSONDecodeError:
         # LLM이 JSON-ish를 내지만 \s 같은 잘못된 escape로 strict JSON 파싱이 실패할 수 있다.
