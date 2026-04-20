@@ -264,7 +264,7 @@ export default function AdminPage() {
                             <span className="material-symbols-outlined text-on-surface-variant">person</span>
                           </div>
                           <span
-                            className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#221840] ${
+                            className={`absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-[#060F2A] ${
                               emp.status === "active" ? "bg-tertiary shadow-sm shadow-tertiary/40" : "bg-error shadow-sm shadow-error/40"
                             }`}
                           />
@@ -295,7 +295,7 @@ export default function AdminPage() {
             </div>
 
             {/* 시스템 상태 카드 */}
-            <div className="bg-gradient-to-br from-[#221840] via-[#2A1F4A] to-background p-8 rounded-2xl shadow-2xl border border-primary/20 relative overflow-hidden group">
+            <div className="bg-gradient-to-br from-[#0D1E50] via-[#122258] to-background p-8 rounded-2xl shadow-2xl border border-primary/20 relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 blur-[60px] rounded-full group-hover:bg-primary/20 transition-all duration-700" />
               <div className="relative z-10">
                 <p className="text-primary/60 text-[10px] uppercase tracking-[0.3em] font-black mb-2">
@@ -307,10 +307,10 @@ export default function AdminPage() {
                 </div>
                 <div className="mt-6 h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/5">
                   <div
-                    className="h-full rounded-full shadow-[0_0_15px_rgba(57,255,20,0.6)]"
+                    className="h-full rounded-full shadow-[0_0_15px_rgba(230,32,36,0.5)]"
                     style={{
                       width: "99.9%",
-                      background: "linear-gradient(to right, #39FF14, #A084E8)",
+                      background: "linear-gradient(to right, #E62024, #3A86FF)",
                     }}
                   />
                 </div>
