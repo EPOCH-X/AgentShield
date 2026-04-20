@@ -9,6 +9,7 @@ import time
 import httpx
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -17,6 +18,13 @@ from .prompts import get_system_prompt
 from .tool_router import execute_tool
 
 app = FastAPI(title="AgentShield Testbed Chatbot")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # ── 스키마 ────────────────────────────────────────────────────────────────────
 
@@ -94,8 +102,8 @@ async def chat(req: ChatRequest):
             })
 
             messages.append({
-                "role": "tool",
-                "content": json.dumps(result, ensure_ascii=False),
+                "role": "user",
+                "content": f"[Tool result for {name}]: {json.dumps(result, ensure_ascii=False)}",
             })
     else:
         final_content = strip_tool_calls(raw)
