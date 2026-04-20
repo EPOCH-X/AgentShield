@@ -33,7 +33,6 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   function isActive(href: string): boolean {
     if (href === "/scan") return pathname === "/scan" || pathname.startsWith("/scan/");
     if (href === "/overview") return pathname === "/overview";
-    // /monitoring 과 /monitoring/admin 은 부모-자식 경로라 startsWith 를 쓰면 둘 다 켜짐 → 구분 필요
     if (href === "/monitoring") return pathname === "/monitoring";
     if (href === "/monitoring/admin") {
       return pathname === "/monitoring/admin" || pathname.startsWith("/monitoring/admin/");
@@ -44,18 +43,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   return (
     <div className="min-h-screen bg-background text-on-surface">
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#0E0819] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
+      <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#060F2A] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
         <div className="p-8 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center shadow-lg shadow-primary/20 neon-glow-primary">
-            <span
-              className="material-symbols-outlined text-on-primary-container font-bold text-xl"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              security
-            </span>
-          </div>
+          {/* Logo Image */}
+          <img
+            src="/logo.png"
+            alt="AgentShield"
+            className="w-10 h-10 object-contain neon-glow-primary"
+          />
           <div>
-            <h1 className="text-xl font-extrabold tracking-tighter text-[#39FF14]">
+            <h1 className="text-xl font-extrabold tracking-tighter text-[#E62024]">
               AgentShield
             </h1>
             <p className="text-[9px] uppercase tracking-[0.3em] text-on-surface-variant/70 font-bold">
@@ -73,7 +70,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
                   active
-                    ? "text-primary bg-primary/10 border border-primary/20 font-bold shadow-[0_0_15px_rgba(57,255,20,0.08)]"
+                    ? "text-primary bg-primary/10 border border-primary/20 font-bold shadow-[0_0_15px_rgba(230,32,36,0.1)]"
                     : "text-on-surface-variant hover:bg-surface-container hover:text-white group"
                 }`}
               >
@@ -123,7 +120,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-tertiary/5 border border-tertiary/10">
-              <span className="w-1.5 h-1.5 rounded-full bg-tertiary shadow-[0_0_8px_rgba(57,255,20,0.7)] animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-tertiary shadow-[0_0_8px_rgba(58,134,255,0.7)] animate-pulse" />
               <span className="text-[10px] font-bold text-tertiary tracking-[0.15em] uppercase">
                 SYSTEM SECURE
               </span>
