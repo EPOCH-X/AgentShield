@@ -64,6 +64,9 @@ export default function LoginPage() {
             <p className="text-sm text-on-surface-variant mt-1">
               인증된 사용자만 접근 가능합니다.
             </p>
+            <p className="text-[10px] text-outline mt-2 leading-relaxed">
+              FastAPI가 꺼져 있을 때는 목업 로그인(아이디·비밀번호 한 글자 이상)으로 콘솔을 열 수 있습니다.
+            </p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-5">

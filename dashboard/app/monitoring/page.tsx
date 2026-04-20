@@ -1,12 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
 import {
   getMonitoringDashboard,
   getViolations,
   Violation,
 } from "../../lib/api";
+
+/** 현재 페이지를 중심으로 최대 `max`개의 페이지 번호만 표시 */
+function visiblePageNumbers(current: number, total: number, max = 5): number[] {
+  if (total <= 0) return [];
+  if (total <= max) return Array.from({ length: total }, (_, i) => i + 1);
+  const half = Math.floor(max / 2);
+  let start = current - half;
+  if (start < 1) start = 1;
+  let end = start + max - 1;
+  if (end > total) {
+    end = total;
+    start = Math.max(1, end - max + 1);
+  }
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i);
+}
 
 const SEVERITY_CONFIG: Record<string, { cls: string; label: string; dotCls: string }> = {
   critical: {
@@ -48,30 +64,35 @@ export default function MonitoringPage() {
   } | null>(null);
   const [violations, setViolations] = useState<Violation[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
   const [deptFilter, setDeptFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 10;
 
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      try {
-        const [dash, viols] = await Promise.all([
-          getMonitoringDashboard(),
-          getViolations(),
-        ]);
-        setDashboard(dash);
-        setViolations(viols);
-      } catch {
-        // 에러 무시 (auth 에러는 api.ts에서 처리)
-      } finally {
-        setLoading(false);
-      }
+  const loadDashboard = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const [dash, viols] = await Promise.all([
+        getMonitoringDashboard(),
+        getViolations(),
+      ]);
+      setDashboard(dash);
+      setViolations(viols);
+    } catch {
+      setLoadError(true);
+      setDashboard(null);
+      setViolations([]);
+    } finally {
+      setLoading(false);
     }
-    load();
   }, []);
+
+  useEffect(() => {
+    loadDashboard();
+  }, [loadDashboard]);
 
   async function applyFilters() {
     try {
@@ -89,7 +110,12 @@ export default function MonitoringPage() {
   function resetFilters() {
     setDeptFilter("");
     setTypeFilter("");
-    getViolations().then(setViolations).catch(() => {});
+    getViolations()
+      .then((v) => {
+        setViolations(v);
+        setLoadError(false);
+      })
+      .catch(() => setLoadError(true));
     setPage(1);
   }
 
@@ -127,6 +153,16 @@ export default function MonitoringPage() {
             <p className="text-on-surface-variant max-w-xl">
               직원 AI 사용 현황을 실시간으로 감시하고 정책 위반을 탐지합니다.
             </p>
+            <p className="text-[11px] text-outline pt-1">
+              정책 규칙 편집은{" "}
+              <Link
+                href="/monitoring/admin"
+                className="text-primary/90 hover:text-primary font-bold underline-offset-2 hover:underline"
+              >
+                관리자
+              </Link>
+              화면에서 할 수 있습니다.
+            </p>
           </div>
           <div className="bg-surface-container-high/40 px-5 py-2.5 rounded-xl border border-white/10 backdrop-blur-sm">
             <span className="text-[10px] block font-black text-outline tracking-widest uppercase mb-0.5">
@@ -139,9 +175,32 @@ export default function MonitoringPage() {
           </div>
         </div>
 
+        {loadError && (
+          <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-error/30 bg-error/10 px-5 py-4">
+            <p className="text-sm text-error font-medium">
+              대시보드 데이터를 불러오지 못했습니다. 네트워크·백엔드 상태를 확인한 뒤 다시 시도해 주세요.
+            </p>
+            <button
+              type="button"
+              onClick={() => loadDashboard()}
+              className="shrink-0 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-wider bg-on-surface text-background hover:opacity-90 transition-opacity"
+            >
+              다시 시도
+            </button>
+          </div>
+        )}
+
         {/* 통계 카드 */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-5">
           {[
+            {
+              icon: "bar_chart",
+              label: "오늘 AI 요청",
+              value: loading ? "—" : (dashboard?.daily_requests ?? 0).toLocaleString(),
+              sub: "DAILY REQUESTS",
+              hoverCls: "hover:border-tertiary/20",
+              valueCls: "text-tertiary",
+            },
             {
               icon: "warning",
               label: "총 위반 건수",
@@ -355,7 +414,7 @@ export default function MonitoringPage() {
               >
                 <span className="material-symbols-outlined text-sm">chevron_left</span>
               </button>
-              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map((p) => (
+              {visiblePageNumbers(page, totalPages, 5).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPage(p)}

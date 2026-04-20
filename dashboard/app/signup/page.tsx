@@ -109,6 +109,9 @@ export default function SignupPage() {
                 <p className="text-sm text-on-surface-variant mt-1">
                   AgentShield 보안 콘솔 접근 권한을 신청합니다.
                 </p>
+                <p className="text-[10px] text-outline mt-2 leading-relaxed">
+                  백엔드가 없으면 비밀번호 8자 이상만 맞으면 목업 가입 성공 응답이 옵니다.
+                </p>
               </div>
 
               <form onSubmit={handleSignup} className="space-y-5">
