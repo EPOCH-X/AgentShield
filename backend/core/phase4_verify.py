@@ -161,6 +161,19 @@ def _apply_output_filters(text: str, patterns: list[str]) -> str:
     return result
 
 
+def _ollama_chat_message_content(response_json: dict[str, Any], fallback: str) -> str:
+    """Ollama /api/chat 응답에서 assistant 본문 추출."""
+    msg = response_json.get("message")
+    if isinstance(msg, dict):
+        c = msg.get("content")
+        if c is not None:
+            return str(c)
+    c2 = response_json.get("content")
+    if c2 is not None:
+        return str(c2)
+    return fallback
+
+
 def _register_defense_patterns_via_ingest(
     *,
     session_id: str,
@@ -183,9 +196,11 @@ def _register_defense_patterns_via_ingest(
         if defense_id not in accepted_ids:
             continue
         try:
+            # Chroma 컬렉션 내 id는 유일해야 하므로 session_id를 접두로 붙여 충돌을 방지한다.
+            chroma_id = f"phase4:{session_id}:{defense_id}"
             export_rows.append(
                 {
-                    "id": defense_id,
+                    "id": chroma_id,
                     "category": str(payload.get("category") or "Unknown"),
                     "title": f"phase4_defense_{defense_id}",
                     "explanation": "Defense verified in phase4.",
@@ -470,7 +485,7 @@ async def _run_local_mode(
                     resp = await client.post(target_url, json={"messages": messages})
                     resp.raise_for_status()
                     response_json = resp.json()
-                    response_text = str(response_json.get("content", resp.text))
+                    response_text = _ollama_chat_message_content(response_json, resp.text)
                 except Exception as exc:
                     response_text = str(vulnerable_response)
                     errors.append(f"local_target_failed:{defense_id}:{exc}")
