@@ -208,11 +208,11 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
           <div className="md:col-span-5 p-8 rounded-[2rem] glass-panel flex flex-col items-center justify-center gap-6 relative overflow-hidden">
             <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-primary/5 rounded-full blur-2xl" />
             <div className="relative w-40 h-40">
-              <svg className="w-full h-full -rotate-90 drop-shadow-[0_0_15px_rgba(57,255,20,0.35)]" viewBox="0 0 36 36">
+              <svg className="w-full h-full -rotate-90 drop-shadow-[0_0_15px_rgba(230,32,36,0.4)]" viewBox="0 0 36 36">
                 <defs>
                   <linearGradient id="progGrad" x1="0%" x2="100%" y1="0%" y2="0%">
-                    <stop offset="0%" stopColor="#39FF14" />
-                    <stop offset="100%" stopColor="#1DA800" />
+                    <stop offset="0%" stopColor="#E62024" />
+                    <stop offset="100%" stopColor="#3A86FF" />
                   </linearGradient>
                 </defs>
                 <circle className="stroke-surface-container-highest" cx="18" cy="18" fill="none" r="16" strokeWidth="2.5" />
