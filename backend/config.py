@@ -3,10 +3,14 @@
 """
 
 import os
-from pydantic_settings import BaseSettings
+
+from dotenv import load_dotenv
 
 
-class Settings(BaseSettings):
+load_dotenv()
+
+
+class AppSettings:
     # PostgreSQL
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
@@ -16,7 +20,7 @@ class Settings(BaseSettings):
     # JWT
     JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
     JWT_ALGORITHM: str = "HS256"
-    JWT_EXPIRE_MINUTES: int = 60 * 24  # 24시간
+    JWT_EXPIRE_MINUTES: int = 60 * 24
 
     # Ollama
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -25,11 +29,28 @@ class Settings(BaseSettings):
     OLLAMA_JUDGE_MODEL: str = os.getenv("OLLAMA_JUDGE_MODEL", "agent-judge")
     OLLAMA_GUARD_MODEL: str = os.getenv("OLLAMA_GUARD_MODEL", "qwen3.5:4b")
     OLLAMA_BLUE_MODEL: str = os.getenv("OLLAMA_BLUE_MODEL", "agent-blue")
+    OLLAMA_BASE_TARGET_MODEL: str = os.getenv(
+        "OLLAMA_BASE_TARGET_MODEL",
+        os.getenv("OLLAMA_MODEL", "gemma4:e2b"),
+    )
+    OLLAMA_RED_TARGET_MODEL: str = os.getenv(
+        "OLLAMA_RED_TARGET_MODEL",
+        "agentshield-red",
+    )
+    OLLAMA_JUDGE_TARGET_MODEL: str = os.getenv(
+        "OLLAMA_JUDGE_TARGET_MODEL",
+        "agentshield-judge",
+    )
+    OLLAMA_BLUE_TARGET_MODEL: str = os.getenv(
+        "OLLAMA_BLUE_TARGET_MODEL",
+        "agentshield-blue",
+    )
 
     # ChromaDB
     CHROMADB_PERSIST_PATH: str = os.getenv("CHROMADB_PERSIST_PATH", "./chromadb_data")
     CHROMADB_HOST: str = os.getenv("CHROMADB_HOST", "localhost")
     CHROMADB_PORT: int = int(os.getenv("CHROMADB_PORT", 8003))
+    RED_RAG_REFERENCE_LIMIT: int = int(os.getenv("RED_RAG_REFERENCE_LIMIT", 8))
 
     # Defense Proxy
     DEFENSE_PROXY_URL: str = os.getenv(
@@ -64,8 +85,5 @@ class Settings(BaseSettings):
     LORA_JUDGE_PATH: str = os.getenv("LORA_JUDGE_PATH", "./adapters/lora-judge")
     LORA_BLUE_PATH: str = os.getenv("LORA_BLUE_PATH", "./adapters/lora-blue")
 
-    class Config:
-        env_file = ".env"
 
-
-settings = Settings()
+settings = AppSettings()
