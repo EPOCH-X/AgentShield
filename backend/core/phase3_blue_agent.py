@@ -106,13 +106,20 @@ async def run_phase3(
     4) llm.generate(role='blue')
     5) 파싱 후 defense JSON 저장
     """
-    from backend.agents.llm_client import llm_client
+    from backend.agents.llm_client import AgentShieldLLM
     from backend.rag.chromadb_client import rag_client
+    from backend.database import async_session
+    from backend.models.test_result import TestResult
+
+    llm = AgentShieldLLM()
 
     generated = 0  # 방어 JSON 생성 성공 개수
     failed = 0  # 생성 실패 개수
     json_files: list[str] = []  # 생성된 JSON 파일의 상대 경로 목록
     failed_ids: list[str] = []  # 실패한 test_result_id 목록
+    source_vulnerabilities: list[dict[str, Any]] = []  # Phase4 검증용 원본 취약점 스냅샷
+    db_updated = 0  # test_results 업데이트 성공 건수
+    db_update_failed_ids: list[str] = []  # test_results 업데이트 실패 ID
 
     project_root = Path(__file__).resolve().parents[2]  # 프로젝트 루트 경로
     defense_out_dir = _phase3_defense_json_dir(project_root, session_id)  # 세션별 출력 디렉터리
@@ -154,7 +161,7 @@ async def run_phase3(
 
         try:
             # Blue 모델의 응답은 구조화(JSON)로 강제하고, 파싱 실패 시 해당 건만 실패 처리
-            raw = await _maybe_await(llm_client.generate(prompt, role="blue"))
+            raw = await _maybe_await(llm.generate(prompt, role="blue"))
             bundle = parse_blue_response(raw)
             written = _write_defense_json_file(
                 defense_out_dir,
@@ -166,6 +173,32 @@ async def run_phase3(
                 bundle=bundle,
             )
             json_files.append(str(written.relative_to(project_root)))
+
+            # R3 요구: 생성된 방어 코드를 test_results에 반영 (검수 전 상태)
+            try:
+                async with async_session() as db:
+                    row_id = int(defense_id)
+                    row = await db.get(TestResult, row_id)
+
+                    if row:
+                        row.defense_code = bundle.to_json_str()
+                        row.defense_reviewed = False
+                        await db.commit()
+                        db_updated += 1
+                    else:
+                        db_update_failed_ids.append(defense_id)
+            except Exception:
+                db_update_failed_ids.append(defense_id)
+
+            source_vulnerabilities.append(
+                {
+                    "defense_id": defense_id,
+                    "category": category,
+                    "attack_prompt": attack_prompt,
+                    "target_response": target_response,
+                    "severity": vuln.get("severity"),
+                }
+            )
             generated += 1
         except Exception:
             # 한 건 실패가 전체 실패로 이어지지 않도록 누적 후 다음 건 계속 처리.
@@ -182,6 +215,9 @@ async def run_phase3(
         "failed_test_result_ids": failed_ids,
         "defense_json_dir": str(defense_out_dir.relative_to(project_root)),
         "defense_json_files": json_files,
+        "source_vulnerabilities": source_vulnerabilities,
+        "db_updated": db_updated,
+        "db_update_failed_ids": db_update_failed_ids,
         "owasp_recommendation_source": (
             "data/owasp_guide.json"
             if (project_root / "data" / "owasp_guide.json").exists()

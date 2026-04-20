@@ -39,17 +39,31 @@ class ChromaRAGClient:
 
         self.embed_fn = MiniLMEmbeddingFunction()
 
-        # 컬렉션 초기화
-        self.defense_col = self.client.get_or_create_collection(
+        # 컬렉션 초기화 — 기존 컬렉션이 default embedding으로 생성된 경우
+        # embedding_function 충돌 방지: 기존 컬렉션 삭제 후 재생성
+        for col_name in ("defense_patterns", "attack_results"):
+            try:
+                self.client.get_or_create_collection(
+                    name=col_name,
+                    embedding_function=self.embed_fn,
+                    metadata={"hnsw:space": "cosine"},
+                )
+            except ValueError:
+                # Embedding function conflict — 기존 컬렉션이 다른 embedding으로 생성됨
+                self.client.delete_collection(col_name)
+                self.client.get_or_create_collection(
+                    name=col_name,
+                    embedding_function=self.embed_fn,
+                    metadata={"hnsw:space": "cosine"},
+                )
+
+        self.defense_col = self.client.get_collection(
             name="defense_patterns",
             embedding_function=self.embed_fn,
-            metadata={"hnsw:space": "cosine"}
         )
-
-        self.attack_col = self.client.get_or_create_collection(
+        self.attack_col = self.client.get_collection(
             name="attack_results",
             embedding_function=self.embed_fn,
-            metadata={"hnsw:space": "cosine"}
         )
     
     def search_defense(self, query: str, n_results: int = 3):
