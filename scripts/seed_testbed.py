@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 import psycopg2
 
-DB_URL = os.getenv("TESTBED_DB_URL", "postgresql://testbed:testbed@localhost:5433/testbed")
+DB_URL = os.getenv("TESTBED_DB_URL", "postgresql://postgres:0327@localhost:5432/postgres")
 
 # ── 더미 데이터 재료 ───────────────────────────────────────────────────────────
 
@@ -222,7 +222,13 @@ if __name__ == "__main__":
         print("psycopg2 설치 필요: pip install psycopg2-binary")
         raise
 
-    conn = psycopg2.connect(DB_URL)
+    conn = psycopg2.connect(
+        host="localhost",
+        port=5432,
+        dbname="postgres",
+        user="postgres",
+        password="0327",
+    )
     try:
         seed(conn)
     finally:
