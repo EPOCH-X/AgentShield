@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     # Ollama
     OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
-    OLLAMA_RED_MODEL: str = os.getenv("OLLAMA_RED_MODEL", "qwen2.5:32b")  # gemma4:26b / qwen2.5:32b
+    OLLAMA_RED_MODEL: str = os.getenv("OLLAMA_RED_MODEL", "gemma4-ara-abliterated")
     OLLAMA_JUDGE_MODEL: str = os.getenv("OLLAMA_JUDGE_MODEL", "agent-judge")
-    OLLAMA_GUARD_MODEL: str = os.getenv("OLLAMA_GUARD_MODEL", "qwen2.5:0.5b")
+    OLLAMA_GUARD_MODEL: str = os.getenv("OLLAMA_GUARD_MODEL", "qwen3.5:4b")
     OLLAMA_BLUE_MODEL: str = os.getenv("OLLAMA_BLUE_MODEL", "agent-blue")
 
     # ChromaDB
