@@ -6,11 +6,13 @@ from __future__ import annotations
 
 import inspect
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from backend.agents.blue_agent import BlueDefenseBundle, build_blue_prompt, parse_blue_response
 
+logger = logging.getLogger(__name__)
 
 # OWASP 카테고리별 권고문 기본값.
 # data/owasp_guide.json이 없거나 파싱 실패하면 이 매핑을 사용한다.
@@ -117,6 +119,7 @@ async def run_phase3(
     failed = 0  # 생성 실패 개수
     json_files: list[str] = []  # 생성된 JSON 파일의 상대 경로 목록
     failed_ids: list[str] = []  # 실패한 test_result_id 목록
+    failed_details: list[dict[str, str]] = []  # 실패 건별 요약 (리뷰/스크립트에서 바로 확인)
     source_vulnerabilities: list[dict[str, Any]] = []  # Phase4 검증용 원본 취약점 스냅샷
     db_updated = 0  # test_results 업데이트 성공 건수
     db_update_failed_ids: list[str] = []  # test_results 업데이트 실패 ID
@@ -200,10 +203,18 @@ async def run_phase3(
                 }
             )
             generated += 1
-        except Exception:
+        except Exception as e:
             # 한 건 실패가 전체 실패로 이어지지 않도록 누적 후 다음 건 계속 처리.
+            logger.exception(
+                "Phase3 방어 생성 실패 (defense_id=%s, category=%s)",
+                defense_id,
+                category or "?",
+            )
             failed += 1
             failed_ids.append(defense_id)
+            failed_details.append(
+                {"defense_id": defense_id, "category": category or "", "error": str(e)}
+            )
             continue
 
     # ---- Phase3 요약 결과 반환 ----
@@ -213,6 +224,7 @@ async def run_phase3(
         "defenses_generated": generated,
         "failed": failed,
         "failed_test_result_ids": failed_ids,
+        "failed_details": failed_details,
         "defense_json_dir": str(defense_out_dir.relative_to(project_root)),
         "defense_json_files": json_files,
         "source_vulnerabilities": source_vulnerabilities,
