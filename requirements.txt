@@ -30,3 +30,6 @@ pdfkit>=1.0.0
 
 # ── paht route ──
 pyprojroot>=0.0.0
+
+# ── Testbed ──
+psycopg2-binary>=2.9.0

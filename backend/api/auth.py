@@ -79,7 +79,7 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(select(User).where(User.email == form_data.username))
+    result = await db.execute(select(User).where(User.name == form_data.username))
     user = result.scalar_one_or_none()
 
     if not user or not verify_password(form_data.password, user.password_hash):
@@ -91,7 +91,7 @@ async def login(
     user.last_login_at = datetime.utcnow()
     await db.commit()
 
-    token = create_access_token({"sub": user.email, "role": "user"})
+    token = create_access_token({"sub": user.name, "role": "user"})
     return TokenResponse(access_token=token)
 
 
