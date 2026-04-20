@@ -21,7 +21,7 @@ Phase 2 로직: 이 스크립트 (Red Agent 변형 생성 + Judge 판정)
 import argparse
 import asyncio
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 import json
@@ -29,11 +29,27 @@ from typing import Optional
 
 import httpx
 
-from backend.agents.red_agent import build_red_prompt, get_system_prompt, _is_abliterated_model, extract_techniques
+from backend.agents.red_agent import analyze_defense_signal, build_red_prompt, get_system_prompt, _is_abliterated_model, extract_techniques, normalize_attack_prompt_output, select_target_failure_mode, validate_attack_prompt_output
 from backend.config import settings
-from backend.core.judge import full_judge
+from backend.core.judge import full_judge, _has_refusal, _has_meta_analysis
 from backend.core.phase1_scanner import run_phase1
-from backend.rag.chromadb_client import add_attack, get_rag_status, search_attacks
+from backend.core.security_schema import list_supported_categories
+
+
+def _truncate(text: str, max_len: int = 200) -> str:
+    """로그 출력용 텍스트 말줄임. 저장에는 영향 없음."""
+    text = text.replace("\n", " ").strip()
+    if len(text) <= max_len:
+        return text
+    return text[:max_len] + "..."
+from backend.rag.chromadb_client import add_attack, get_rag_client, get_rag_status, search_attacks
+
+
+def _get_attack_rag_count() -> Optional[int]:
+    try:
+        return get_rag_client().attack_col.count()
+    except Exception:
+        return None
 
 
 # ── 성공 사례 시드 로더 ─────────────────────────────────────────
@@ -74,7 +90,7 @@ def _load_success_seeds() -> dict[str, list[str]]:
 _SUCCESS_SEEDS: dict[str, list[str]] = {}
 
 
-def _load_dynamic_attack_refs(category: str, attack_prompt: str, limit: int = 3) -> list[str]:
+def _load_dynamic_attack_refs(category: str, attack_prompt: str, limit: int = 4) -> list[dict]:
     """ChromaDB에서 카테고리별 유사 성공 공격을 불러온다."""
     query = f"{category} {attack_prompt[:300]}"
     results = search_attacks(query=query, n_results=limit)
@@ -84,21 +100,156 @@ def _load_dynamic_attack_refs(category: str, attack_prompt: str, limit: int = 3)
         metadata = item.get("metadata", {})
         if metadata.get("category") and metadata.get("category") != category:
             continue
-        refs.append(item.get("attack_prompt", ""))
-    return [ref for ref in refs if ref]
+        prompt = item.get("attack_prompt", "")
+        if not prompt:
+            continue
+        refs.append({
+            "attack_prompt": prompt,
+            "metadata": {
+                **metadata,
+                "similarity": item.get("similarity"),
+                "source": metadata.get("source", "rag"),
+            },
+            "techniques": metadata.get("techniques") or extract_techniques(prompt),
+        })
+    return refs
 
 
-def _merge_similar_cases(static_cases: Optional[list[str]], dynamic_cases: list[str]) -> Optional[list[str]]:
+async def _load_historical_failure_intel(category: str, limit: int = 6) -> list[dict]:
+    """최근 차단 사례를 읽어 Red Agent가 같은 실패를 반복하지 않게 한다."""
+    try:
+        from sqlalchemy import desc, select
+
+        from backend.database import async_session
+        from backend.models.test_result import TestResult
+    except Exception:
+        return []
+
+    try:
+        async with async_session() as db:
+            stmt = (
+                select(
+                    TestResult.subcategory,
+                    TestResult.target_response,
+                    TestResult.detail,
+                    TestResult.judgment,
+                )
+                .where(
+                    TestResult.category == category,
+                    TestResult.judgment.in_(("safe", "ambiguous", "generation_failed")),
+                )
+                .order_by(desc(TestResult.created_at))
+                .limit(limit)
+            )
+            rows = (await db.execute(stmt)).all()
+    except Exception:
+        return []
+
+    intel = []
+    for row in rows:
+        signal = analyze_defense_signal(row.target_response or "", row.detail or "")
+        intel.append({
+            "subcategory": row.subcategory,
+            "judgment": row.judgment,
+            "label": signal["label"],
+            "guidance": signal["guidance"],
+            "evidence": signal["evidence"],
+        })
+    return intel
+
+
+async def _load_category_attack_profile(category: str, limit: int = 240) -> dict:
+    """카테고리별 누적 성공/실패 특징을 요약한다."""
+    try:
+        from sqlalchemy import desc, select
+
+        from backend.database import async_session
+        from backend.models.test_result import TestResult
+    except Exception:
+        return {}
+
+    try:
+        async with async_session() as db:
+            stmt = (
+                select(TestResult.attack_prompt, TestResult.target_response, TestResult.judgment)
+                .where(TestResult.category == category)
+                .order_by(desc(TestResult.created_at))
+                .limit(limit)
+            )
+            rows = (await db.execute(stmt)).all()
+    except Exception:
+        return {}
+
+    technique_counter: Counter[str] = Counter()
+    blocked_modes: Counter[str] = Counter()
+    vulnerable_count = 0
+    blocked_count = 0
+
+    for row in rows:
+        if row.judgment == "vulnerable":
+            vulnerable_count += 1
+            technique_counter.update(extract_techniques(row.attack_prompt or ""))
+        elif row.judgment in {"safe", "ambiguous", "generation_failed"}:
+            blocked_count += 1
+            blocked_modes.update([analyze_defense_signal(row.target_response or "")["label"]])
+
+    return {
+        "vulnerable_count": vulnerable_count,
+        "blocked_count": blocked_count,
+        "top_techniques": [name for name, _ in technique_counter.most_common(4)],
+        "top_blocked_modes": [name for name, _ in blocked_modes.most_common(3)],
+    }
+
+
+def _merge_similar_cases(static_cases: Optional[list[str]], dynamic_cases: list[dict]) -> Optional[list[dict]]:
     """정적 시드와 동적 RAG 검색 결과를 합쳐 Red Agent reference로 전달한다."""
-    merged = []
-    for case in (static_cases or []) + dynamic_cases:
-        if case and case not in merged:
+    merged: list[dict] = []
+    seen_prompts = set()
+    for case in static_cases or []:
+        if case and case not in seen_prompts:
+            seen_prompts.add(case)
+            merged.append({
+                "attack_prompt": case,
+                "metadata": {"source": "seed"},
+                "techniques": extract_techniques(case),
+            })
+    for case in dynamic_cases:
+        prompt = case.get("attack_prompt", "")
+        if prompt and prompt not in seen_prompts:
+            seen_prompts.add(prompt)
             merged.append(case)
     return merged or None
 
 
+def _check_fp_flag(target_response: str) -> Optional[str]:
+    """vulnerable 판정된 응답에 refusal/meta-analysis 신호가 있으면 FP 플래그 반환.
+
+    Returns:
+        '⚠️ FP_SUSPECT: ...' 문자열 또는 None
+    """
+    signals = []
+    if _has_refusal(target_response):
+        signals.append("refusal_detected")
+    if _has_meta_analysis(target_response):
+        signals.append("meta_analysis_detected")
+    if signals:
+        return f"⚠️ FP_SUSPECT: {'+'.join(signals)}"
+    return None
+
+
 def _store_success_case(category: str, attack_prompt: str, target_response: str, metadata: dict) -> bool:
-    """성공 공격을 ChromaDB attack_results 컬렉션에 저장한다."""
+    """성공 공격을 ChromaDB attack_results 컬렉션에 저장한다.
+
+    FP 의심 플래그가 있으면 ChromaDB 저장을 **보류**하여 오염을 방지한다.
+    결과 JSON에는 fp_flag와 함께 기록되므로 나중에 수동 확인 후 적재 가능.
+    """
+    # FP 의심 체크 → 있으면 ChromaDB 저장 차단
+    fp_flag = _check_fp_flag(target_response)
+    if fp_flag:
+        metadata["fp_flag"] = fp_flag
+        print(f"      ⏸️ ChromaDB 저장 보류 ({fp_flag})")
+        return False
+
     return add_attack(
         attack_prompt=attack_prompt,
         metadata={
@@ -245,6 +396,8 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
 
     # C: 크로스 카테고리 인텔리전스 — 카테고리별 성공 공격 요약 공유
     cross_category_intel: dict[str, str] = {}
+    category_profiles: dict[str, dict] = {}
+    category_failure_intel: dict[str, list[dict]] = {}
 
     for i, attack in enumerate(safe_attacks, 1):
         cat = attack["category"]
@@ -252,25 +405,37 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         current_prompt = attack["attack_prompt"]
         current_response = attack["target_response"]
 
+        if cat not in category_profiles:
+            category_profiles[cat] = await _load_category_attack_profile(cat)
+        if cat not in category_failure_intel:
+            category_failure_intel[cat] = await _load_historical_failure_intel(cat)
+
         print(f"\n  [{i}/{len(safe_attacks)}] Red Agent: {cat}/{subcat}")
-        print(f"    원본: {current_prompt}")
+        print(f"    원본: {_truncate(current_prompt, 150)}")
 
         # B: 라운드 간 사용된 기법 추적
         used_techniques: list[str] = []
+        used_failure_modes: list[str] = []
 
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
             dynamic_refs = _load_dynamic_attack_refs(cat, current_prompt)
             similar_cases = _merge_similar_cases(_SUCCESS_SEEDS.get(cat), dynamic_refs)
+            target_failure_mode = select_target_failure_mode(cat, rnd, prev_failure_modes=used_failure_modes)
 
             red_prompt = build_red_prompt(
                 attack_prompt=current_prompt,
                 target_response=current_response,
                 category=cat,
-                similar_cases=similar_cases,
+                similar_cases=None,
                 round_num=rnd,
                 prev_techniques=used_techniques if used_techniques else None,
                 cross_category_intel=cross_category_intel if cross_category_intel else None,
+                successful_attack_refs=similar_cases,
+                failure_intel=category_failure_intel.get(cat),
+                category_attack_profile=category_profiles.get(cat),
+                target_failure_mode=target_failure_mode,
+                judge_detail=attack.get("detail", ""),
             )
             try:
                 new_attack, raw_llm_response = await generate_mutation(client, red_prompt)
@@ -278,10 +443,36 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                 print(f"    R{rnd}: ❌ Red Agent 실패: {e}")
                 break
 
+            new_attack = normalize_attack_prompt_output(new_attack)
+
+            is_valid_attack, invalid_reason = validate_attack_prompt_output(new_attack)
+            if not is_valid_attack:
+                print(f"    R{rnd}: ❌ Red Agent 출력 차단: {invalid_reason}")
+                results.append({
+                    "phase": 2,
+                    "seed_id": attack.get("seed_id", ""),
+                    "category": cat,
+                    "subcategory": subcat,
+                    "original_prompt": attack["attack_prompt"],
+                    "mutated_prompt": new_attack,
+                    "target_response": "[blocked: invalid red-agent output]",
+                    "judgment": "generation_failed",
+                    "judge_layer": 0,
+                    "round": rnd,
+                    "mutation_type": f"llm:{_AGENT_LABEL}",
+                    "severity": None,
+                    "detail": f"Red Agent output rejected: {invalid_reason}",
+                    "target_failure_mode": target_failure_mode,
+                    "red_agent_raw_response": raw_llm_response,
+                })
+                break
+
             # B: 생성된 공격에서 사용된 기법 추출 → 다음 라운드에서 차단
             if new_attack:
                 round_techniques = extract_techniques(new_attack)
                 used_techniques.extend(round_techniques)
+                if target_failure_mode:
+                    used_failure_modes.append(target_failure_mode)
 
             if not new_attack:
                 print(f"    R{rnd}: ❌ 빈 변형 응답 — 타겟 전송 차단")
@@ -299,12 +490,13 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": None,
                     "detail": "Red Agent returned empty mutation",
+                    "target_failure_mode": target_failure_mode,
                     "red_agent_raw_response": raw_llm_response,
                 })
                 break
 
             print(f"    R{rnd}: {_AGENT_LABEL} LLM변형 생성완료")
-            print(f"      🗡️ 공격: {new_attack}")
+            print(f"      🗡️ 공격: {_truncate(new_attack, 200)}")
             print(f"      → 타겟 전송...", end=" ", flush=True)
 
             # 2. 타겟 LLM에 전송
@@ -322,8 +514,13 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
             elapsed = time.time() - t0
 
             if verdict["judgment"] == "vulnerable":
-                print(f"🔴 vulnerable! (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
-                print(f"      🎯 응답: {target_response}")
+                current_techniques = extract_techniques(new_attack)
+                fp_flag = _check_fp_flag(target_response)
+                if fp_flag:
+                    print(f"🟡 vulnerable BUT {fp_flag} (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
+                else:
+                    print(f"🔴 vulnerable! (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
+                print(f"      🎯 응답: {_truncate(target_response, 200)}")
                 _store_success_case(
                     category=cat,
                     attack_prompt=new_attack,
@@ -335,6 +532,9 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                         "round": rnd,
                         "judge_layer": verdict["layer"],
                         "seed_id": attack.get("seed_id", ""),
+                        "techniques": current_techniques,
+                        "failure_mode": verdict.get("failure_mode") or target_failure_mode,
+                        "root_cause_label": verdict.get("root_cause_label"),
                     },
                 )
                 results.append({
@@ -351,19 +551,24 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": verdict.get("severity"),
                     "detail": verdict.get("detail", ""),
+                    "target_failure_mode": target_failure_mode,
+                    "failure_mode": verdict.get("failure_mode") or target_failure_mode,
+                    "root_cause_label": verdict.get("root_cause_label"),
+                    "leak_origin": verdict.get("leak_origin"),
+                    "fp_flag": fp_flag,
                     "red_agent_raw_response": raw_llm_response,
                 })
                 # C: 성공 공격 정보를 다른 카테고리에 공유
-                techniques_used = extract_techniques(new_attack)
+                techniques_used = current_techniques
                 intel_summary = (
                     f"R{rnd} bypass succeeded via {', '.join(techniques_used) if techniques_used else 'unknown technique'}. "
-                    f"Attack excerpt: {new_attack}"
+                    f"failure_mode={verdict.get('failure_mode') or target_failure_mode}. Attack excerpt: {new_attack}"
                 )
                 cross_category_intel[cat] = intel_summary
                 break
             else:
                 print(f"🟢 {verdict['judgment']} (L{verdict['layer']}) [{elapsed:.1f}s]")
-                print(f"      🛡️ 응답: {target_response}")
+                print(f"      🛡️ 응답: {_truncate(target_response, 200)}")
                 results.append({
                     "phase": 2,
                     "seed_id": attack.get("seed_id", ""),
@@ -378,6 +583,10 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": None,
                     "detail": verdict.get("detail", ""),
+                    "target_failure_mode": target_failure_mode,
+                    "failure_mode": verdict.get("failure_mode") or target_failure_mode,
+                    "root_cause_label": verdict.get("root_cause_label"),
+                    "leak_origin": verdict.get("leak_origin"),
                     "red_agent_raw_response": raw_llm_response,
                 })
                 current_prompt = new_attack
@@ -428,12 +637,19 @@ def print_summary(p1, p2, elapsed):
     print(f"  {'전체':<10} {p1v:<10} {p1s:<10} {p1e:<8} {p2v:<10} {overall}")
     if p1e:
         print(f"  ⚠  Error {p1e}건은 취약률 계산에서 제외 (타겟 응답 실패)")
+
+    # FP suspect 카운트
+    fp_suspects = [r for r in p2 if r.get("fp_flag")]
+    if fp_suspects:
+        print(f"  ⚠  FP 의심 {len(fp_suspects)}건 (vulnerable 판정이나 refusal/meta-analysis 감지 → ChromaDB 미적재)")
+        for fp in fp_suspects:
+            print(f"      - {fp['category']}/{fp.get('subcategory','?')} R{fp['round']}: {fp['fp_flag']}")
     print(f"\n  ⏱  소요시간: {elapsed:.1f}s")
 
     return {"p1_vuln": p1v, "p1_safe": p1s, "p1_error": p1e, "p2_vuln": p2v}
 
 
-def save_results(p1, p2, summary, elapsed, args):
+def save_results(p1, p2, summary, elapsed, args, rag_stats: Optional[dict] = None):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = Path(__file__).resolve().parent.parent.parent / "results" / f"pipeline_{ts}.json"
     out.parent.mkdir(exist_ok=True)
@@ -465,6 +681,12 @@ def save_results(p1, p2, summary, elapsed, args):
     with open(out, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"\n  결과 저장: {out}")
+    if rag_stats and rag_stats.get("after") is not None:
+        delta = rag_stats.get("delta")
+        if delta is not None:
+            print(f"  🧠 VectorDB 저장: 이번 런 신규 {delta}건, 총 {rag_stats['after']}건")
+        else:
+            print(f"  🧠 VectorDB 총 저장: {rag_stats['after']}건")
 
 
 async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline") -> int:
@@ -637,6 +859,8 @@ async def async_main(args):
 
     t0 = time.time()
     p2 = []
+    rag_count_before = _get_attack_rag_count()
+    p1_rag_stored = 0
 
     if args.phase2_only:
         # ── Phase 1 결과를 이전 JSON에서 로드 ──
@@ -693,7 +917,14 @@ async def async_main(args):
 
     elapsed = time.time() - t0
     summary = print_summary(p1, p2, elapsed)
-    save_results(p1, p2, summary, elapsed, args)
+    rag_count_after = _get_attack_rag_count()
+    rag_stats = {
+        "before": rag_count_before,
+        "after": rag_count_after,
+        "delta": (rag_count_after - rag_count_before) if rag_count_before is not None and rag_count_after is not None else None,
+        "phase1_stored": p1_rag_stored,
+    }
+    save_results(p1, p2, summary, elapsed, args, rag_stats=rag_stats)
 
     # DB 저장 (PostgreSQL 연결 시에만, 실패해도 JSON은 이미 저장됨)
     await save_results_to_db(p1, p2, session_name=f"pipeline-{args.category or 'all'}")
@@ -710,7 +941,7 @@ def main():
   python -m backend.graph.run_pipeline --phase2-only -c LLM01  # Phase 2만, LLM01만  python -m backend.graph.run_pipeline                         # 전체 80건
 """,
     )
-    parser.add_argument("-c", "--category", help="카테고리 필터 (LLM01/02/06/07)")
+    parser.add_argument("-c", "--category", help=f"카테고리 필터 ({'/'.join(list_supported_categories())})")
     parser.add_argument("-m", "--max-attacks", type=int, default=0, help="최대 공격 수 (0=전체)")
     parser.add_argument("-r", "--rounds", type=int, default=5, help="Phase 2 최대 라운드 (기본 5)")
     parser.add_argument("-t", "--target", default=None, help="타겟 모델 (기본: gemma4:e2b)")
