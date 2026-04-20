@@ -22,7 +22,10 @@ _pool: asyncpg.Pool | None = None
 async def lifespan(app: FastAPI):
     global _pool
     try:
-        _pool = await asyncpg.create_pool(config.TESTBED_DB_URL, min_size=2, max_size=10)
+        _pool = await asyncpg.create_pool(
+            host="localhost", port=5432, database="postgres",
+            user="postgres", password="0327", min_size=2, max_size=10
+        )
     except Exception as e:
         print(f"[tool_gateway] DB 연결 실패 (stub 모드로 동작): {e}")
         _pool = None
