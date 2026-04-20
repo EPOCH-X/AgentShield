@@ -82,6 +82,11 @@ class ChromaRAGClient:
     
     def add_attack(self, attack_prompt: str, metadata: dict) -> bool:
         """Phase 2: 공격 성공 시 호출. 중복 체크 후 저장"""
+        seed_id = metadata.get("seed_id")
+        if seed_id and (self.attack_col.get(where={"seed_id": seed_id}).get("ids") or []):
+            print(f"동일 seed_id 공격 패턴 존재 ({seed_id}). 저장을 생략합니다.")
+            return False
+
         # 가장 비슷한 공격 1개 검색
         results = self.search_attacks(query=attack_prompt, n_results=1)
         
@@ -218,6 +223,56 @@ class _RAGClientProxy:
     def __getattr__(self, name: str):
         client = get_rag_client()
         return getattr(client, name)
+
+
+# ── ChromaDB 오염 정리 유틸리티 ──────────────────────────────────
+
+def audit_attack_results(dry_run: bool = True) -> dict:
+    """attack_results 컬렉션에서 FP 의심 데이터를 감사한다.
+
+    저장된 각 공격의 target_response를 refusal/meta-analysis 패턴으로 재검증.
+    dry_run=True면 목록만 반환, False면 실제 삭제.
+
+    Returns:
+        {"total": int, "suspects": [...], "deleted": int}
+    """
+    from backend.core.judge import _has_refusal, _has_meta_analysis
+
+    client = get_rag_client()
+    all_data = client.attack_col.get(include=["metadatas", "documents"])
+    ids = all_data.get("ids", [])
+    metadatas = all_data.get("metadatas", [])
+    documents = all_data.get("documents", [])
+
+    suspects = []
+    for i, doc_id in enumerate(ids):
+        meta = metadatas[i] if i < len(metadatas) else {}
+        doc = documents[i] if i < len(documents) else ""
+        resp = meta.get("target_response", "")
+
+        signals = []
+        if _has_refusal(resp):
+            signals.append("refusal")
+        if _has_meta_analysis(resp):
+            signals.append("meta_analysis")
+
+        if signals:
+            suspects.append({
+                "id": doc_id,
+                "category": meta.get("category", "?"),
+                "source": meta.get("source", "?"),
+                "signals": signals,
+                "attack_excerpt": doc[:100] if doc else "",
+                "response_excerpt": resp[:100] if resp else "",
+            })
+
+    deleted = 0
+    if not dry_run and suspects:
+        delete_ids = [s["id"] for s in suspects]
+        client.attack_col.delete(ids=delete_ids)
+        deleted = len(delete_ids)
+
+    return {"total": len(ids), "suspects": suspects, "deleted": deleted}
 
 
 rag_client = _RAGClientProxy()

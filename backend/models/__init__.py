@@ -1,3 +1,4 @@
+from backend.models.user import User
 from backend.models.attack_pattern import AttackPattern
 from backend.models.test_session import TestSession
 from backend.models.test_result import TestResult
@@ -7,6 +8,7 @@ from backend.models.violation import Violation
 from backend.models.policy_rule import PolicyRule
 
 __all__ = [
+    "User",
     "AttackPattern",
     "TestSession",
     "TestResult",
