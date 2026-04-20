@@ -3,13 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "clean": "node scripts/clean-next.cjs",
+    "dev": "next dev --turbo",
+    "dev:webpack": "next dev",
+    "dev:fresh": "npm run clean && next dev --turbo",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
-    "next": "14.2.0",
+    "next": "14.2.35",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "react-chartjs-2": "^5.2.0",
