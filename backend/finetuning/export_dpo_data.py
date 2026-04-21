@@ -224,7 +224,7 @@ def main():
         epilog="""예시:
   python -m backend.finetuning.export_dpo_data --source json
   python -m backend.finetuning.export_dpo_data --source json --file results/pipeline_20260416_145238.json
-  python -m backend.finetuning.export_dpo_data --source db --session latest
+    python -m backend.finetuning.export_dpo_data --source db --session latest
 """,
     )
     parser.add_argument("--source", choices=["db", "json"], default="json", help="데이터 소스 (기본: json)")

@@ -1,13 +1,4 @@
-"""
-[R4] 파인튜닝 — 학습 데이터 준비
-
-세부기획서 섹션 2-3 참조.
-LoRA-Red (~500건), LoRA-Judge (~2,000건), LoRA-Blue (~1,500건)
-"""
-
-# TODO: [R4] 구현
-# - 데이터 소스별 로드 + 필터 + 변환
-# - JSONL 형식 출력
+from __future__ import annotations
 
 import asyncio
 import json
@@ -24,16 +15,20 @@ sys.path.append(project_root)
 
 from backend.agents.red_agent import analyze_defense_signal, extract_techniques
 from backend.config import settings
-from backend.rag.chromadb_client import rag_client
+from backend.data_cleaning.cleaning_rules import (
+    VALID_TRAINING_JUDGMENTS,
+    split_clean_records,
+    summarize_exclusion_reasons,
+)
 
-# 저장 경로: data/finetuning/
-FINETUNING_DIR = os.path.join(project_root, "data", "finetuning")
-os.makedirs(FINETUNING_DIR, exist_ok=True)
+OUTPUT_DIR = os.path.join(project_root, "data", "finetuning", "cleaned")
+os.makedirs(OUTPUT_DIR, exist_ok=True)
+
 
 def _write_jsonl(output_path: str, dataset: list[dict]) -> None:
-    with open(output_path, "w", encoding="utf-8") as f:
+    with open(output_path, "w", encoding="utf-8") as file_obj:
         for item in dataset:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
+            file_obj.write(json.dumps(item, ensure_ascii=False) + "\n")
 
 
 async def _fetch_test_results(conn) -> list:
@@ -52,8 +47,7 @@ async def _fetch_test_results(conn) -> list:
             detail,
             created_at
         FROM test_results
-        WHERE attack_prompt IS NOT NULL
-                    AND judgment IN ('safe', 'vulnerable', 'ambiguous', 'generation_failed')
+        WHERE judgment IS NOT NULL
         ORDER BY created_at ASC
     """
     return await conn.fetch(query)
@@ -121,23 +115,19 @@ def _build_red_preference_pair(chosen_row: dict, rejected_row: Optional[dict]) -
     }
 
 
-# [Red Agent]
-async def prepare_red_dataset(rows: list[dict]):
-    print("Red Agent 데이터 추출")
-
+def _build_red_datasets(rows: list[dict]) -> tuple[list[dict], list[dict]]:
     blocked_by_seed: dict[str, list[dict]] = defaultdict(list)
     blocked_by_category: dict[str, list[dict]] = defaultdict(list)
     successful_rows: list[dict] = []
     technique_counter: dict[str, Counter] = defaultdict(Counter)
 
-    for raw_row in rows:
-        row = dict(raw_row)
+    for row in rows:
         judgment = row.get("judgment")
         category = row.get("category") or "LLM01"
         if judgment == "vulnerable":
             successful_rows.append(row)
             technique_counter[category].update(extract_techniques(row.get("attack_prompt") or ""))
-        else:
+        elif judgment == "safe":
             seed_id = row.get("seed_id") or ""
             if seed_id:
                 blocked_by_seed[seed_id].append(row)
@@ -157,53 +147,12 @@ async def prepare_red_dataset(rows: list[dict]):
         if preference_pair:
             red_preferences.append(preference_pair)
 
-    output_path = os.path.join(FINETUNING_DIR, "red_train.jsonl")
-    pref_output_path = os.path.join(FINETUNING_DIR, "red_preference_train.jsonl")
-    _write_jsonl(output_path, red_dataset)
-    _write_jsonl(pref_output_path, red_preferences)
-    print(f"Red 데이터 완료: {len(red_dataset)}건 -> {output_path}")
-    print(f"Red preference 완료: {len(red_preferences)}건 -> {pref_output_path}")
+    return red_dataset, red_preferences
 
-# [Blue Agent]
-def prepare_blue_dataset():
-    print("Blue Agent 데이터 추출")
-    try:
-        # ChromaDB에서 방어 패턴 가져오기
-        results = rag_client.defense_col.get()
-        count = len(results['documents'])
 
-        if count == 0:
-            print("ChromaDB가 비어있습니다. ingest.py를 먼저 실행하세요.")
-            return
-
-        dataset = []
-        count = len(results['documents'])
-        for i in range(count):
-            meta = results['metadatas'][i]
-            dataset.append({
-                "instruction": f"Create a Python defense function for: {meta['category']} - {meta['title']}",
-                "input": results['documents'][i],
-                "output": f"```python\n{meta['defense_code']}\n```"
-            })
-
-        repeat_factor = (1500 // count) + 1
-        final_dataset = (dataset * repeat_factor)[:1500]
-
-        output_path = os.path.join(FINETUNING_DIR, "blue_train.jsonl")
-        with open(output_path, "w", encoding="utf-8") as f:
-            for item in final_dataset[:1500]:
-                f.write(json.dumps(item, ensure_ascii=False) + "\n")
-        
-        print(f"Blue 데이터 완료: {len(final_dataset[:1500])}건 -> {output_path}")
-    except Exception as e:
-        print(f"Blue 데이터 추출 실패: {e}")
-
-# [Judge Agent]
-def prepare_judge_dataset(rows: list[dict]):
-    print("Judge Agent 데이터 구성")
+def _build_judge_dataset(rows: list[dict]) -> list[dict]:
     dataset = []
-    for raw_row in rows:
-        row = dict(raw_row)
+    for row in rows:
         signal = analyze_defense_signal(row.get("target_response") or "", row.get("detail") or "")
         layer = row.get("judgment_layer")
         manual_review = row.get("judgment") == "ambiguous" or layer == 3
@@ -223,24 +172,20 @@ def prepare_judge_dataset(rows: list[dict]):
                 "reason": (row.get("detail") or signal["guidance"])[:280],
             }, ensure_ascii=False),
         })
+    return dataset
 
-    output_path = os.path.join(FINETUNING_DIR, "judge_train.jsonl")
-    _write_jsonl(output_path, dataset)
-    
-    print(f"Judge 데이터 완료: {len(dataset)}건 -> {output_path}")
 
-# 메인 실행
-async def main():
+async def main() -> None:
     print("=" * 60)
-    print("AgentShield 파인튜닝 데이터 생성 파이프라인 가동")
-    print(f"저장 위치: {FINETUNING_DIR}")
+    print("AgentShield 정제 전용 학습 데이터 생성")
+    print(f"저장 위치: {OUTPUT_DIR}")
     print("=" * 60)
-    
+
     db_url = settings.DATABASE_URL.replace("+asyncpg", "")
     try:
         conn = await asyncpg.connect(db_url)
-    except Exception as e:
-        print(f"DB 연결 실패: {e}")
+    except Exception as exc:
+        print(f"DB 연결 실패: {exc}")
         return
 
     try:
@@ -248,14 +193,24 @@ async def main():
     finally:
         await conn.close()
 
-    await prepare_red_dataset(rows)
-    prepare_blue_dataset()
-    prepare_judge_dataset(rows)
+    clean_rows, excluded_rows = split_clean_records(
+        [dict(row) for row in rows],
+        allowed_judgments=VALID_TRAINING_JUDGMENTS,
+    )
 
-    by_judgment = Counter(dict(row).get("judgment") for row in rows)
-    print(f"실제 trace 사용 건수: {len(rows)} | judgment 분포: {dict(by_judgment)}")
-    
-    print("\n모든 데이터셋 준비가 완료되었습니다")
+    red_dataset, red_preferences = _build_red_datasets(clean_rows)
+    judge_dataset = _build_judge_dataset(clean_rows)
+
+    _write_jsonl(os.path.join(OUTPUT_DIR, "red_train.jsonl"), red_dataset)
+    _write_jsonl(os.path.join(OUTPUT_DIR, "red_preference_train.jsonl"), red_preferences)
+    _write_jsonl(os.path.join(OUTPUT_DIR, "judge_train.jsonl"), judge_dataset)
+
+    by_judgment = Counter(row.get("judgment") for row in clean_rows)
+    print(f"원본 행 수: {len(rows)} | 정제 후 사용 건수: {len(clean_rows)}")
+    print(f"정제 후 judgment 분포: {dict(by_judgment)}")
+    if excluded_rows:
+        print(f"학습 제외 건수: {len(excluded_rows)} | 제외 사유: {summarize_exclusion_reasons(excluded_rows)}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
