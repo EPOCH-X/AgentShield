@@ -1,13 +1,15 @@
+from typing import Optional
+
 from monitoring_proxy.schemas import SeverityType, ViolationRecordInput
 
 
 def build_violation_record_input(
     *,
     violation_type: str,
-    severity: SeverityType | None,
+    severity: Optional[SeverityType],
     description: str,
-    evidence: str | None = None,
-    reference: str | None = None,
+    evidence: Optional[str] = None,
+    reference: Optional[str] = None,
 ) -> ViolationRecordInput:
     return ViolationRecordInput(
         violation_type=violation_type,

@@ -1,6 +1,6 @@
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from monitoring_proxy.schemas import PolicyResultSchema
@@ -77,7 +77,7 @@ def calculate_retry_after_seconds(
 
 def detect_rate_limit(employee_id: str, text: str) -> P3DetectionResult:
     normalized = text.strip()
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     state = get_employee_state(employee_id)
     prune_rate_limit_state(state, now)
 
