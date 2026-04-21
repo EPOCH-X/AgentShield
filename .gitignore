@@ -56,6 +56,7 @@ id_rsa*
 
 # Data (용량 큰 파일)
 *.jsonl
+models/
 data/attack_patterns/*.csv
 data/phase3_defenses/
 !data/attack_patterns/README.md
@@ -75,16 +76,8 @@ gemma4_26b_baseline_분석.md
 LLM_Judge_분석_및_업계동향.md
 남은_과제_로드맵.md
 로컬_AI_모델_비교_20260421.md
-
 # ChromaDB
 chromadb_data/
-
-# GGUF 모델 파일 (대용량)
-models/
-*.gguf
-
-# harmful_behaviors raw (변환 전 원본)
-data/attack_patterns/harmful_behaviors_raw.json
 
 # Reports
 reports/*.pdf
@@ -124,4 +117,3 @@ docker-compose.override.yml
 
 results/
 scripts/calibrate_result.txt
-chromadb_data/

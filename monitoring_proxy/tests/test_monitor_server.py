@@ -6,7 +6,17 @@ from monitoring_proxy.monitor_server import (
     process_monitor_request_with_dependencies,
     reset_rate_limit_state,
 )
-from monitoring_proxy.schemas import IntentReviewResult
+from monitoring_proxy.services.intent_review import review_request_intent
+
+
+class FakeLLMClient:
+    def __init__(self, response: object) -> None:
+        self.response = response
+        self.calls: list[dict[str, object]] = []
+
+    def generate(self, prompt: str, role: str = "base") -> object:
+        self.calls.append({"prompt": prompt, "role": role})
+        return self.response
 
 
 class MonitorServerSmokeTest(unittest.TestCase):
@@ -71,68 +81,62 @@ class MonitorServerSmokeTest(unittest.TestCase):
         self.assertIsNone(response.retry_after_seconds)
         self.assertIsNone(response.limit_type)
 
-    def test_p4_violation_blocks_reviewable_request(self) -> None:
+    def test_injected_llm_client_blocks_when_p4_returns_violation(self) -> None:
         payload = MonitorChatRequest(
             messages=[{"role": "user", "content": "Please review this create table draft"}],
             employee_id="employee-e",
         )
-
-        def fake_intent_reviewer(**_: object) -> IntentReviewResult:
-            return IntentReviewResult(
-                judgment="violation",
-                confidence=0.94,
-                reason="request appears intended to obtain restricted internal schema details",
-            )
+        client = FakeLLMClient(
+            '{"judgment":"violation","confidence":0.95,"reason":"request appears intended to obtain restricted internal schema details"}',
+        )
 
         response = process_monitor_request_with_dependencies(
             payload,
-            intent_reviewer=fake_intent_reviewer,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
         )
 
         self.assertTrue(response.blocked)
         self.assertEqual(response.stage, "p4_intent_review")
         self.assertEqual(response.severity, "medium")
         self.assertIn("restricted internal schema", response.reason)
+        self.assertEqual(len(client.calls), 1)
+        self.assertEqual(client.calls[0]["role"], "base")
 
-    def test_p4_normal_allows_reviewable_request(self) -> None:
+    def test_injected_llm_client_allows_when_p4_returns_normal(self) -> None:
         payload = MonitorChatRequest(
             messages=[{"role": "user", "content": "Please review this create table draft"}],
             employee_id="employee-f",
         )
-
-        def fake_intent_reviewer(**_: object) -> IntentReviewResult:
-            return IntentReviewResult(
-                judgment="normal",
-                confidence=0.87,
-                reason="request is consistent with normal engineering review work",
-            )
+        client = FakeLLMClient(
+            '{"judgment":"normal","confidence":0.91,"reason":"request is consistent with normal engineering review work"}',
+        )
 
         response = process_monitor_request_with_dependencies(
             payload,
-            intent_reviewer=fake_intent_reviewer,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
         )
 
         self.assertFalse(response.blocked)
         self.assertEqual(response.stage, "p1_confidential_scan")
         self.assertEqual(response.severity, "medium")
         self.assertIn("database-sensitive keyword", response.reason)
+        self.assertEqual(len(client.calls), 1)
 
-    def test_p4_ambiguous_allows_request_with_review_note(self) -> None:
+    def test_injected_llm_client_keeps_request_non_blocking_when_p4_is_ambiguous(self) -> None:
         payload = MonitorChatRequest(
             messages=[{"role": "user", "content": "주말 계획 추천해줘"}],
             employee_id="employee-g",
         )
-
-        def fake_intent_reviewer(**_: object) -> IntentReviewResult:
-            return IntentReviewResult(
-                judgment="ambiguous",
-                confidence=0.41,
-                reason="request intent is unclear between casual use and low-risk internal usage",
-            )
+        client = FakeLLMClient(
+            '{"judgment":"ambiguous","confidence":0.41,"reason":"request intent is unclear between casual use and low-risk internal usage"}',
+        )
 
         response = process_monitor_request_with_dependencies(
             payload,
-            intent_reviewer=fake_intent_reviewer,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
         )
 
         self.assertFalse(response.blocked)
@@ -140,11 +144,41 @@ class MonitorServerSmokeTest(unittest.TestCase):
         self.assertEqual(response.severity, "low")
         self.assertIn("non-work-related request detected", response.reason)
         self.assertIn("p4 review ambiguous", response.reason)
+        self.assertEqual(len(client.calls), 1)
+
+    def test_p3_does_not_call_p4_even_when_client_is_injected(self) -> None:
+        payload = MonitorChatRequest(
+            messages=[{"role": "user", "content": "same question"}],
+            employee_id="employee-h",
+        )
+        client = FakeLLMClient(
+            '{"judgment":"violation","confidence":0.99,"reason":"should not be used"}',
+        )
+
+        process_monitor_request_with_dependencies(
+            payload,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
+        )
+        process_monitor_request_with_dependencies(
+            payload,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
+        )
+        response = process_monitor_request_with_dependencies(
+            payload,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
+        )
+
+        self.assertTrue(response.blocked)
+        self.assertEqual(response.stage, "p3_rate_limit")
+        self.assertEqual(len(client.calls), 0)
 
     def test_p1_high_creates_usage_log_and_violation_record(self) -> None:
         payload = MonitorChatRequest(
             messages=[{"role": "user", "content": "email me at secret@company.com"}],
-            employee_id="employee-h",
+            employee_id="employee-i",
         )
         saved_logs = []
         created_violations = []
@@ -165,7 +199,7 @@ class MonitorServerSmokeTest(unittest.TestCase):
     def test_p2_low_non_work_request_logs_without_violation(self) -> None:
         payload = MonitorChatRequest(
             messages=[{"role": "user", "content": "주말 계획 추천해줘"}],
-            employee_id="employee-i",
+            employee_id="employee-j",
         )
         saved_logs = []
         created_violations = []
@@ -185,21 +219,18 @@ class MonitorServerSmokeTest(unittest.TestCase):
     def test_p4_violation_creates_violation_record(self) -> None:
         payload = MonitorChatRequest(
             messages=[{"role": "user", "content": "Please review this create table draft"}],
-            employee_id="employee-j",
+            employee_id="employee-k",
         )
         saved_logs = []
         created_violations = []
-
-        def fake_intent_reviewer(**_: object) -> IntentReviewResult:
-            return IntentReviewResult(
-                judgment="violation",
-                confidence=0.93,
-                reason="request appears intended to obtain restricted internal schema details",
-            )
+        client = FakeLLMClient(
+            '{"judgment":"violation","confidence":0.93,"reason":"request appears intended to obtain restricted internal schema details"}',
+        )
 
         response = process_monitor_request_with_dependencies(
             payload,
-            intent_reviewer=fake_intent_reviewer,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
             save_usage_log_fn=lambda entry: saved_logs.append(entry) or entry,
             create_violation_record_fn=lambda record: created_violations.append(record) or record,
         )
@@ -214,21 +245,18 @@ class MonitorServerSmokeTest(unittest.TestCase):
     def test_p4_ambiguous_logs_review_needed_without_violation(self) -> None:
         payload = MonitorChatRequest(
             messages=[{"role": "user", "content": "Please review this create table draft"}],
-            employee_id="employee-k",
+            employee_id="employee-l",
         )
         saved_logs = []
         created_violations = []
-
-        def fake_intent_reviewer(**_: object) -> IntentReviewResult:
-            return IntentReviewResult(
-                judgment="ambiguous",
-                confidence=0.40,
-                reason="intent is unclear between legitimate review and restricted data probing",
-            )
+        client = FakeLLMClient(
+            '{"judgment":"ambiguous","confidence":0.40,"reason":"intent is unclear between legitimate review and restricted data probing"}',
+        )
 
         response = process_monitor_request_with_dependencies(
             payload,
-            intent_reviewer=fake_intent_reviewer,
+            intent_reviewer=review_request_intent,
+            llm_client=client,
             save_usage_log_fn=lambda entry: saved_logs.append(entry) or entry,
             create_violation_record_fn=lambda record: created_violations.append(record) or record,
         )

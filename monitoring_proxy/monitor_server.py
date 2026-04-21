@@ -35,6 +35,7 @@ from monitoring_proxy.services import (
     build_violation_record_input,
     create_violation_record,
     forward_to_target_ai,
+    get_default_intent_review_llm_client,
     mask_response_content,
     review_request_intent,
     save_usage_log,
@@ -302,14 +303,25 @@ def finalize_response(
     return response
 
 
-def process_monitor_request(payload: MonitorChatRequest) -> MonitorChatResponse:
-    return process_monitor_request_with_dependencies(payload)
+def process_monitor_request(
+    payload: MonitorChatRequest,
+    *,
+    llm_client: object | None = None,
+    llm_client_factory=None,
+) -> MonitorChatResponse:
+    return process_monitor_request_with_dependencies(
+        payload,
+        llm_client=llm_client,
+        llm_client_factory=llm_client_factory,
+    )
 
 
 def process_monitor_request_with_dependencies(
     payload: MonitorChatRequest,
     *,
     intent_reviewer=review_request_intent,
+    llm_client: object | None = None,
+    llm_client_factory=None,
     save_usage_log_fn=save_usage_log,
     create_violation_record_fn=create_violation_record,
     forwarder_fn=forward_to_target_ai,
@@ -350,12 +362,15 @@ def process_monitor_request_with_dependencies(
     intent_review_result: IntentReviewResult | None = None
     review_severity = determine_review_severity(p1_result, p2_result)
     if should_review_request_intent(p1_result, p2_result):
+        review_client = llm_client
+        if review_client is None and llm_client_factory is not None:
+            review_client = llm_client_factory()
         rule_reasons = [reason for reason in [p1_result.reason, p2_result.reason] if reason]
         intent_review_result = intent_reviewer(
             message=context.latest_message,
             employee_context={"employee_id": context.employee_id},
             rule_reasons=rule_reasons,
-            llm_client=None,
+            llm_client=review_client,
             role="base",
         )
         if intent_review_result.judgment == "violation":
@@ -459,4 +474,7 @@ async def health() -> HealthResponse:
 
 @app.post("/monitor/chat", response_model=MonitorChatResponse)
 async def monitor_chat(payload: MonitorChatRequest) -> MonitorChatResponse:
-    return process_monitor_request(payload)
+    return process_monitor_request(
+        payload,
+        llm_client_factory=get_default_intent_review_llm_client,
+    )
