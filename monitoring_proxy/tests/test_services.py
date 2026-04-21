@@ -56,11 +56,13 @@ class ServiceContractTest(unittest.TestCase):
         self.assertEqual(response.target_service, "https://example.com/chat")
 
     def test_masking_placeholder_is_passthrough(self) -> None:
-        response_text = "raw response text"
+        response_text = "email john.doe@example.com phone 010-1234-5678 token ADMIN-12345-2026"
 
         masked = mask_response_content(response_text)
 
-        self.assertEqual(masked, "raw response text")
+        self.assertNotIn("john.doe@example.com", masked)
+        self.assertNotIn("010-1234-5678", masked)
+        self.assertNotIn("ADMIN-12345-2026", masked)
 
 
 if __name__ == "__main__":

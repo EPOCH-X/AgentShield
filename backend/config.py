@@ -63,9 +63,19 @@ class AppSettings:
         "MONITORING_PROXY_URL", "http://localhost:8002"
     )
 
+    # Target adapter
+    TARGET_ADAPTER_OPENAI_MODEL: str = os.getenv(
+        "TARGET_ADAPTER_OPENAI_MODEL",
+        "gpt-4o-mini",
+    )
+
     # Phase 1
     PHASE1_CONCURRENCY: int = 5
     PHASE1_TIMEOUT: int = int(os.getenv("PHASE1_TIMEOUT", 120))
+    PHASE1_ALLOW_FILE_FALLBACK: bool = os.getenv("PHASE1_ALLOW_FILE_FALLBACK", "false").lower() == "true"
+
+    # Dev seed
+    DEV_SEED_INCLUDE_ATTACK_PATTERNS: bool = os.getenv("DEV_SEED_INCLUDE_ATTACK_PATTERNS", "false").lower() == "true"
 
     # Phase 2
     PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 10))

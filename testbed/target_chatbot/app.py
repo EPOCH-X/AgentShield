@@ -1,5 +1,6 @@
-"""
-Target Chatbot API — AgentShield 테스트 타겟
+"""[공통 testbed / 주관: R7, 사용: R1/R2/R5] Target Chatbot API.
+
+AgentShield 테스트 타겟.
 POST /chat  {"messages": [...]} -> {"content": "..."}
 """
 
@@ -118,4 +119,10 @@ async def chat(req: ChatRequest):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "model": config.OLLAMA_MODEL, "security_mode": config.SECURITY_MODE}
+    return {
+        "status": "ok",
+        "model": config.OLLAMA_MODEL,
+        "security_mode": config.SECURITY_MODE,
+        "tool_gateway_url": config.TOOL_GATEWAY_URL,
+        "allow_stub_tools": config.ALLOW_STUB_TOOLS,
+    }

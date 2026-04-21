@@ -51,6 +51,7 @@ class IntentReviewResult(BaseModel):
 
 
 class UsageLogEntry(BaseModel):
+    id: Optional[int] = None
     employee_id: str
     request_content: str
     response_content: str
@@ -61,15 +62,23 @@ class UsageLogEntry(BaseModel):
 
 
 class ViolationRecordInput(BaseModel):
+    id: Optional[int] = None
+    employee_id: Optional[str] = None
     violation_type: str
     severity: Optional[SeverityType]
     description: str
     evidence: Optional[str] = None
+    evidence_log_id: Optional[int] = None
     reference: Optional[str] = None
+    sanction: Optional[str] = None
+    resolved: bool = False
 
 
 class ForwardRequest(BaseModel):
     target_url: Optional[str]
+    target_api_key: Optional[str] = None
+    target_provider: Optional[str] = None
+    target_model: Optional[str] = None
     messages: list[dict[str, str]]
     employee_context: Optional[dict] = None
 

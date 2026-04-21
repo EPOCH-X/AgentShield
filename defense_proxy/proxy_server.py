@@ -11,11 +11,13 @@ Layer 4: 출력 필터
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Optional
 
-import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
+
+from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
+import httpx
 
 app = FastAPI(title="AgentShield Defense Proxy")
 
@@ -35,6 +37,9 @@ class DefenseRules(BaseModel):
 
 class ProxyChatRequest(BaseModel):
     target_url: str
+    target_api_key: Optional[str] = None
+    target_provider: Optional[str] = None
+    target_model: Optional[str] = None
     messages: list[dict[str, str]]
 
 
@@ -118,14 +123,21 @@ async def proxy_chat(session_id: str, req: ProxyChatRequest) -> dict[str, Any]:
 
     # Layer 2: 시스템 프롬프트 패치
     patched_messages = _inject_system_patch(req.messages, rules.system_prompt_patch)
+    adapter_config = TargetAdapterConfig.from_input(
+        target_url=req.target_url,
+        api_key=req.target_api_key,
+        provider=req.target_provider,
+        model=req.target_model,
+    )
 
     # Layer 3: 타겟 호출
     try:
         async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(req.target_url, json={"messages": patched_messages})
-            resp.raise_for_status()
-            response_json = resp.json()
-            response_text = response_json.get("content", "")
+            response_text = await send_messages_to_target(
+                client,
+                adapter_config,
+                messages=patched_messages,
+            )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Target call failed: {e}")
 

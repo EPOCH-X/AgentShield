@@ -1,5 +1,6 @@
-"""
-Tool Gateway API — 챗봇의 tool call을 실제 시스템에 연결한다.
+"""[공통 testbed / 주관: R7, 사용: R2/R5] Tool Gateway API.
+
+챗봇의 tool call을 실제 testbed DB/KB/메일 샌드박스에 연결한다.
 POST /tools/{tool}/{action}  {"arguments": {...}}
 """
 
