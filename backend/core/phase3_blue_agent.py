@@ -29,6 +29,11 @@ def _phase3_defense_json_dir(project_root: Path, session_id: str) -> Path:
     return project_root / "data" / "phase3_defenses" / str(session_id)
 
 
+def _phase3_failure_raw_dir(project_root: Path, session_id: str) -> Path:
+    """Blue 응답 파싱 실패 시 원문을 남기는 디렉터리: data/phase3_failures/<session_id>/"""
+    return project_root / "data" / "phase3_failures" / str(session_id)
+
+
 def _write_defense_json_file(
     out_dir: Path,
     *,
@@ -59,6 +64,20 @@ def _write_defense_json_file(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    return path
+
+
+def _write_failure_raw_file(
+    out_dir: Path,
+    *,
+    defense_id: str,
+    raw: str,
+) -> Path:
+    """파싱 실패 원문을 후속 분석용 텍스트 파일로 저장."""
+    out_dir.mkdir(parents=True, exist_ok=True)
+    safe_id = defense_id.replace("/", "_")
+    path = out_dir / f"blue_raw_{safe_id}.txt"
+    path.write_text(raw, encoding="utf-8")
     return path
 
 
@@ -127,6 +146,7 @@ async def run_phase3(
 
     project_root = Path(__file__).resolve().parents[2]  # 프로젝트 루트 경로
     defense_out_dir = _phase3_defense_json_dir(project_root, session_id)  # 세션별 출력 디렉터리
+    failure_raw_dir = _phase3_failure_raw_dir(project_root, session_id)  # 파싱 실패 원문 저장 디렉터리
     owasp_recommendations = _load_owasp_recommendations(project_root)  # 카테고리별 권고문 매핑
 
     phase2_rows = (phase2_result or {}).get("results", []) if isinstance(phase2_result, dict) else []  # 원본 Phase2 결과 목록
@@ -211,10 +231,29 @@ async def run_phase3(
                 defense_id,
                 category or "?",
             )
+            raw_failure_path = ""
+            raw_preview = ""
+            if "raw" in locals() and isinstance(raw, str) and raw.strip():
+                try:
+                    written_raw = _write_failure_raw_file(
+                        failure_raw_dir,
+                        defense_id=defense_id,
+                        raw=raw,
+                    )
+                    raw_failure_path = str(written_raw.relative_to(project_root))
+                except Exception:
+                    raw_failure_path = ""
+                raw_preview = raw[:500].replace("\n", "\\n")
             failed += 1
             failed_ids.append(defense_id)
             failed_details.append(
-                {"defense_id": defense_id, "category": category or "", "error": str(e)}
+                {
+                    "defense_id": defense_id,
+                    "category": category or "",
+                    "error": str(e),
+                    "raw_response_file": raw_failure_path,
+                    "raw_response_preview": raw_preview,
+                }
             )
             continue
 
