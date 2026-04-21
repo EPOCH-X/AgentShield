@@ -51,6 +51,7 @@ class AppSettings:
     CHROMADB_HOST: str = os.getenv("CHROMADB_HOST", "localhost")
     CHROMADB_PORT: int = int(os.getenv("CHROMADB_PORT", 8003))
     RED_RAG_REFERENCE_LIMIT: int = int(os.getenv("RED_RAG_REFERENCE_LIMIT", 8))
+    RED_RAG_RECENT_REFERENCE_LIMIT: int = int(os.getenv("RED_RAG_RECENT_REFERENCE_LIMIT", 4))
 
     # Defense Proxy
     DEFENSE_PROXY_URL: str = os.getenv(

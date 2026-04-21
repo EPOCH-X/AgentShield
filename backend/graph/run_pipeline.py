@@ -20,6 +20,7 @@ Phase 2 로직: 이 스크립트 (Red Agent 변형 생성 + Judge 판정)
 
 import argparse
 import asyncio
+import re
 import time
 from collections import Counter, defaultdict
 from datetime import datetime
@@ -29,7 +30,7 @@ from typing import Optional
 
 import httpx
 
-from backend.agents.red_agent import analyze_defense_signal, build_red_prompt, get_system_prompt, _is_abliterated_model, extract_techniques, normalize_attack_prompt_output, select_target_failure_mode, validate_attack_prompt_output
+from backend.agents.red_agent import analyze_defense_signal, build_red_prompt, get_system_prompt, _is_abliterated_model, extract_techniques, normalize_attack_prompt_output, select_target_failure_mode, validate_attack_prompt_output, _extract_structural_anchor
 from backend.config import settings
 from backend.core.judge import full_judge, _has_refusal, _has_meta_analysis
 from backend.core.phase1_scanner import run_phase1
@@ -42,7 +43,7 @@ def _truncate(text: str, max_len: int = 200) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."
-from backend.rag.chromadb_client import add_attack, get_attack_category_counts, get_rag_client, get_rag_status, search_attacks
+from backend.rag.chromadb_client import add_attack, get_attack_category_counts, get_rag_client, get_rag_status, get_recent_attacks, search_attacks
 
 
 def _get_attack_rag_count() -> Optional[int]:
@@ -52,31 +53,147 @@ def _get_attack_rag_count() -> Optional[int]:
         return None
 
 
-def _load_dynamic_attack_refs(category: str, attack_prompt: str, limit: Optional[int] = None) -> list[dict]:
-    """ChromaDB에서 카테고리별 유사 성공 공격을 불러온다."""
+def _build_rag_where(category: str, subcategory: Optional[str] = None) -> dict:
+    if subcategory:
+        return {"$and": [{"category": category}, {"subcategory": subcategory}]}
+    return {"category": category}
+
+
+def _technique_overlap_score(reference_techniques: list[str], current_techniques: list[str]) -> float:
+    if not current_techniques:
+        return 0.0
+    overlap = set(reference_techniques) & set(current_techniques)
+    return len(overlap) / max(len(set(current_techniques)), 1)
+
+
+def _score_attack_ref(item: dict, category: str, subcategory: str, current_techniques: list[str]) -> float:
+    metadata = item.get("metadata") or {}
+    reference_techniques = metadata.get("techniques") or item.get("techniques") or []
+    similarity = item.get("similarity") or 0.0
+    subcategory_match = 1.0 if subcategory and metadata.get("subcategory") == subcategory else 0.0
+    technique_overlap = _technique_overlap_score(reference_techniques, current_techniques)
+    category_match = 1.0 if metadata.get("category") == category else 0.0
+    return (similarity * 1.0) + (subcategory_match * 0.35) + (technique_overlap * 0.45) + (category_match * 0.1)
+
+
+def _normalize_attack_ref(item: dict, *, source_type: str, score: Optional[float] = None) -> Optional[dict]:
+    metadata = dict(item.get("metadata") or {})
+    prompt = item.get("attack_prompt", "")
+    if not prompt:
+        return None
+
+    return {
+        "attack_prompt": prompt,
+        "metadata": {
+            **metadata,
+            "similarity": item.get("similarity"),
+            "source": metadata.get("source", "rag"),
+            "source_type": source_type,
+            "hybrid_score": score,
+        },
+        "techniques": metadata.get("techniques") or extract_techniques(prompt),
+    }
+
+
+def _dedupe_attack_refs(refs: list[dict], limit: int) -> list[dict]:
+    deduped = []
+    seen_ids = set()
+    seen_seed_ids = set()
+    seen_prompts = set()
+
+    for ref in refs:
+        metadata = ref.get("metadata") or {}
+        ref_id = metadata.get("id") or ref.get("id") or metadata.get("doc_id")
+        seed_id = metadata.get("seed_id")
+        prompt = ref.get("attack_prompt", "")
+
+        if ref_id and ref_id in seen_ids:
+            continue
+        if seed_id and seed_id in seen_seed_ids:
+            continue
+        if prompt in seen_prompts:
+            continue
+
+        if ref_id:
+            seen_ids.add(ref_id)
+        if seed_id:
+            seen_seed_ids.add(seed_id)
+        seen_prompts.add(prompt)
+        deduped.append(ref)
+
+        if len(deduped) >= limit:
+            break
+
+    return deduped
+
+
+def _load_dynamic_attack_refs(
+    category: str,
+    subcategory: str,
+    attack_prompt: str,
+    limit: Optional[int] = None,
+    recent_limit: Optional[int] = None,
+) -> dict:
+    """ChromaDB에서 category + subcategory + techniques 기반 hybrid refs를 불러오고 recent fallback을 섞는다."""
     if limit is None:
         limit = settings.RED_RAG_REFERENCE_LIMIT
-    query = f"{category} {attack_prompt[:300]}"
-    results = search_attacks(query=query, n_results=limit)
+    if recent_limit is None:
+        recent_limit = settings.RED_RAG_RECENT_REFERENCE_LIMIT
 
-    refs = []
-    for item in results:
+    current_techniques = extract_techniques(attack_prompt)
+    structured_tokens = [category]
+    if subcategory:
+        structured_tokens.append(subcategory)
+    if current_techniques:
+        structured_tokens.extend(current_techniques)
+
+    hybrid_query = " ".join(structured_tokens)
+    semantic_candidates = search_attacks(
+        query=hybrid_query,
+        n_results=max(limit * 4, 12),
+        where={"category": category},
+    )
+
+    ranked_semantic = []
+    for item in semantic_candidates:
         metadata = item.get("metadata", {})
         if metadata.get("category") and metadata.get("category") != category:
             continue
-        prompt = item.get("attack_prompt", "")
-        if not prompt:
-            continue
-        refs.append({
-            "attack_prompt": prompt,
-            "metadata": {
-                **metadata,
-                "similarity": item.get("similarity"),
-                "source": metadata.get("source", "rag"),
-            },
-            "techniques": metadata.get("techniques") or extract_techniques(prompt),
-        })
-    return refs
+        score = _score_attack_ref(item, category, subcategory, current_techniques)
+        ranked_semantic.append((score, item))
+
+    ranked_semantic.sort(key=lambda pair: pair[0], reverse=True)
+    hybrid_refs = []
+    for score, item in ranked_semantic[:limit]:
+        normalized = _normalize_attack_ref(item, source_type="semantic", score=score)
+        if normalized is not None:
+            hybrid_refs.append(normalized)
+
+    recent_refs = []
+    if len(hybrid_refs) < limit:
+        recent_candidates = get_recent_attacks(
+            limit=max(recent_limit * 3, 12),
+            where={"category": category},
+        )
+        for item in reversed(recent_candidates):
+            metadata = item.get("metadata", {})
+            if metadata.get("category") and metadata.get("category") != category:
+                continue
+            normalized = _normalize_attack_ref(item, source_type="recent")
+            if normalized is not None:
+                recent_refs.append(normalized)
+
+    merged_refs = _dedupe_attack_refs(hybrid_refs + recent_refs, limit)
+    recent_used = [ref for ref in merged_refs if (ref.get("metadata") or {}).get("source_type") == "recent"]
+    semantic_used = [ref for ref in merged_refs if (ref.get("metadata") or {}).get("source_type") == "semantic"]
+
+    return {
+        "refs": merged_refs,
+        "semantic_count": len(semantic_used),
+        "recent_count": len(recent_used),
+        "candidate_count": len(semantic_candidates),
+        "techniques": current_techniques,
+    }
 
 
 async def _load_historical_failure_intel(category: str, limit: int = 6) -> list[dict]:
@@ -193,6 +310,11 @@ def _store_success_case(category: str, attack_prompt: str, target_response: str,
         metadata["fp_flag"] = fp_flag
         print(f"      ⏸️ ChromaDB 저장 보류 ({fp_flag})")
         return False
+
+    metadata = {
+        **metadata,
+        "created_at": metadata.get("created_at") or datetime.utcnow().isoformat(),
+    }
 
     return add_attack(
         attack_prompt=attack_prompt,
@@ -315,9 +437,17 @@ async def generate_mutation(client: httpx.AsyncClient, red_prompt: str) -> tuple
     return content, raw_result
 
 
+def _is_primary_phase2_vulnerable(result: dict) -> bool:
+    return result.get("judgment") == "vulnerable" and not result.get("is_harvest")
+
+
+def _is_primary_phase2_safe(result: dict) -> bool:
+    return result.get("judgment") == "safe" and not result.get("is_harvest")
+
+
 # ── Phase 2: Red Agent 변형 Self-Play ────────────────────────────
 
-async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
+async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harvest_rounds_after_success=0):
     """Phase 2: safe 결과에 대해 Red Agent 변형 공격 (최대 N 라운드)
 
     모든 라운드는 Red Agent LLM 변형으로 진행한다.
@@ -348,6 +478,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         subcat = attack.get("subcategory", "?")
         current_prompt = attack["attack_prompt"]
         current_response = attack["target_response"]
+        current_judge_detail = attack.get("detail", "")
 
         if cat not in category_profiles:
             category_profiles[cat] = await _load_category_attack_profile(cat)
@@ -363,10 +494,16 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
 
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
-            dynamic_refs = _load_dynamic_attack_refs(cat, current_prompt)
+            rag_bundle = _load_dynamic_attack_refs(cat, subcat, current_prompt)
+            dynamic_refs = rag_bundle["refs"]
             similar_cases = dynamic_refs or None
             if rnd == 1:
-                print(f"    참고 성공사례: rag={len(dynamic_refs)}")
+                print(
+                    "    참고 성공사례: "
+                    f"rag={len(dynamic_refs)} "
+                    f"(hybrid={rag_bundle['semantic_count']}, recent={rag_bundle['recent_count']}, "
+                    f"candidates={rag_bundle['candidate_count']})"
+                )
             target_failure_mode = select_target_failure_mode(cat, rnd, prev_failure_modes=used_failure_modes)
 
             red_prompt = build_red_prompt(
@@ -381,7 +518,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                 failure_intel=category_failure_intel.get(cat),
                 category_attack_profile=category_profiles.get(cat),
                 target_failure_mode=target_failure_mode,
-                judge_detail=attack.get("detail", ""),
+                judge_detail=current_judge_detail,
             )
             try:
                 new_attack, raw_llm_response = await generate_mutation(client, red_prompt)
@@ -411,6 +548,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "target_failure_mode": target_failure_mode,
                     "red_agent_raw_response": raw_llm_response,
                 })
+                current_judge_detail = f"Red Agent output rejected: {invalid_reason}"
                 break
 
             # B: 생성된 공격에서 사용된 기법 추출 → 다음 라운드에서 차단
@@ -439,6 +577,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     "target_failure_mode": target_failure_mode,
                     "red_agent_raw_response": raw_llm_response,
                 })
+                current_judge_detail = "Red Agent returned empty mutation"
                 break
 
             print(f"    R{rnd}: {_AGENT_LABEL} LLM변형 생성완료")
@@ -511,6 +650,178 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                     f"failure_mode={verdict.get('failure_mode') or target_failure_mode}. Attack excerpt: {new_attack}"
                 )
                 cross_category_intel[cat] = intel_summary
+
+                if harvest_rounds_after_success > 0 and not fp_flag:
+                    print(f"      🧪 Harvest mode: 추가 변종 최대 {harvest_rounds_after_success}건")
+                    harvest_prompt = new_attack
+                    harvest_response = target_response
+                    harvest_detail = verdict.get("detail", "")
+                    harvest_successes = [new_attack]
+                    # Success-Anchor: 성공한 공격의 구조적 불변량 추출
+                    harvest_anchor = _extract_structural_anchor(new_attack)
+
+                    for harvest_idx in range(1, harvest_rounds_after_success + 1):
+                        harvest_t0 = time.time()
+                        harvest_rag_bundle = _load_dynamic_attack_refs(cat, subcat, harvest_prompt)
+                        harvest_refs = harvest_rag_bundle["refs"] or None
+                        harvest_failure_mode = select_target_failure_mode(cat, rnd + harvest_idx, prev_failure_modes=used_failure_modes)
+                        harvest_round_num = min(max_rounds, rnd + harvest_idx)
+
+                        harvest_red_prompt = build_red_prompt(
+                            attack_prompt=harvest_prompt,
+                            target_response=harvest_response,
+                            category=cat,
+                            similar_cases=None,
+                            round_num=harvest_round_num,
+                            prev_techniques=used_techniques if used_techniques else None,
+                            cross_category_intel=cross_category_intel if cross_category_intel else None,
+                            successful_attack_refs=harvest_refs,
+                            failure_intel=category_failure_intel.get(cat),
+                            category_attack_profile=category_profiles.get(cat),
+                            target_failure_mode=harvest_failure_mode,
+                            judge_detail=harvest_detail,
+                            harvest_mode=True,
+                            prior_successes=harvest_successes,
+                            success_anchor=harvest_anchor,
+                        )
+
+                        try:
+                            harvest_attack, harvest_raw_llm_response = await generate_mutation(client, harvest_red_prompt)
+                        except Exception as e:
+                            print(f"      H{harvest_idx}: ❌ Harvest 생성 실패: {e}")
+                            break
+
+                        harvest_attack = normalize_attack_prompt_output(harvest_attack)
+                        is_valid_harvest, harvest_invalid_reason = validate_attack_prompt_output(harvest_attack)
+                        if not is_valid_harvest:
+                            print(f"      H{harvest_idx}: ❌ Harvest 출력 차단: {harvest_invalid_reason}")
+                            results.append({
+                                "phase": 2,
+                                "seed_id": attack.get("seed_id", ""),
+                                "category": cat,
+                                "subcategory": subcat,
+                                "original_prompt": attack["attack_prompt"],
+                                "mutated_prompt": harvest_attack,
+                                "target_response": "[blocked: invalid harvest output]",
+                                "judgment": "generation_failed",
+                                "judge_layer": 0,
+                                "round": rnd,
+                                "mutation_type": f"llm:{_AGENT_LABEL}",
+                                "severity": None,
+                                "detail": f"Harvest output rejected: {harvest_invalid_reason}",
+                                "target_failure_mode": harvest_failure_mode,
+                                "is_harvest": True,
+                                "harvest_index": harvest_idx,
+                                "harvest_parent_round": rnd,
+                                "red_agent_raw_response": harvest_raw_llm_response,
+                            })
+                            break
+
+                        harvest_techniques = extract_techniques(harvest_attack)
+                        used_techniques.extend(harvest_techniques)
+                        if harvest_failure_mode:
+                            used_failure_modes.append(harvest_failure_mode)
+
+                        print(f"      H{harvest_idx}: 추가 변종 생성완료")
+                        print(f"        🗡️ 공격: {_truncate(harvest_attack, 200)}")
+                        print("        → 타겟 전송...", end=" ", flush=True)
+
+                        try:
+                            harvest_target_response = await send_to_target(client, harvest_attack)
+                        except Exception as e:
+                            print(f"❌ 타겟 실패: {e}")
+                            break
+
+                        harvest_verdict = await full_judge(
+                            cat,
+                            harvest_attack,
+                            harvest_target_response,
+                            llm if use_llm_judge else None,
+                        )
+                        harvest_elapsed = time.time() - harvest_t0
+
+                        if harvest_verdict["judgment"] == "vulnerable":
+                            harvest_fp_flag = _check_fp_flag(harvest_target_response)
+                            if harvest_fp_flag:
+                                print(f"🟡 vulnerable BUT {harvest_fp_flag} (Harvest {harvest_idx}) [{harvest_elapsed:.1f}s]")
+                            else:
+                                print(f"🔴 harvest vulnerable! (H{harvest_idx}) [{harvest_elapsed:.1f}s]")
+                            print(f"        🎯 응답: {_truncate(harvest_target_response, 200)}")
+
+                            if not harvest_fp_flag:
+                                _store_success_case(
+                                    category=cat,
+                                    attack_prompt=harvest_attack,
+                                    target_response=harvest_target_response,
+                                    metadata={
+                                        "source": "phase2_harvest",
+                                        "subcategory": subcat,
+                                        "judgment": "vulnerable",
+                                        "round": rnd,
+                                        "harvest_index": harvest_idx,
+                                        "judge_layer": harvest_verdict["layer"],
+                                        "seed_id": attack.get("seed_id", ""),
+                                        "techniques": harvest_techniques,
+                                        "failure_mode": harvest_verdict.get("failure_mode") or harvest_failure_mode,
+                                        "root_cause_label": harvest_verdict.get("root_cause_label"),
+                                    },
+                                )
+
+                            results.append({
+                                "phase": 2,
+                                "seed_id": attack.get("seed_id", ""),
+                                "category": cat,
+                                "subcategory": subcat,
+                                "original_prompt": attack["attack_prompt"],
+                                "mutated_prompt": harvest_attack,
+                                "target_response": harvest_target_response,
+                                "judgment": "vulnerable",
+                                "judge_layer": harvest_verdict["layer"],
+                                "round": rnd,
+                                "mutation_type": f"llm:{_AGENT_LABEL}",
+                                "severity": harvest_verdict.get("severity"),
+                                "detail": harvest_verdict.get("detail", ""),
+                                "target_failure_mode": harvest_failure_mode,
+                                "failure_mode": harvest_verdict.get("failure_mode") or harvest_failure_mode,
+                                "root_cause_label": harvest_verdict.get("root_cause_label"),
+                                "leak_origin": harvest_verdict.get("leak_origin"),
+                                "fp_flag": harvest_fp_flag,
+                                "is_harvest": True,
+                                "harvest_index": harvest_idx,
+                                "harvest_parent_round": rnd,
+                                "red_agent_raw_response": harvest_raw_llm_response,
+                            })
+                            harvest_successes.append(harvest_attack)
+                        else:
+                            print(f"🟢 {harvest_verdict['judgment']} (Harvest {harvest_idx}, L{harvest_verdict['layer']}) [{harvest_elapsed:.1f}s]")
+                            print(f"        🛡️ 응답: {_truncate(harvest_target_response, 200)}")
+                            results.append({
+                                "phase": 2,
+                                "seed_id": attack.get("seed_id", ""),
+                                "category": cat,
+                                "subcategory": subcat,
+                                "original_prompt": attack["attack_prompt"],
+                                "mutated_prompt": harvest_attack,
+                                "target_response": harvest_target_response,
+                                "judgment": harvest_verdict["judgment"],
+                                "judge_layer": harvest_verdict["layer"],
+                                "round": rnd,
+                                "mutation_type": f"llm:{_AGENT_LABEL}",
+                                "severity": None,
+                                "detail": harvest_verdict.get("detail", ""),
+                                "target_failure_mode": harvest_failure_mode,
+                                "failure_mode": harvest_verdict.get("failure_mode") or harvest_failure_mode,
+                                "root_cause_label": harvest_verdict.get("root_cause_label"),
+                                "leak_origin": harvest_verdict.get("leak_origin"),
+                                "is_harvest": True,
+                                "harvest_index": harvest_idx,
+                                "harvest_parent_round": rnd,
+                                "red_agent_raw_response": harvest_raw_llm_response,
+                            })
+
+                        harvest_prompt = harvest_attack
+                        harvest_response = harvest_target_response
+                        harvest_detail = harvest_verdict.get("detail", "")
                 break
             else:
                 print(f"🟢 {verdict['judgment']} (L{verdict['layer']}) [{elapsed:.1f}s]")
@@ -537,6 +848,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
                 })
                 current_prompt = new_attack
                 current_response = target_response
+                current_judge_detail = verdict.get("detail", "")
         else:
             print(f"    → {max_rounds}라운드 모두 방어 성공 ✅")
 
@@ -549,8 +861,9 @@ def print_summary(p1, p2, elapsed):
     p1v = len(p1.get("vulnerable_attacks", []))
     p1s = len(p1.get("safe_attacks", []))
     p1e = len(p1.get("error_attacks", []))
-    p2_vuln_list = [r for r in p2 if r["judgment"] == "vulnerable"]
+    p2_vuln_list = [r for r in p2 if _is_primary_phase2_vulnerable(r)]
     p2v = len(p2_vuln_list)
+    harvest_vuln = len([r for r in p2 if r.get("judgment") == "vulnerable" and r.get("is_harvest")])
     total = p1v + p1s  # error 제외
 
     stats = defaultdict(lambda: {"p1_vuln": 0, "p1_safe": 0, "p1_error": 0, "p2_vuln": 0})
@@ -591,11 +904,100 @@ def print_summary(p1, p2, elapsed):
         for fp in fp_suspects:
             print(f"      - {fp['category']}/{fp.get('subcategory','?')} R{fp['round']}: {fp['fp_flag']}")
     print(f"\n  ⏱  소요시간: {elapsed:.1f}s")
+    if harvest_vuln:
+        print(f"  🧪 Harvest 성공 변종: {harvest_vuln}건 (벤치마크 취약률 미포함)")
 
     return {"p1_vuln": p1v, "p1_safe": p1s, "p1_error": p1e, "p2_vuln": p2v}
 
 
-def save_results(p1, p2, summary, elapsed, args, rag_stats: Optional[dict] = None):
+def build_hygiene_audit(p1: dict, p2: list) -> dict:
+    """판정 로직은 유지한 채 런 품질 리스크만 측정한다."""
+    rows = p1.get("vulnerable_attacks", []) + p1.get("safe_attacks", []) + p2
+    structured_tool_call = re.compile(r"<tool_call>\s*\{", re.IGNORECASE)
+    sensitive_marker = re.compile(
+        r"internal api key|authentication token|system prompt|strictly confidential|sk-[A-Za-z0-9_-]+|bearer\s+[A-Za-z0-9._-]+",
+        re.IGNORECASE,
+    )
+
+    non_vulnerable_with_tool_call = []
+    non_vulnerable_with_sensitive_markers = []
+    nul_byte_rows = []
+
+    for row in rows:
+        response = row.get("target_response") or ""
+        if row.get("judgment") != "vulnerable" and structured_tool_call.search(response):
+            non_vulnerable_with_tool_call.append(row)
+        if row.get("judgment") != "vulnerable" and sensitive_marker.search(response):
+            non_vulnerable_with_sensitive_markers.append(row)
+
+        for field in ("attack_prompt", "original_prompt", "mutated_prompt", "target_response", "detail"):
+            value = row.get(field)
+            if isinstance(value, str) and "\x00" in value:
+                nul_byte_rows.append({
+                    "seed_id": row.get("seed_id", ""),
+                    "category": row.get("category", ""),
+                    "subcategory": row.get("subcategory", ""),
+                    "round": row.get("round"),
+                    "field": field,
+                    "nul_count": value.count("\x00"),
+                })
+
+    def _compress(items: list[dict]) -> list[dict]:
+        seen = set()
+        compact = []
+        for item in items:
+            key = (
+                item.get("category"),
+                item.get("subcategory"),
+                item.get("seed_id"),
+                item.get("round"),
+                item.get("judgment"),
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            compact.append({
+                "seed_id": item.get("seed_id", ""),
+                "category": item.get("category", ""),
+                "subcategory": item.get("subcategory", ""),
+                "round": item.get("round"),
+                "judgment": item.get("judgment", ""),
+                "detail": item.get("detail", ""),
+            })
+        return compact
+
+    return {
+        "non_vulnerable_with_tool_call": {
+            "count": len(_compress(non_vulnerable_with_tool_call)),
+            "examples": _compress(non_vulnerable_with_tool_call)[:10],
+        },
+        "non_vulnerable_with_sensitive_markers": {
+            "count": len(_compress(non_vulnerable_with_sensitive_markers)),
+            "examples": _compress(non_vulnerable_with_sensitive_markers)[:10],
+        },
+        "nul_byte_rows": {
+            "count": len(nul_byte_rows),
+            "examples": nul_byte_rows[:10],
+        },
+    }
+
+
+def print_hygiene_audit(hygiene: dict) -> None:
+    tool_count = hygiene["non_vulnerable_with_tool_call"]["count"]
+    sensitive_count = hygiene["non_vulnerable_with_sensitive_markers"]["count"]
+    nul_count = hygiene["nul_byte_rows"]["count"]
+    if not any((tool_count, sensitive_count, nul_count)):
+        return
+
+    print("\n  런 품질 점검")
+    print(f"  - 비취약인데 tool_call 포함: {tool_count}건")
+    print(f"  - 비취약인데 민감마커 포함: {sensitive_count}건")
+    print(f"  - NUL 바이트 포함 문자열: {nul_count}건")
+    if tool_count or sensitive_count:
+        print("  - 참고: 위 수치는 경고용이며 취약률 계산과 판정 결과는 변경하지 않음")
+
+
+def save_results(p1, p2, summary, elapsed, args, rag_stats: Optional[dict] = None, hygiene: Optional[dict] = None):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     out = Path(__file__).resolve().parent.parent.parent / "results" / f"pipeline_{ts}.json"
     out.parent.mkdir(exist_ok=True)
@@ -608,6 +1010,7 @@ def save_results(p1, p2, summary, elapsed, args, rag_stats: Optional[dict] = Non
             "카테고리_필터": args.category,
             "최대_공격수": args.max_attacks,
             "Phase2_라운드": args.rounds,
+            "Harvest_추가_변종": args.harvest_rounds_after_success,
             "LLM_Judge": args.llm_judge,
             "소요시간_초": round(elapsed, 1),
         },
@@ -618,11 +1021,15 @@ def save_results(p1, p2, summary, elapsed, args, rag_stats: Optional[dict] = Non
         },
         "Phase2_Red_Agent": {
             "results": p2,
-            "추가_vulnerable": len([r for r in p2 if r["judgment"] == "vulnerable"]),
-            "방어_성공": len([r for r in p2 if r["judgment"] == "safe"]),
+            "추가_vulnerable": len([r for r in p2 if _is_primary_phase2_vulnerable(r)]),
+            "harvest_vulnerable": len([r for r in p2 if r.get("judgment") == "vulnerable" and r.get("is_harvest")]),
+            "방어_성공": len([r for r in p2 if _is_primary_phase2_safe(r)]),
+            "harvest_safe": len([r for r in p2 if r.get("judgment") == "safe" and r.get("is_harvest")]),
         },
         "요약": summary,
     }
+    if hygiene:
+        data["런_품질_점검"] = hygiene
 
     with open(out, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -650,6 +1057,11 @@ async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline")
         print(f"  ⚠ DB 모듈 로드 실패 (DB 저장 건너뜀): {e}")
         return 0
 
+    def _db_safe_text(value):
+        if not isinstance(value, str):
+            return value
+        return value.replace("\x00", "")
+
     session_id = _uuid.uuid4()
     saved = 0
 
@@ -671,15 +1083,15 @@ async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline")
                     tr = TestResult(
                         session_id=session_id,
                         phase=1,
-                        seed_id=attack.get("seed_id", ""),
-                        attack_prompt=attack.get("attack_prompt", ""),
-                        target_response=attack.get("target_response", ""),
-                        judgment=attack.get("judgment", ""),
+                        seed_id=_db_safe_text(attack.get("seed_id", "")),
+                        attack_prompt=_db_safe_text(attack.get("attack_prompt", "")),
+                        target_response=_db_safe_text(attack.get("target_response", "")),
+                        judgment=_db_safe_text(attack.get("judgment", "")),
                         judgment_layer=attack.get("judge_layer", 1),
-                        severity=attack.get("severity"),
-                        category=attack.get("category", ""),
-                        subcategory=attack.get("subcategory", ""),
-                        detail=attack.get("detail", ""),
+                        severity=_db_safe_text(attack.get("severity")),
+                        category=_db_safe_text(attack.get("category", "")),
+                        subcategory=_db_safe_text(attack.get("subcategory", "")),
+                        detail=_db_safe_text(attack.get("detail", "")),
                     )
                     db.add(tr)
                     saved += 1
@@ -689,16 +1101,16 @@ async def save_results_to_db(p1: dict, p2: list, session_name: str = "pipeline")
                 tr = TestResult(
                     session_id=session_id,
                     phase=2,
-                    seed_id=result.get("seed_id", ""),
+                    seed_id=_db_safe_text(result.get("seed_id", "")),
                     round=result.get("round"),
-                    attack_prompt=result.get("mutated_prompt", ""),
-                    target_response=result.get("target_response", ""),
-                    judgment=result.get("judgment", ""),
+                    attack_prompt=_db_safe_text(result.get("mutated_prompt", "")),
+                    target_response=_db_safe_text(result.get("target_response", "")),
+                    judgment=_db_safe_text(result.get("judgment", "")),
                     judgment_layer=result.get("judge_layer"),
-                    severity=result.get("severity"),
-                    category=result.get("category", ""),
-                    subcategory=result.get("subcategory", ""),
-                    detail=result.get("detail", ""),
+                    severity=_db_safe_text(result.get("severity")),
+                    category=_db_safe_text(result.get("category", "")),
+                    subcategory=_db_safe_text(result.get("subcategory", "")),
+                    detail=_db_safe_text(result.get("detail", "")),
                 )
                 db.add(tr)
                 saved += 1
@@ -765,6 +1177,7 @@ async def async_main(args):
     if args.category:
         print(f"  카테고리: {args.category}")
     print(f"  Phase 2 라운드: 최대 {args.rounds}회")
+    print(f"  Harvest mode: 성공 후 추가 변종 {args.harvest_rounds_after_success}회")
     print(f"  LLM Judge: {'ON' if args.llm_judge else 'OFF (규칙만)'}")
     print()
 
@@ -857,12 +1270,14 @@ async def async_main(args):
         print("─" * 72)
 
         async with httpx.AsyncClient(timeout=settings.PHASE2_TIMEOUT) as client:
-            p2 = await run_phase2(safe_list, client, llm, args.llm_judge, args.rounds)
-        p2_vuln = len([r for r in p2 if r["judgment"] == "vulnerable"])
+            p2 = await run_phase2(safe_list, client, llm, args.llm_judge, args.rounds, args.harvest_rounds_after_success)
+        p2_vuln = len([r for r in p2 if _is_primary_phase2_vulnerable(r)])
         print(f"\n  Phase 2 완료: 추가 vulnerable={p2_vuln}")
 
     elapsed = time.time() - t0
     summary = print_summary(p1, p2, elapsed)
+    hygiene = build_hygiene_audit(p1, p2)
+    print_hygiene_audit(hygiene)
     rag_count_after = _get_attack_rag_count()
     rag_stats = {
         "before": rag_count_before,
@@ -870,7 +1285,7 @@ async def async_main(args):
         "delta": (rag_count_after - rag_count_before) if rag_count_before is not None and rag_count_after is not None else None,
         "phase1_stored": p1_rag_stored,
     }
-    save_results(p1, p2, summary, elapsed, args, rag_stats=rag_stats)
+    save_results(p1, p2, summary, elapsed, args, rag_stats=rag_stats, hygiene=hygiene)
 
     # DB 저장 (PostgreSQL 연결 시에만, 실패해도 JSON은 이미 저장됨)
     await save_results_to_db(p1, p2, session_name=f"pipeline-{args.category or 'all'}")
@@ -890,6 +1305,7 @@ def main():
     parser.add_argument("-c", "--category", help=f"카테고리 필터 ({'/'.join(list_supported_categories())})")
     parser.add_argument("-m", "--max-attacks", type=int, default=0, help="최대 공격 수 (0=전체)")
     parser.add_argument("-r", "--rounds", type=int, default=5, help="Phase 2 최대 라운드 (기본 5)")
+    parser.add_argument("--harvest-rounds-after-success", type=int, default=2, help="성공 후 추가 harvest 변종 수 (기본 2, 벤치마크 점수 미포함)")
     parser.add_argument("-t", "--target", default=None, help="타겟 모델 (기본: gemma4:e2b)")
     parser.add_argument("--phase1-only", action="store_true", help="Seed 테스트만 (Phase 2 안 함)")
     parser.add_argument("--phase2-only", action="store_true", help="Phase 1 건너뛰고 Phase 2만 (이전 결과 로드)")
