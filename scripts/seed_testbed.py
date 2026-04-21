@@ -355,6 +355,14 @@ async def seed(db_url: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="testbed DB 시드 데이터 삽입")
-    parser.add_argument("--db-url", default=DEFAULT_DB_URL, help="PostgreSQL 접속 URL")
+    parser.add_argument(
+        "--db-url",
+        default=None,
+        help="PostgreSQL 접속 URL (미지정 시 TESTBED_DB_URL 환경변수 또는 기본값 사용)",
+    )
     args = parser.parse_args()
-    asyncio.run(seed(args.db_url))
+
+    import os
+
+    db_url = args.db_url or os.getenv("TESTBED_DB_URL") or DEFAULT_DB_URL
+    asyncio.run(seed(db_url))

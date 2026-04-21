@@ -319,7 +319,12 @@
     if (e.key === 'Enter' && !e.shiftKey) sendMessage();
   });
 
-  function getUrl() { return document.getElementById('serverUrl').value.replace(/\/$/, ''); }
+  /** 베이스 URL만 (끝의 /chat 은 코드에서 붙임 — 중복되면 /chat/chat 이 됨) */
+  function getUrl() {
+    let u = document.getElementById('serverUrl').value.trim().replace(/\/$/, '');
+    if (u.endsWith('/chat')) u = u.slice(0, -'/chat'.length).replace(/\/$/, '');
+    return u;
+  }
 
   function updateModeBadge(mode) {
     modeBadge.textContent = mode === 'weak' ? 'WEAK' : 'STRICT';
@@ -414,7 +419,11 @@
       });
       const data = await res.json();
       hideTyping();
-      addMessage('bot', data.content, data.tool_trace);
+      if (!res.ok) {
+        addSystem(`HTTP ${res.status}: ${JSON.stringify(data)}`);
+        return;
+      }
+      addMessage('bot', data.content ?? '(응답에 content 없음)', data.tool_trace);
       if (data.security_mode) updateModeBadge(data.security_mode);
     } catch (e) {
       hideTyping();
