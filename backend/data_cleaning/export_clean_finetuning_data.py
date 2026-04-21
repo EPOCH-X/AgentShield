@@ -42,12 +42,15 @@ async def _fetch_test_results(conn) -> list:
             target_response,
             judgment,
             judgment_layer,
+                        manual_review_needed,
             category,
             subcategory,
             detail,
             created_at
         FROM test_results
-        WHERE judgment IS NOT NULL
+                WHERE phase IN (1, 2)
+                    AND judgment IS NOT NULL
+                    AND COALESCE(manual_review_needed, FALSE) = FALSE
         ORDER BY created_at ASC
     """
     return await conn.fetch(query)

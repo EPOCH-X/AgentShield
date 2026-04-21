@@ -1,11 +1,13 @@
 """
-[R7] 개발용 DB 시드 — 전체 목업 데이터 삽입
+[R7] 개발용 DB 시드 — 운영과 분리된 목업 데이터 삽입
 
 실행 (저장소 루트 AgentShield/에서):
 
     python -m backend.dev_seed
 
 이미 있는 데이터는 건너뜁니다 (중복 삽입 방지).
+기본값으로는 공격 패턴을 넣지 않는다. 샘플 공격까지 넣으려면
+`DEV_SEED_INCLUDE_ATTACK_PATTERNS=true`를 지정해야 한다.
 """
 
 from __future__ import annotations
@@ -17,6 +19,7 @@ from datetime import datetime, timedelta
 import bcrypt
 from sqlalchemy import func, select
 
+from backend.config import settings
 from backend.database import async_session, init_db
 from backend.models import (
     AttackPattern,
@@ -177,7 +180,9 @@ async def seed() -> None:
             select(func.count()).select_from(AttackPattern)
             .where(AttackPattern.source == "seed_dev")
         )
-        if not existing_ap:
+        if not settings.DEV_SEED_INCLUDE_ATTACK_PATTERNS:
+            print("[seed] 공격 패턴 시드 스킵 (DEV_SEED_INCLUDE_ATTACK_PATTERNS=false)")
+        elif not existing_ap:
             s.add_all([AttackPattern(**d) for d in ATTACK_PATTERNS])
             added.append(f"attack_patterns×{len(ATTACK_PATTERNS)}")
         else:

@@ -56,6 +56,9 @@ class MonitorChatRequest(BaseModel):
 
     messages: list[ChatMessage] = Field(..., min_length=1)
     target_url: Optional[HttpUrl] = None
+    target_api_key: Optional[str] = None
+    target_provider: Optional[str] = None
+    target_model: Optional[str] = None
     employee_id: Optional[str] = None
 
 
@@ -74,6 +77,9 @@ class RequestContext:
     latest_message: str
     employee_id: str
     target_url: Optional[str]
+    target_api_key: Optional[str]
+    target_provider: Optional[str]
+    target_model: Optional[str]
     message_count: int
 
 
@@ -97,6 +103,9 @@ def extract_request_context(payload: MonitorChatRequest) -> RequestContext:
         latest_message=latest_message,
         employee_id=payload.employee_id or DEFAULT_EMPLOYEE_ID,
         target_url=str(payload.target_url) if payload.target_url else None,
+        target_api_key=payload.target_api_key,
+        target_provider=payload.target_provider,
+        target_model=payload.target_model,
         message_count=len(payload.messages),
     )
 
@@ -281,15 +290,6 @@ def finalize_response(
     save_usage_log_fn=save_usage_log,
     create_violation_record_fn=create_violation_record,
 ) -> MonitorChatResponse:
-    if record_plan.should_create_violation and record_plan.violation_type:
-        record = build_violation_record_input(
-            violation_type=record_plan.violation_type,
-            severity=response.severity,
-            description=response.reason or response.content,
-            evidence=context.latest_message,
-            reference=context.target_url,
-        )
-        create_violation_record_fn(record)
     log_entry = build_usage_log_entry(
         employee_id=context.employee_id,
         request_content=context.latest_message,
@@ -299,7 +299,20 @@ def finalize_response(
         action_taken=record_plan.action_taken,
         target_service=context.target_url,
     )
-    save_usage_log_fn(log_entry)
+    saved_log = save_usage_log_fn(log_entry)
+
+    if record_plan.should_create_violation and record_plan.violation_type:
+        record = build_violation_record_input(
+            employee_id=context.employee_id,
+            violation_type=record_plan.violation_type,
+            severity=response.severity,
+            description=response.reason or response.content,
+            evidence=context.latest_message,
+            evidence_log_id=getattr(saved_log, "id", None),
+            reference=context.target_url,
+            sanction="blocked",
+        )
+        create_violation_record_fn(record)
     return response
 
 
@@ -388,6 +401,9 @@ def process_monitor_request_with_dependencies(
 
     forward_request = build_forward_request(
         target_url=context.target_url,
+        target_api_key=context.target_api_key,
+        target_provider=context.target_provider,
+        target_model=context.target_model,
         messages=[{"role": "user", "content": context.latest_message}],
         employee_context={"employee_id": context.employee_id},
     )
