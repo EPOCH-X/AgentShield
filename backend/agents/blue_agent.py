@@ -37,8 +37,9 @@ Artifacts:
    If policy patching is unnecessary, return "".
 
 Output format (strict): a single JSON object with keys:
-  "input_filter", "output_filter", "system_prompt_patch"
+  "input_filter", "output_filter", "system_prompt_patch", "defense_rationale"
 Values must be strings (Python code as string for the two functions).
+defense_rationale must explain in 1-3 sentences why each artifact is present or empty.
 Do not wrap in markdown fences. No extra keys. No commentary outside JSON.
 """
 
@@ -96,6 +97,7 @@ class BlueDefenseBundle:
     input_filter: str
     output_filter: str
     system_prompt_patch: str
+    defense_rationale: str
 
     def to_json_str(self) -> str:
         return json.dumps(
@@ -103,6 +105,7 @@ class BlueDefenseBundle:
                 "input_filter": self.input_filter,
                 "output_filter": self.output_filter,
                 "system_prompt_patch": self.system_prompt_patch,
+                "defense_rationale": self.defense_rationale,
             },
             ensure_ascii=False,
         )
@@ -129,10 +132,11 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
             input_filter=str(data.get("input_filter", "")),
             output_filter=str(data.get("output_filter", "")),
             system_prompt_patch=str(data.get("system_prompt_patch", "")),
+            defense_rationale=str(data.get("defense_rationale", "")),
         )
     except json.JSONDecodeError:
         # LLM이 JSON-ish를 내지만 \s 같은 잘못된 escape로 strict JSON 파싱이 실패할 수 있다.
-        # 핵심 3개 필드를 정규식으로 추출해 폴백한다.
+        # 핵심 필드를 정규식으로 추출해 폴백한다.
         def _extract_field_value(key: str, src: str) -> str | None:
             # JSON string body: (?:\\.|[^"\\])*
             m = re.search(
@@ -157,6 +161,7 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
         input_filter = _extract_field_value("input_filter", text)
         output_filter = _extract_field_value("output_filter", text)
         system_prompt_patch = _extract_field_value("system_prompt_patch", text)
+        defense_rationale = _extract_field_value("defense_rationale", text)
 
         if input_filter is None or output_filter is None or system_prompt_patch is None:
             raise
@@ -165,4 +170,5 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
             input_filter=input_filter,
             output_filter=output_filter,
             system_prompt_patch=system_prompt_patch,
+            defense_rationale=defense_rationale or "",
         )

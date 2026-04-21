@@ -194,6 +194,7 @@ def _register_defense_patterns_via_ingest(
                             "input_filter": str(payload.get("input_filter") or ""),
                             "output_filter": str(payload.get("output_filter") or ""),
                             "system_prompt_patch": str(payload.get("system_prompt_patch") or ""),
+                            "defense_rationale": str(payload.get("defense_rationale") or ""),
                         },
                         ensure_ascii=False,
                     ),
@@ -380,6 +381,8 @@ async def _run_proxy_mode(
                     "input_action": "proxy_runtime",
                     "benign_blocked": benign_blocked,
                     "source_file": str(payload.get("_source_file", "")),
+                    "response_after_defense": response_text,
+                    "attack_prompt": attack_prompt,
                 }
             )
 
@@ -457,10 +460,12 @@ async def _run_local_mode(
             category = str(payload.get("category") or "")
             attack_prompt, vulnerable_response = _find_source_case(source_rows, defense_id, category)
             total_tested += 1
+            response_after_defense = ""
 
             if _apply_input_filters(attack_prompt, input_patterns):
                 verdict = "blocked"
                 blocked += 1
+                response_after_defense = "[blocked_by_input_filter]"
             else:
                 messages = _inject_system_patch(
                     [{"role": "user", "content": attack_prompt}],
@@ -476,6 +481,7 @@ async def _run_local_mode(
                     errors.append(f"local_target_failed:{defense_id}:{exc}")
 
                 filtered_text = _apply_output_filters(response_text, output_patterns)
+                response_after_defense = filtered_text
                 # Phase 1/2와 동일한 Judge 기준으로 방어 성공 여부를 판정한다.
                 judge_result = await full_judge(
                     category,
@@ -505,6 +511,8 @@ async def _run_local_mode(
                     "input_action": "local_runtime",
                     "benign_blocked": benign_blocked,
                     "source_file": str(payload.get("_source_file", "")),
+                    "response_after_defense": response_after_defense,
+                    "attack_prompt": attack_prompt,
                 }
             )
 
