@@ -51,6 +51,7 @@ def _write_defense_json_file(
         "input_filter": bundle.input_filter,
         "output_filter": bundle.output_filter,
         "system_prompt_patch": bundle.system_prompt_patch,
+        "defense_rationale": bundle.defense_rationale,
     }
     safe_id = defense_id.replace("/", "_")
     path = out_dir / f"defense_{safe_id}.json"
