@@ -44,6 +44,50 @@ Do not wrap in markdown fences. No extra keys. No commentary outside JSON.
 """
 
 
+def _category_policy_block(category: str) -> str:
+    """카테고리별 동적 정책 블록(유저 프롬프트에 삽입)."""
+    c = (category or "").strip().upper()
+    common = (
+        "- Objective: block/mitigate this case with minimal false positives.\n"
+        "- Prefer precise structural patterns over broad single-keyword rules.\n"
+        "- If an artifact is empty, explain why in defense_rationale."
+    )
+
+    if c == "LLM01":
+        specific = (
+            "- Focus on instruction-boundary attacks (override/ignore/hidden directives).\n"
+            "- Prioritize patterns like 'ignore previous instructions', 'override', hidden control sections.\n"
+            "- Strengthen system_prompt_patch to preserve system rules over user-supplied override text."
+        )
+    elif c == "LLM02":
+        specific = (
+            "- Focus on sensitive-data disclosure/extraction requests.\n"
+            "- Prioritize masking for API keys, bearer tokens, emails, phone numbers, account identifiers.\n"
+            "- Prefer output_filter redaction first; use input_filter blocking for explicit extraction prompts."
+        )
+    elif c == "LLM06":
+        specific = (
+            "- Focus on excessive agency and unauthorized tool execution.\n"
+            "- Prioritize structured signatures (<tool_call>, tool_call(...), function_call payloads).\n"
+            "- Do NOT use standalone broad patterns like 'tool call' without execution context."
+        )
+    elif c == "LLM07":
+        specific = (
+            "- Focus on system prompt/policy leakage and hidden-instruction disclosure.\n"
+            "- Prioritize patterns requesting internal instructions, role/system prompt reveal, encoded leakage attempts.\n"
+            "- Strengthen system_prompt_patch to refuse disclosure of internal rules/configuration."
+        )
+    else:
+        specific = "- Apply generic defense hardening aligned to OWASP category signals in the case context."
+
+    return (
+        "[Dynamic category policy]\n"
+        f"category: {c or 'UNKNOWN'}\n"
+        f"{common}\n"
+        f"{specific}\n"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 프롬프트 빌더
 # ---------------------------------------------------------------------------
@@ -68,6 +112,7 @@ def build_blue_prompt(
         if rag_defense_examples.strip()
         else ""
     )
+    category_policy_block = _category_policy_block(category)
 
     return f"""You are the Blue Agent for an LLM security product. Generate defenses for the finding below.
 
@@ -81,6 +126,7 @@ category: {category}
 {target_response}
 
 {owasp_block}{rag_block}
+{category_policy_block}
 
 [Defense authoring rules]
 {DEFENSE_WRITING_GUIDE}
