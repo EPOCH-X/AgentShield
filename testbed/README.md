@@ -54,6 +54,13 @@ AgentShield (공격자)
 
 ## 실행 방법
 
+> **역할별 안내**
+> - **A파트 (챗봇/인프라 담당)** → 아래 전체 순서 진행
+> - **B파트 (더미 데이터 담당)** → 1~2번만 진행
+> - **QA** → [QA 실행 가이드](#qa-실행-가이드) 섹션으로 바로 이동
+
+---
+
 ### 사전 조건
 - Ollama 설치 + `gemma4:e2b` 모델 다운로드
 - PostgreSQL 로컬 설치
@@ -100,6 +107,109 @@ curl -X POST http://localhost:8010/chat \
 ### 5. AgentShield 파이프라인 연결
 ```bash
 python -m backend.graph.run_pipeline --target http://localhost:8010/chat
+```
+
+---
+
+## QA 실행 가이드
+
+> A/B파트 작업 없이 QA만 독립적으로 챗봇을 띄우는 방법이다.
+
+### QA 사전 조건
+
+| 항목 | 설치 방법 |
+|---|---|
+| **Git** | 코드 클론용 |
+| **Python 3.11+** | [python.org](https://www.python.org/downloads/) |
+| **PostgreSQL 16** | [postgresql.org](https://www.postgresql.org/download/) |
+| **Ollama** | [ollama.com](https://ollama.com/download) |
+| **VS Code + Live Server 확장** | 브라우저 테스트 UI용 |
+
+### QA Step 1 — 코드 받기
+
+```bash
+git clone <repo-url>
+cd AgentShield
+git checkout develop
+```
+
+### QA Step 2 — Python 환경 설정
+
+```bash
+python -m venv venv
+venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### QA Step 3 — Ollama 모델 다운로드
+
+```bash
+ollama pull gemma4:e2b
+```
+
+> 모델 크기가 크므로 시간이 걸릴 수 있다. Ollama는 백그라운드 서비스로 자동 실행되므로 별도로 `ollama serve`를 실행하지 않아도 된다.
+
+### QA Step 4 — .env 설정
+
+프로젝트 루트에 `.env` 파일을 만들고 아래 내용 입력:
+
+```env
+TESTBED_DB_URL=postgresql://postgres:내PostgreSQL비밀번호@localhost:5432/postgres
+TOOL_GATEWAY_URL=http://localhost:8020
+TESTBED_SECURITY_MODE=weak
+OLLAMA_MODEL=gemma4:e2b
+OLLAMA_BASE_URL=http://localhost:11434
+```
+
+> `내PostgreSQL비밀번호` 부분만 본인 PC의 PostgreSQL 설치 시 설정한 비밀번호로 변경한다.
+
+### QA Step 5 — DB 초기화 (최초 1회)
+
+```bash
+# 스키마 생성
+"C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -d postgres -f "database/testbed_schema.sql"
+
+# 더미 데이터 삽입
+python scripts/seed_testbed.py
+```
+
+### QA Step 6 — 서버 실행 (터미널 2개)
+
+**터미널 1**
+```bash
+venv\Scripts\activate
+uvicorn testbed.tool_gateway.app:app --port 8020 --reload --env-file .env
+```
+
+**터미널 2**
+```bash
+venv\Scripts\activate
+uvicorn testbed.target_chatbot.app:app --port 8010 --reload --env-file .env
+```
+
+두 서버 모두 `Application startup complete.`가 뜨면 준비 완료.
+
+### QA Step 7 — 테스트 UI 접속
+
+VS Code에서 `testbed/chatbot_test.html` 파일을 열고 **Alt+L, O** (Live Server 실행).
+
+브라우저에서 `http://127.0.0.1:5500/testbed/chatbot_test.html` 접속.
+
+### QA 정상 동작 확인
+
+아래 메시지를 입력해서 tool_trace에 `customer_db.query`가 찍히고 고객 정보가 나오면 정상:
+
+```
+CUST-0001 고객 정보 알려줘
+```
+
+### QA 보안 모드 전환
+
+`.env`에서 `TESTBED_SECURITY_MODE` 값을 바꾸고 서버를 재시작하면 된다:
+
+```env
+TESTBED_SECURITY_MODE=weak    # 공격이 잘 먹히는 취약 모드
+TESTBED_SECURITY_MODE=strict  # 방어 모드
 ```
 
 ---

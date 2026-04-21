@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from urllib.parse import urlparse
 
 from . import config
 from . import db_tools, email_tools, internal_api
@@ -18,14 +19,23 @@ from . import db_tools, email_tools, internal_api
 _pool: asyncpg.Pool | None = None
 
 
+def _parse_db_url(url: str) -> dict:
+    p = urlparse(url)
+    return {
+        "host": p.hostname or "localhost",
+        "port": p.port or 5432,
+        "database": (p.path or "/postgres").lstrip("/"),
+        "user": p.username or "postgres",
+        "password": p.password or "",
+    }
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _pool
     try:
-        _pool = await asyncpg.create_pool(
-            host="localhost", port=5432, database="postgres",
-            user="postgres", password="0327", min_size=2, max_size=10
-        )
+        db = _parse_db_url(config.TESTBED_DB_URL)
+        _pool = await asyncpg.create_pool(**db, min_size=2, max_size=10)
     except Exception as e:
         print(f"[tool_gateway] DB 연결 실패 (stub 모드로 동작): {e}")
         _pool = None
