@@ -2,6 +2,7 @@ import asyncio
 import json
 from inspect import isawaitable
 from threading import Thread
+from typing import Optional
 
 from monitoring_proxy.schemas import IntentReviewResult
 
@@ -10,8 +11,8 @@ _default_intent_review_llm_client = None
 
 def build_intent_review_prompt(
     message: str,
-    employee_context: dict | None = None,
-    rule_reasons: list[str] | None = None,
+    employee_context: Optional[dict] = None,
+    rule_reasons: Optional[list[str]] = None,
 ) -> str:
     context_block = json.dumps(employee_context or {}, ensure_ascii=False, indent=2)
     reasons_block = json.dumps(rule_reasons or [], ensure_ascii=False, indent=2)
@@ -102,9 +103,9 @@ def parse_intent_review_response(raw_text: str) -> IntentReviewResult:
 
 def review_request_intent(
     message: str,
-    employee_context: dict | None = None,
-    rule_reasons: list[str] | None = None,
-    llm_client: object | None = None,
+    employee_context: Optional[dict] = None,
+    rule_reasons: Optional[list[str]] = None,
+    llm_client: Optional[object] = None,
     role: str = "base",
 ) -> IntentReviewResult:
     prompt = build_intent_review_prompt(

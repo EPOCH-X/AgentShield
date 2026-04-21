@@ -1,184 +1,135 @@
-# 팀원 병합용 — Testbed 로컬 QA 가이드
+# 팀 QA 가이드
 
-이 문서는 `AgentShield/testbed/` 실전형 테스트 챗봇을 **각자 PC(로컬 PostgreSQL)** 환경에서 동일하게 실행/검증(QA)하기 위한 안내서입니다.
+이 문서는 팀원이 각자 로컬에서 testbed를 같은 방식으로 띄우고 확인하기 위한 실행 기준이다.
 
-핵심 원칙은 **환경변수 `TESTBED_DB_URL` 하나로 DB 연결을 통일**하는 것입니다.
+## 1. 목표
 
----
+- 같은 DB 구조
+- 같은 시드 데이터
+- 같은 포트
+- 같은 최소 검증 절차
+- 고객이 target URL 하나만 넣고도 검증할 수 있는 환경 재현
 
-## 1) 사전 준비
+## 2. 필수 환경변수
 
-- **Python 3.11+**
-- **Ollama 설치**
-- **PostgreSQL 설치(로컬)**
-- (선택) **pgAdmin** / **DBeaver** 같은 DB GUI
-
----
-
-## 2) 공통 환경변수(팀원마다 “자기 DB”에 맞게)
-
-### 2.1 `TESTBED_DB_URL` (필수)
-
-형식:
-
-```text
-postgresql://USER:PASSWORD@HOST:PORT/DBNAME
-```
+- `TESTBED_DB_URL`
+- `TOOL_GATEWAY_URL`
+- `TESTBED_SECURITY_MODE`
+- `OLLAMA_BASE_URL`
+- `OLLAMA_MODEL`
 
 예시:
 
-```powershell
-$env:TESTBED_DB_URL="postgresql://postgres:비밀번호@localhost:5432/postgres"
+```bash
+export TESTBED_DB_URL="postgresql://postgres:password@localhost:5432/postgres"
+export TOOL_GATEWAY_URL="http://localhost:8020"
+export TESTBED_SECURITY_MODE="weak"
+export OLLAMA_BASE_URL="http://localhost:11434"
+export OLLAMA_MODEL="gemma4:e2b"
 ```
 
-### 2.2 기타(선택)
+## 3. 최초 1회
 
-```powershell
-$env:OLLAMA_BASE_URL="http://localhost:11434"
-$env:OLLAMA_MODEL="gemma4:e2b"
-$env:TOOL_GATEWAY_URL="http://localhost:8020"
-$env:TESTBED_SECURITY_MODE="weak"   # 또는 strict
-```
-
----
-
-## 3) 설치(최초 1회)
-
-프로젝트 루트에서:
-
-```powershell
-cd "C:\Users\user\Desktop\파이널 프로젝트\agent1\AgentShield"
+```bash
 python -m venv venv
-.\venv\Scripts\activate
+source venv/bin/activate
 pip install -U pip
 pip install -r requirements.txt
 ```
 
-> 최신 `scripts/seed_testbed.py`는 `asyncpg`를 사용합니다(보통 `requirements.txt`에 포함).
+## 4. DB 준비
 
----
-
-## 4) DB 스키마/시드(최초 1회, 또는 데이터가 비었을 때)
-
-### 4.1 스키마 적용
-
-```powershell
-$env:TESTBED_DB_URL="postgresql://postgres:비밀번호@localhost:5432/postgres"
-$env:PGCLIENTENCODING="UTF8"
-& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -d "$env:TESTBED_DB_URL" -v ON_ERROR_STOP=1 -f "database\testbed_schema.sql"
+```bash
+psql "$TESTBED_DB_URL" -f database/testbed_schema.sql
+python scripts/seed_testbed.py
+python scripts/ingest_testbed_kb.py
 ```
 
-> `database/testbed_schema.sql`은 안전하게 재실행 가능하도록 **테스트베드 테이블만 DROP 후 재생성**합니다.
+빠른 상태 확인:
 
-### 4.2 시드 주입(더미 데이터 생성)
-
-```powershell
-$env:TESTBED_DB_URL="postgresql://postgres:비밀번호@localhost:5432/postgres"
-python scripts\seed_testbed.py
+```bash
+nc -z localhost 5433 && echo TESTBED_DB_UP || echo TESTBED_DB_DOWN
+psql "$TESTBED_DB_URL" -c "SELECT COUNT(*) AS customers FROM customers;"
+psql "$TESTBED_DB_URL" -c "SELECT COUNT(*) AS orders FROM orders;"
+psql "$TESTBED_DB_URL" -c "SELECT COUNT(*) AS audit_logs FROM audit_logs;"
 ```
 
-기대 건수:
-- `customers`: 110
-- `orders`: 320
-- `support_tickets`: 160
-- `refund_requests`: 35
-- `password_reset_requests`: 20
-- `audit_logs`: 50
+## 5. 서버 실행
 
----
+### Tool Gateway
 
-## 5) 서비스 실행(터미널 2개)
-
-### 5.1 Tool Gateway (8020)
-
-```powershell
-cd "C:\Users\user\Desktop\파이널 프로젝트\agent1\AgentShield"
-.\venv\Scripts\activate
-$env:TESTBED_DB_URL="postgresql://postgres:비밀번호@localhost:5432/postgres"
+```bash
 uvicorn testbed.tool_gateway.app:app --port 8020 --reload
 ```
 
-확인: `http://localhost:8020/health` 에서 `db_connected: true`
+### Target Chatbot
 
-### 5.2 Target Chatbot (8010)
-
-```powershell
-cd "C:\Users\user\Desktop\파이널 프로젝트\agent1\AgentShield"
-.\venv\Scripts\activate
-$env:TOOL_GATEWAY_URL="http://localhost:8020"
-$env:TESTBED_SECURITY_MODE="weak"
+```bash
 uvicorn testbed.target_chatbot.app:app --port 8010 --reload
 ```
 
-확인: `http://localhost:8010/health`
+## 6. 최소 QA
 
----
+### health
 
-## 6) 브라우저로 채팅 테스트(UI)
+- `GET /health` on 8010
+- `GET /health` on 8020
 
-파일: `testbed/chatbot_test.html`
+### chat
 
-- 브라우저로 열기(더블클릭 또는 Live Server)
-- 하단 **서버** 입력칸에는 **`http://localhost:8010` 만** 넣기
-  - `/chat`까지 붙이면 내부에서 또 `/chat`을 붙여 **`/chat/chat`** 이 되어 동작이 이상해질 수 있음
-
----
-
-## 7) QA 스모크 테스트(최소)
-
-### 7.1 health
-- `GET http://localhost:8010/health`
-- `GET http://localhost:8020/health`
-
-### 7.2 `/chat` 최소 호출(curl)
-
-```powershell
-curl -X POST http://localhost:8010/chat -H "Content-Type: application/json" -d "{\"messages\":[{\"role\":\"user\",\"content\":\"CUST-0001 고객 정보 알려줘\"}]}"
+```bash
+curl -X POST http://localhost:8010/chat \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"CUST-0001 고객 정보 알려줘"}]}'
 ```
 
-응답 JSON에 **`content`**가 있으면 API 계약 충족. `tool_trace`에 `customer_db.query`가 찍히면 DB 연동까지 정상.
+확인 항목:
 
----
+- `content` 존재
+- `tool_trace` 또는 audit log 기록
+- DB 연결 정상
 
-## 8) DB 데이터 “직접 확인”(pgAdmin / psql)
+tool trace 없이 확인할 때:
 
-### 8.1 psql로 빠른 확인
-
-```powershell
-$env:TESTBED_DB_URL="postgresql://postgres:비밀번호@localhost:5432/postgres"
-& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -d "$env:TESTBED_DB_URL" -c "select count(*) from customers;"
+```bash
+psql "$TESTBED_DB_URL" -c "SELECT tool_name, result_summary, created_at FROM audit_logs ORDER BY created_at DESC LIMIT 5;"
 ```
 
-### 8.2 pgAdmin에서 행 보기
+### AgentShield scan 연결 확인
 
-- `Databases` → (DBNAME 예: `postgres`)
-- `Schemas` → `public` → `Tables`
-- 테이블 우클릭 → **View/Edit Data → All Rows**
+검증 시스템은 같은 타겟 URL을 내부에서 반복 호출해 원응답과 방어 재검증을 수행한다.
 
-> 최신 스키마/시드는 `audit_logs`도 **초기 50건**을 넣습니다(정상 호출 이력 샘플).
+예시 target URL:
 
----
+- `http://localhost:8010/chat`
 
-## 9) 자주 겪는 문제(해결)
+핵심 확인:
 
-### 9.1 psql 스키마 적용 시 “UHC/UTF8 인코딩 오류”
-- 원인: Windows 환경에서 psql이 파일을 CP949(UHC)로 읽어 한글 주석이 깨짐
-- 해결: 스키마 적용 전에 `PGCLIENTENCODING="UTF8"` 설정 + `-v ON_ERROR_STOP=1` 사용
+- 고객이 넘길 값은 target URL 하나면 충분한가
+- attack -> target original response -> judge -> blue defense -> rejudge 흐름이 성립하는가
 
-### 9.2 pgAdmin에서 테이블은 보이는데 “데이터가 안 보임”
-- `View/Edit Data` 후 **Execute(▶) / F5**를 눌러 실행
-- 아래 `Data Output` 그리드가 접혀있을 수 있으니 분할바를 내려서 확인
-- `SELECT count(*) FROM public.customers;`로 0/110 확인
+## 7. 공통 실수
 
-### 9.3 `chatbot_test.html`에서 아무 반응 없음
-- 서버 입력칸은 **`http://localhost:8010`** (끝에 `/chat` 금지)
-- `http://localhost:8010/health`가 먼저 뜨는지 확인
+- `/chat/chat`로 잘못 호출하지 말 것
+- `TESTBED_DB_URL`을 비워두지 말 것
+- weak/strict 모드를 혼용한 채 결과를 비교하지 말 것
+- shared DB를 바로 학습 데이터셋이라고 생각하지 말 것
+- `manual_review_needed`가 걸린 결과를 그대로 export하지 말 것
 
-### 9.4 시드 실행이 DB에 안 들어가는 것 같을 때
-- `TESTBED_DB_URL`이 올바른지 확인(호스트/포트/DB/계정)
-- 확인 쿼리:
+## 8. DB 오염관리
 
-```sql
-SELECT count(*) FROM customers;
-```
+- `test_results`는 일단 모으는 원본 저장소다. 성공, 실패, 애매한 케이스가 같이 들어와도 된다.
+- 사람이 다시 봐야 하는 건 review queue에서 먼저 확인한다.
+- `manual_review_needed=true`가 붙은 건 바로 학습에 쓰지 않는다.
+- 학습 파일은 항상 `backend/data_cleaning/` 정제 스크립트로 다시 뽑는다.
+- 팀 공통 규칙은 하나만 기억하면 된다: `raw는 DB`, `train/eval은 cleaned export`.
 
+## 9. QA 완료 기준
+
+- customers 110
+- orders 320
+- support_tickets 160
+- refund_requests 35
+- password_reset_requests 20
+- audit_logs 초기 적재 확인
+- target URL `http://localhost:8010/chat` 로 실제 질의 가능

@@ -56,6 +56,7 @@ id_rsa*
 
 # Data (용량 큰 파일)
 *.jsonl
+models/
 data/attack_patterns/*.csv
 data/phase3_defenses/
 !data/attack_patterns/README.md
@@ -70,6 +71,11 @@ adapters/lora-judge/*.safetensors
 adapters/lora-blue/*.bin
 adapters/lora-blue/*.safetensors
 
+# 분석·연구 문서 (개인 작업용, 커밋 불필요)
+gemma4_26b_baseline_분석.md
+LLM_Judge_분석_및_업계동향.md
+남은_과제_로드맵.md
+로컬_AI_모델_비교_20260421.md
 # ChromaDB
 chromadb_data/
 

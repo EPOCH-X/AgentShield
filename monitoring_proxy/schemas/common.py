@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -26,21 +26,21 @@ class PolicyResultSchema(BaseModel):
     blocked: bool
     needs_llm_review: bool = False
     stage: StageType
-    severity: SeverityType | None
-    reason: str | None
-    retry_after_seconds: int | None = None
-    limit_type: LimitType | None = None
+    severity: Optional[SeverityType]
+    reason: Optional[str]
+    retry_after_seconds: Optional[int] = None
+    limit_type: Optional[LimitType] = None
 
 
 class MonitorChatResponseSchema(BaseModel):
     content: str
     blocked: bool
     stage: StageType
-    severity: SeverityType | None
-    reason: str | None
-    retry_after_seconds: int | None = None
-    limit_type: LimitType | None = None
-    target_url: str | None = None
+    severity: Optional[SeverityType]
+    reason: Optional[str]
+    retry_after_seconds: Optional[int] = None
+    limit_type: Optional[LimitType] = None
+    target_url: Optional[str] = None
     message_count: int
 
 
@@ -51,30 +51,39 @@ class IntentReviewResult(BaseModel):
 
 
 class UsageLogEntry(BaseModel):
+    id: Optional[int] = None
     employee_id: str
     request_content: str
     response_content: str
-    policy_violation: str | None
-    severity: SeverityType | None
+    policy_violation: Optional[str]
+    severity: Optional[SeverityType]
     action_taken: ActionTakenType
-    target_service: str | None = None
+    target_service: Optional[str] = None
 
 
 class ViolationRecordInput(BaseModel):
+    id: Optional[int] = None
+    employee_id: Optional[str] = None
     violation_type: str
-    severity: SeverityType | None
+    severity: Optional[SeverityType]
     description: str
-    evidence: str | None = None
-    reference: str | None = None
+    evidence: Optional[str] = None
+    evidence_log_id: Optional[int] = None
+    reference: Optional[str] = None
+    sanction: Optional[str] = None
+    resolved: bool = False
 
 
 class ForwardRequest(BaseModel):
-    target_url: str | None
+    target_url: Optional[str]
+    target_api_key: Optional[str] = None
+    target_provider: Optional[str] = None
+    target_model: Optional[str] = None
     messages: list[dict[str, str]]
-    employee_context: dict | None = None
+    employee_context: Optional[dict] = None
 
 
 class ForwardResponse(BaseModel):
-    content: str | None
-    target_service: str | None = None
+    content: Optional[str]
+    target_service: Optional[str] = None
     forwarded: bool = False

@@ -5,7 +5,7 @@
 Phase 4에서 bypassed > 0이면 Phase 3으로 재순환 (최대 3회).
 """
 
-from typing import TypedDict, Any
+from typing import TypedDict, Any, Optional
 
 from langgraph.graph import StateGraph, END
 
@@ -17,6 +17,7 @@ from backend.config import settings
 class ScanState(TypedDict):
     session_id: str
     target_url: str
+    target_config: dict[str, Any]
     phase1_result: dict[str, Any]  # [R2] Phase 1 출력
     phase2_result: dict[str, Any]  # [R1] Phase 2 출력
     phase3_result: dict[str, Any]  # [R3] Phase 3 출력
@@ -30,7 +31,11 @@ async def phase1_node(state: ScanState) -> dict:
     """[R2 구현 연결] Phase 1 — DB 기반 대량 스캔"""
     from backend.core.phase1_scanner import run_phase1  # [R2]
 
-    result = await run_phase1(state["session_id"], state["target_url"])
+    result = await run_phase1(
+        state["session_id"],
+        state["target_url"],
+        target_config=state.get("target_config") or {},
+    )
     return {"phase1_result": result}
 
 
@@ -42,6 +47,7 @@ async def phase2_node(state: ScanState) -> dict:
         session_id=state["session_id"],
         target_url=state["target_url"],
         phase1_result=state["phase1_result"],
+        target_config=state.get("target_config") or {},
     )
     return {"phase2_result": result}
 
@@ -66,6 +72,7 @@ async def phase4_node(state: ScanState) -> dict:
         session_id=state["session_id"],
         target_url=state["target_url"],
         phase3_result=state["phase3_result"],
+        target_config=state.get("target_config") or {},
     )
     return {"phase4_result": result, "iteration": state["iteration"] + 1}
 
@@ -111,13 +118,18 @@ def build_security_graph() -> StateGraph:
     return graph.compile()
 
 
-async def run_scan(session_id: str, target_url: str) -> ScanState:
+async def run_scan(
+    session_id: str,
+    target_url: str,
+    target_config: Optional[dict[str, Any]] = None,
+) -> ScanState:
     """전체 스캔 실행 진입점"""
     app = build_security_graph()
 
     initial_state: ScanState = {
         "session_id": session_id,
         "target_url": target_url,
+        "target_config": target_config or {},
         "phase1_result": {},
         "phase2_result": {},
         "phase3_result": {},

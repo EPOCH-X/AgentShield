@@ -11,12 +11,13 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 import httpx
 from sqlalchemy import select
 
 from backend.config import settings
+from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 
 
 _FALLBACK_ATTACK_BY_CATEGORY: dict[str, str] = {
@@ -265,6 +266,7 @@ async def _run_proxy_mode(
     *,
     session_id: str,
     target_url: str,
+    target_config: Optional[dict[str, Any]],
     payload_rows: list[dict[str, Any]],
     source_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -321,6 +323,9 @@ async def _run_proxy_mode(
                     chat_url,
                     json={
                         "target_url": target_url,
+                        "target_api_key": (target_config or {}).get("api_key"),
+                        "target_provider": (target_config or {}).get("provider"),
+                        "target_model": (target_config or {}).get("model"),
                         "messages": [{"role": "user", "content": attack_prompt}],
                     },
                 )
@@ -351,6 +356,9 @@ async def _run_proxy_mode(
                         chat_url,
                         json={
                             "target_url": target_url,
+                            "target_api_key": (target_config or {}).get("api_key"),
+                            "target_provider": (target_config or {}).get("provider"),
+                            "target_model": (target_config or {}).get("model"),
                             "messages": [{"role": "user", "content": benign}],
                         },
                     )
@@ -424,6 +432,7 @@ async def _run_local_mode(
     *,
     session_id: str,
     target_url: str,
+    target_config: Optional[dict[str, Any]],
     payload_rows: list[dict[str, Any]],
     source_rows: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -440,6 +449,12 @@ async def _run_local_mode(
     input_patterns = rules.get("input_filters", [])
     output_patterns = rules.get("output_filters", [])
     system_patch = str(rules.get("system_prompt_patch", ""))
+    adapter_config = TargetAdapterConfig.from_input(
+        target_url=target_url,
+        api_key=(target_config or {}).get("api_key"),
+        provider=(target_config or {}).get("provider"),
+        model=(target_config or {}).get("model"),
+    )
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         for payload in payload_rows:
@@ -457,10 +472,11 @@ async def _run_local_mode(
                     system_patch,
                 )
                 try:
-                    resp = await client.post(target_url, json={"messages": messages})
-                    resp.raise_for_status()
-                    response_json = resp.json()
-                    response_text = str(response_json.get("content", resp.text))
+                    response_text = await send_messages_to_target(
+                        client,
+                        adapter_config,
+                        messages=messages,
+                    )
                 except Exception as exc:
                     response_text = str(vulnerable_response)
                     errors.append(f"local_target_failed:{defense_id}:{exc}")
@@ -537,6 +553,7 @@ async def run_phase4(
     target_url: str,
     phase3_result: dict[str, Any] | None = None,
     mode: str = "proxy",
+    target_config: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """
     1차(local) 검증:
@@ -573,12 +590,14 @@ async def run_phase4(
         return await _run_proxy_mode(
             session_id=session_id,
             target_url=target_url,
+            target_config=target_config,
             payload_rows=payload_rows,
             source_rows=source_rows,
         )
     return await _run_local_mode(
         session_id=session_id,
         target_url=target_url,
+        target_config=target_config,
         payload_rows=payload_rows,
         source_rows=source_rows,
     )

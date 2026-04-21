@@ -1,208 +1,125 @@
-# AgentShield — 프로젝트 개요 및 기획
+# AgentShield 개요
 
-> 작성일: 2026년 4월  
-> 팀 규모: 7명
-> 모델: Gemma 4 E2B + Gemma 4 26B 혼합 운용
+## 제품 정의
 
----
+AgentShield는 기업용 AI 챗봇과 AI 에이전트의 취약점을 자동으로 찾고, Blue Agent가 방어 응답과 방어 정책을 생성하고, Judge가 다시 검증하는 보안 플랫폼이다. 현재 1차 목표는 `단일 target URL 기반 검증 + 개선안 생성`이며, 상시 보호 프록시는 2차 목표다.
 
-## 1. 프로젝트 한 줄 요약
+## 왜 이 구조가 필요한가
 
-**AI 챗봇/에이전트의 보안 취약점을 자동으로 찾고(Find), 방어 코드를 생성하고(Fix), 실제로 방어되는지 검증(Verify)하는 플랫폼.**
+- AI 서비스는 프롬프트 인젝션, 민감정보 유출, 권한 오남용, 시스템 프롬프트 누출에 동시에 노출된다.
+- 탐지만 하는 도구는 운영팀 입장에서 후속 조치가 끊긴다.
+- 방어 초안만 만드는 도구는 실제 차단율과 오탐률을 증명하지 못한다.
+- 운영 조직은 고객 LLM 보안 테스트와 사내 직원용 AI 게이트웨이를 분리해서 볼 수 없다. 두 영역 모두 같은 정책 자산과 연결 기준이 필요하다.
 
-기존 도구(Lakera, LLM Guard, NeMo Guardrails)는 "방어만" 하거나 "발견만" 한다.  
-AgentShield는 **Find → Fix → Verify**를 하나의 파이프라인으로 자동화한다.
+## 제품 범위
 
----
+### 기능 A. AI 보안 테스트 자동화
 
-## 2. 해결하려는 문제
+1. 공용 공격 데이터셋을 고객 타겟에 대량 전송한다.
+2. 안전하게 보였던 응답은 Red Agent가 다시 변형 공격한다.
+3. 실제 취약점 케이스에 대해 Blue Agent가 방어 응답을 생성하고, 필요 시 방어 정책/코드를 보조 산출물로 만든다.
+4. 같은 공격에 대해 Blue 결과를 Judge가 다시 판정하고, 선택적으로 Defense Proxy 또는 local runtime에서 검증한다.
+5. 결과를 Dashboard와 Report API로 보여주고 데이터셋으로 축적한다.
 
-```
-현재 상황:
-  - 기업이 AI 챗봇/에이전트를 도입하고 있음
-  - 프롬프트 인젝션, 민감정보 유출, 권한 초과 등 보안 위협이 존재
-  - 보안 테스트를 수동으로 하면 시간이 오래 걸리고 일관성이 없음
-  - 침투테스트(공격)만 해주는 도구는 있지만, "방어 코드"까지 자동 생성하는 건 없음
-  - 기업 내 직원의 AI 사용을 모니터링하는 시스템도 부재
+### 기능 B. 직원 AI 사용 모니터링
 
-AgentShield가 해결:
-  ① 자동 보안 테스트: DB 기반 + AI 기반 공격으로 취약점 자동 발견
-  ② 방어 코드 자동 생성: 취약점별 입력필터/출력필터/시스템프롬프트 패치 생성
-  ③ 실제 재검증: Defense Proxy로 방어가 실제 동작하는지 확인
-  ④ 직원 모니터링: AI 사용 정책 위반 자동 탐지 + 제재
-```
+1. 직원 프롬프트를 정책 엔진으로 검사한다.
+2. 애매한 요청은 의도 판정까지 한 번 더 거친다.
+3. 허용된 요청만 실제 타겟 AI로 전달한다.
+4. 응답을 마스킹하고 로그와 위반 기록을 남긴다.
 
----
+## 현재 집중하는 OWASP 범위
 
-## 3. OWASP LLM Top 10 — 4개 카테고리 집중
+- `LLM01`: Prompt Injection
+- `LLM02`: Sensitive Information Disclosure
+- `LLM06`: Excessive Agency
+- `LLM07`: System Prompt Leakage
 
-**4개를 완전히 커버하는 것**이 실무적으로 더 가치 있다.
+이 네 범위는 기능 A, 기능 B, testbed, defense JSON, judge 기준 전체에 공통으로 영향을 준다.
 
-| ID        | 위협                      | 설명                                                 | 선택 이유                                               |
-| --------- | ------------------------- | ---------------------------------------------------- | ------------------------------------------------------- |
-| **LLM01** | Prompt Injection          | 공격자가 LLM의 지시를 조작하여 의도치 않은 동작 유발 | 가장 흔한 공격. DB 스캔 + LLM 변형 모두 적용 가능       |
-| **LLM02** | Sensitive Info Disclosure | LLM이 민감정보(PII, API키, 내부데이터)를 응답에 포함 | 기업 데이터 유출 = 최대 비즈니스 리스크. 출력 필터 필수 |
-| **LLM06** | Excessive Agency          | 에이전트가 허가 없이 외부 API/DB에 접근              | 기업 AI 도입에서 핵심 문제. 도구 호출 검증 필요         |
-| **LLM07** | System Prompt Leakage     | 시스템 프롬프트 내용이 사용자에게 노출               | 모든 다른 공격의 진입점. 방어 우선순위 최상위           |
+## 기술 스택
 
----
+### Backend
 
-## 4. 기능 구성
+- FastAPI
+- SQLAlchemy Async
+- PostgreSQL
+- LangGraph
+- Ollama 및 role-based LLM client
 
-```
-AgentShield
-│
-├── 기능 A: AI Agent Shield (핵심)
-│   타겟 AI 챗봇 API URL을 입력하면
-│   → Phase 1: DB에 저장된 공격 프롬프트로 자동 스캔 (규칙 기반 판정)
-│   → Phase 2: AI(Red Agent)가 실패한 공격을 변형하여 재공격 (LLM + RAG)
-│   → Phase 3: AI(Blue Agent)가 방어 코드 자동 생성 (LLM + RAG)
-│   → Phase 4: Defense Proxy로 방어 코드를 실제 적용 후 재검증
-│   → 보고서: 취약점 목록 + 방어 코드 + 방어 전/후 비교 PDF
-│
-└── 기능 B: 직원 AI 사용 모니터링
-    기업 내 직원들의 AI 챗봇 사용을 Proxy로 감시
-    → P1: 기밀 정보 유출 방지 (PII, 소스코드, API키 입력 차단)
-    → P2: 부적절 사용 탐지 (업무 무관, 유해 콘텐츠)
-    → P3: 과도한 사용 제한 (Rate Limit)
-    → P4: 애매한 요청에 대한 LLM 기반 2차 의도 판정
-    → P5: 사용 통계 + 위반 이력 대시보드
-    기능 A의 Defense Proxy 아키텍처를 재활용
-```
+### Data / Retrieval
 
-### 기능 A와 기능 B의 관계
+- ChromaDB
+- `data/attack_patterns/`, `data/defense_patterns/`
+- PostgreSQL `attack_patterns`, `test_sessions`, `test_results`, monitoring 관련 테이블
 
-| 공유 컴포넌트    | 기능 A 사용처                  | 기능 B 사용처                       |
-| ---------------- | ------------------------------ | ----------------------------------- |
-| Proxy 서버 코드  | Defense Proxy (Phase 4 재검증) | Monitoring Proxy (직원 트래픽 감시) |
-| PII 정규식       | LLM02 판정 + 출력 필터         | P1 기밀 유출 탐지                   |
-| PostgreSQL       | 공격 패턴, 테스트 결과 저장    | 사용 로그, 위반 이력 저장           |
-| FastAPI 백엔드   | Phase 1-4 실행 API             | 모니터링/관리자 API                 |
-| Next.js 대시보드 | 취약점 맵, 보고서 뷰어         | 사용 현황, 위반 알림                |
+### Runtime Components
 
----
+- `defense_proxy/`: 방어 정책 적용 후 재검증 프록시
+- `monitoring_proxy/`: 직원 AI 사용 모니터링 프록시
+- `testbed/`: 타겟 챗봇, tool gateway, KB, 실제 DB
 
-## 5. 해외 보안 솔루션 분석
+### Frontend
 
-### 5-1. Lakera (Guard + Red)
+- Next.js dashboard
+- scan/monitoring/report 화면
 
-스위스 기반 엔터프라이즈 AI 보안 플랫폼.
+## 고객 통합 방식
 
-**Lakera Guard** — 실시간 AI 방화벽
+이번 정리의 핵심 설계는 여기다.
 
-- LLM 앞에 Middleware로 배치. 모든 입/출력 실시간 검사
-- ML 모델 + 규칙 기반 필터 혼합. 100개 이상 언어 지원
-- 방어: 프롬프트 공격, PII 6종, 콘텐츠 위반, 악성 링크
-- 4단계 임계값 (L1 Lenient ~ L4 Paranoid)
-- PII 탐지: 이름, 주소, 전화번호, 이메일, IP, 신용카드(Luhn), IBAN, SSN
+- 고객은 기본적으로 `target_url`과 `target_api_key`만 넣는다.
+- 공통 target adapter가 URL 패턴을 보고 provider를 자동 감지한다.
+- 내부에서 요청 payload와 응답 파싱 형식을 맞춘다.
+- 따라서 고객별 포맷 차이를 phase 코드나 proxy 코드가 직접 알 필요가 없다.
+- 고객에게 추가 URL을 요구하지 않는다. 검증 관점에서는 하나의 target URL로 충분하다.
 
-**Lakera Red** — 사전 배포 보안 평가 4단계:
+현재 지원 방향:
 
-1. Application Enumeration: 대상 시스템 매핑
-2. Targeted Attack Development: 맞춤 공격 설계
-3. Impact Amplification Testing: 피해 범위 확대 검증
-4. Risk Assessment & Reporting: 비즈니스 영향도 보고서
+- generic `messages -> content`
+- OpenAI-style `chat/completions`
+- Ollama `api/chat`
 
-**우리와의 차이:** Lakera Red는 보고서까지만. 방어 코드 자동 생성이 없다. AgentShield는 Fix + Verify까지 자동화.
+## 기존 기획 대비 변경점
 
-### 5-2. LLM Guard (Protect AI)
+### 현재 기획
 
-MIT 오픈소스. Python 기반 LLM 입출력 스캐너. GitHub 2.8K Stars.
+- 각 phase가 타겟 요청 형식을 직접 가정했다.
+- 공격 패턴은 파일 자산 위주로 생각했다.
+- scan API는 최종 연결 전 placeholder/mock 단계였다.
+- monitoring outbound는 placeholder 성격이 강했다.
 
-- 입력 스캐너 15종: Anonymize, BanCode, PromptInjection, InvisibleText, Gibberish, Secrets, Toxicity 등
-- 출력 스캐너 11종: Sensitive, NoRefusal, MaliciousURLs, FactualConsistency 등
+- Blue Agent는 `방어 코드 생성기만`이 아니라 `방어 응답 생성기 + 보조 정책 생성기`로 해석한다.
+### 현재 기획
 
-**우리와의 차이:** 실시간 방어만 한다. 취약점을 능동적으로 찾는 기능 없음. 우리는 Phase 3 방어 코드 생성 시 LLM Guard 스캐너 패턴을 RAG 참고 자료로 활용.
+- target adapter를 공통 계층으로 둔다.
+- 공격 패턴은 DB를 팀 공용 기준본으로 관리하고 파일은 fallback 또는 원본 자산으로 본다.
+- scan API는 실제 graph 실행 경로가 기본이다.
+- monitoring proxy도 실제 포워딩 경로를 사용한다.
+- develop에서 합쳐진 testbed를 공통 검증 환경으로 삼는다.
 
-### 5-3. NeMo Guardrails (NVIDIA)
+즉, 제품 방향이 바뀐 것이 아니라 운영 가능한 통합 구조로 구체화된 것이다.
 
-Apache 2.0 오픈소스. 프로그래밍 가능한 가드레일 프레임워크. GitHub 5.9K Stars.
+## 현재 구조에서 중요한 사실
 
-5가지 레일:
+- 로컬 graph 파이프라인은 존재한다.
+- dashboard scan 경로도 이미 준비되어 있었다.
+- 막혀 있던 핵심은 scan API mock 처리와 format fragmentation이었다.
+- 이번 정리는 이 병목을 target adapter와 실경로 연결로 줄이는 방향이다.
+- 앞으로 보고서와 데이터셋은 `공격 - 원응답 - 판정 - 방어 응답 - 재판정` 묶음을 기준으로 정리한다.
 
-- Input Rails: 사용자 입력 검사
-- Dialog Rails: 대화 흐름 제어 (Colang 언어)
-- Retrieval Rails: RAG 청크 검사
-- **Execution Rails: 도구 호출 검사** ← LLM06 방어에 핵심
-- Output Rails: LLM 출력 검사
+## 팀이 문서를 보는 순서
 
-**우리와의 차이:** 방어 전용. 취약점 능동 테스트 없음. Execution Rails 아키텍처를 우리 LLM06 방어에 참고.
+- `README.md`: 저장소 입구와 폴더 경계
+- `AgentShield_세부기획서.md`: 역할, 인터페이스, 운영 기준
+- `AgentShield_기능별_파이프라인.md`: 역할별 상세 입력/출력/호출 경로
+- `실전형_테스트_챗봇_구축_가이드.md`: 공통 testbed 기준
+- `TEAM_QA_GUIDE.md`: 로컬 QA 기준
 
-### 5-4. 종합 비교
+## 이번 병합 이후 팀 정렬 기준
 
-|                      | Lakera Guard    | LLM Guard | NeMo Guardrails | **AgentShield**    |
-| -------------------- | --------------- | --------- | --------------- | ------------------ |
-| 취약점 발견 (Find)   | Lakera Red 별도 | 없음      | 없음            | **Phase 1-2 자동** |
-| 방어 코드 생성 (Fix) | 없음            | 없음      | 없음            | **Phase 3 자동**   |
-| 재검증 (Verify)      | 없음            | 없음      | 없음            | **Phase 4 자동**   |
-| 실시간 방어          | Proxy 방식      | 스캐너    | 레일            | Defense Proxy      |
-| 도구 호출 검사       | 없음            | 없음      | Execution Rails | LLM06 전용         |
-| 라이선스             | 상용            | MIT       | Apache 2.0      | **Apache 2.0**     |
-
-**결론:** Find + Fix + Verify를 하나로 자동화하는 오픈소스는 없다. 이것이 AgentShield의 차별점.
-
----
-
-## 6. 기술 스택
-
-| 영역       | 기술                                 | 용도                                       |
-| ---------- | ------------------------------------ | ------------------------------------------ |
-| AI 모델    | **Gemma 4 E2B + Gemma 4 26B** | 타겟/기본 실행은 E2B, Red Agent 변형은 26B 우선 |
-| LLM 실행   | Ollama                               | 로컬 LLM 실행 (`ollama pull gemma4:e2b`, `ollama pull gemma4:26b`)   |
-| 워크플로우 | LangGraph                            | Phase 1→2→3→4 상태 그래프                  |
-| 벡터 DB    | ChromaDB                             | 방어 패턴/공격 기록 의미 검색 (RAG)        |
-| 임베딩     | all-MiniLM-L6-v2                     | 384차원 벡터, CPU 동작                     |
-| 관계형 DB  | PostgreSQL                           | 공격 DB, 테스트 결과, 사용 로그, 위반 이력 |
-| 백엔드     | FastAPI                              | REST API, WebSocket                        |
-| 프론트엔드 | Next.js 14                           | 대시보드, 보고서, 모니터링 화면            |
-| 보고서     | Jinja2 + wkhtmltopdf                 | HTML → PDF                                 |
-| 인증       | JWT                                  | 관리자/감사자/직원 역할 분리               |
-
-### 왜 E2B + 26B 혼합인가
-
-| 용도 | 모델 | 비고 |
-| ---- | ---- | ---- |
-| 타겟 시뮬레이션 / 공용 개발 | Gemma 4 E2B | 전원이 로컬에서 실행 가능 |
-| Red Agent 런타임 변형 | Gemma 4 26B | 공격 프롬프트 품질 향상용, 미설치 시 e2b 폴백 |
-
-핵심은 전원에게 26B를 강제하는 것이 아니다. 공용 개발과 기본 테스트는 E2B로 유지하고, R1의 Red Agent 런타임 변형 품질이 중요한 구간에서만 26B를 우선 사용한다.
-
----
-
-## 7. 팀 구성 개요
-
-| 역할      | 담당 영역                                              |
-| --------- | ------------------------------------------------------ |
-| R1 (리드) | Phase 2 Red Agent + Judge 판정 + LangGraph + 전체 관리 |
-| R2        | Phase 1 DB 스캐너 + 데이터 적재                        |
-| R3        | Phase 3 Blue Agent + Phase 4 Defense Proxy             |
-| R4        | RAG 구축 + Ollama 연동 + 학습 코드 작성                |
-| R5        | 기능 B: 모니터링 Proxy + 정책 엔진 + 2차 LLM 의도 판정 |
-| R6        | 프론트엔드 전체 (기능 A + B 화면)                      |
-| R7        | 백엔드 API + DB + 보고서 + 테스트                      |
-
-**원칙:** 1인 1담당 영역. 파일/폴더 충돌 방지. 상세 역할은 세부기획서 참조.
-
----
-
-## 8. OWASP 커버리지
-
-| ID    | 위협               | Phase 1 | Phase 2 | Phase 3 | Phase 4 |   수준   |
-| ----- | ------------------ | :-----: | :-----: | :-----: | :-----: | :------: |
-| LLM01 | Prompt Injection   |    O    |    O    |    O    |    O    | **완전** |
-| LLM02 | Sensitive Info     |    O    |    O    |    O    |    O    | **완전** |
-| LLM06 | Excessive Agency   |    △    |    O    |    O    |    O    | **완전** |
-| LLM07 | System Prompt Leak |    O    |    O    |    O    |    O    | **완전** |
-
-LLM06은 Phase 1에서 자체 구축 ~200건만 시도하되, 규칙 기반 판정이 어려워 대부분 ambiguous로 처리된다. Phase 2(Red Agent)에서 본격 시작하며, Blue Agent가 Execution Guard(NeMo Guardrails 참고)를 생성한다.
-
----
-
-> **이 문서 요약:**
->
-> - AgentShield = AI 보안의 Find + Fix + Verify 자동화 플랫폼
-> - OWASP LLM01, 02, 06, 07 4개 카테고리 완전 집중
-> - Gemma 4 E2B 공용 실행 + Gemma 4 26B Red Agent 변형 혼합 구조
-> - 기능 A(보안 테스트) + 기능 B(직원 모니터링) 2축
-> - 세부 구현은 → **AgentShield\_세부기획서.md** 참조
-> - 기능별 파이프라인은 → **AgentShield*기능별*파이프라인.md** 참조
+- 문서는 압축보다 역할과 경계 복원이 우선이다.
+- 목표 상태와 현재 상태를 분리해서 쓴다.
+- 고객 통합은 URL과 key 입력을 기준으로 맞춘다.
+- 공통 attack DB와 testbed를 팀 단일 기준으로 본다.
+- tool 이름과 judge 계약은 문서 없이 바꾸지 않는다.

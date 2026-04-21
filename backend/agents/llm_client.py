@@ -1,23 +1,23 @@
 """
-[R4] LLM 클라이언트 — Ollama + LoRA 어댑터 전환
+[R4 담당 / 연동 정리: Copilot] LLM 클라이언트 — Ollama + LoRA 어댑터 전환
 
 기능별 파이프라인 섹션 8 참조.
 Ollama로 Gemma 4 E2B를 로컬 실행하고, 역할별 LoRA 어댑터를 전환한다.
+로컬 PEFT 경로는 선택 기능이므로, 관련 패키지가 없어도 Ollama 경로 import는 깨지지 않아야 한다.
 """
 
 import asyncio
 import os
+from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
 import httpx
 import torch
 from dotenv import load_dotenv
-from peft import PeftModel
 from pydantic import BaseModel
-from pyprojroot import here
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-root = str(here())
+root = str(Path(__file__).resolve().parents[2])
 load_dotenv()
 
 
@@ -103,6 +103,18 @@ class AgentShieldLLM:
             self.tokenizer = None
             self.current_local_base_path = None
 
+    @staticmethod
+    def _load_peft_model(base_model: Any, adapter_path: str) -> Any:
+        try:
+            from peft import PeftModel
+        except ImportError as exc:
+            raise RuntimeError(
+                "Local PEFT 모드를 사용하려면 peft 패키지가 필요합니다. "
+                "현재는 Ollama 경로만 사용 가능합니다."
+            ) from exc
+
+        return PeftModel.from_pretrained(base_model, adapter_path)
+
     def switch_role(self, role: str):
         if role == self.current_role:
             return
@@ -136,7 +148,7 @@ class AgentShieldLLM:
             adapter_path = role_config.get("adapter_path")
             if adapter_path and os.path.exists(adapter_path):
                 print(f"[{role}] 어댑터 로드 중... ({adapter_path})")
-                self.model = PeftModel.from_pretrained(self.base_model, adapter_path)
+                self.model = self._load_peft_model(self.base_model, adapter_path)
             else:
                 print(f"[{role}] 어댑터를 찾을 수 없어 Base 모델로 동작합니다.")
                 self.model = self.base_model
