@@ -25,6 +25,7 @@ export default function ScanPage() {
   const router = useRouter();
   const [projectName, setProjectName] = useState("Enterprise-LLM-Production");
   const [targetUrl, setTargetUrl] = useState("https://api.internal.llm/v1/chat");
+  const [targetApiKey, setTargetApiKey] = useState("");
   const [selectedVectors, setSelectedVectors] = useState<string[]>(["jailbreak", "prompt_injection"]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -64,7 +65,7 @@ export default function ScanPage() {
     setLoading(true);
 
     try {
-      const data = await startScan(targetUrl.trim(), projectName.trim());
+      const data = await startScan(targetUrl.trim(), projectName.trim(), targetApiKey.trim() || undefined, "auto");
       // 로컬 히스토리 저장
       const newScan: RecentScan = {
         session_id: data.session_id,
@@ -171,6 +172,27 @@ export default function ScanPage() {
                   </div>
                 </div>
 
+                <div className="space-y-3">
+                  <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/60">
+                    대상 API 키
+                  </label>
+                  <div className="relative">
+                    <span className="material-symbols-outlined absolute left-4 top-1/2 -translate-y-1/2 text-primary/60 text-lg">
+                      key
+                    </span>
+                    <input
+                      type="password"
+                      value={targetApiKey}
+                      onChange={(e) => setTargetApiKey(e.target.value)}
+                      placeholder="선택 입력: Bearer 토큰 또는 API Key"
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-6 py-4 text-sm focus:border-primary/50 focus:ring-4 focus:ring-primary/5 focus:outline-none transition-all"
+                    />
+                  </div>
+                  <p className="text-[10px] text-on-surface-variant/70 leading-relaxed">
+                    공통 target adapter가 URL 패턴을 보고 요청 형식을 자동 감지합니다. 기본 입력은 URL과 키만 있으면 됩니다.
+                  </p>
+                </div>
+
                 {/* 공격 벡터 프리셋 */}
                 <div className="space-y-4">
                   <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/60">
@@ -208,8 +230,7 @@ export default function ScanPage() {
                     })}
                   </div>
                   <p className="text-[10px] text-on-surface-variant/70 leading-relaxed">
-                    현재 스캔 API는 URL·프로젝트명만 받습니다. 벡터 선택은 UI 정렬용이며, 백엔드에 옵션으로
-                    붙는 즉시 같은 요청에 반영할 수 있게 준비된 상태입니다.
+                    벡터 선택은 현재 UI 프리셋이다. 실제 스캔은 공통 DB 공격 패턴과 graph 파이프라인으로 실행된다.
                   </p>
                 </div>
               </div>
