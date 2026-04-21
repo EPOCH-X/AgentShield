@@ -222,12 +222,14 @@ if __name__ == "__main__":
         print("psycopg2 설치 필요: pip install psycopg2-binary")
         raise
 
+    from urllib.parse import urlparse
+    p = urlparse(DB_URL)
     conn = psycopg2.connect(
-        host="localhost",
-        port=5432,
-        dbname="postgres",
-        user="postgres",
-        password="0327",
+        host=p.hostname or "localhost",
+        port=p.port or 5432,
+        dbname=(p.path or "/postgres").lstrip("/"),
+        user=p.username or "postgres",
+        password=p.password or "",
     )
     try:
         seed(conn)
