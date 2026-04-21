@@ -276,3 +276,18 @@ def audit_attack_results(dry_run: bool = True) -> dict:
 
 
 rag_client = _RAGClientProxy()
+
+
+def get_attack_category_counts() -> dict[str, int]:
+    """attack_results 컬렉션의 카테고리별 저장 건수를 반환한다."""
+    try:
+        client = get_rag_client()
+        all_data = client.attack_col.get(include=["metadatas"])
+    except Exception:
+        return {}
+
+    counts: dict[str, int] = {}
+    for metadata in all_data.get("metadatas") or []:
+        category = (metadata or {}).get("category", "unknown")
+        counts[category] = counts.get(category, 0) + 1
+    return dict(sorted(counts.items()))
