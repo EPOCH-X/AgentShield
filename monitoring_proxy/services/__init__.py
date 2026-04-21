@@ -4,6 +4,7 @@ from monitoring_proxy.services.forwarder import (
 )
 from monitoring_proxy.services.intent_review import (
     build_intent_review_prompt,
+    get_default_intent_review_llm_client,
     parse_intent_review_response,
     review_request_intent,
 )
@@ -24,6 +25,7 @@ __all__ = [
     "build_violation_record_input",
     "create_violation_record",
     "forward_to_target_ai",
+    "get_default_intent_review_llm_client",
     "mask_response_content",
     "parse_intent_review_response",
     "review_request_intent",
