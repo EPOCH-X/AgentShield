@@ -1,3 +1,5 @@
+from typing import Optional
+
 from monitoring_proxy.schemas import ActionTakenType, SeverityType, UsageLogEntry
 
 
@@ -6,10 +8,10 @@ def build_usage_log_entry(
     employee_id: str,
     request_content: str,
     response_content: str,
-    policy_violation: str | None,
-    severity: SeverityType | None,
+    policy_violation: Optional[str],
+    severity: Optional[SeverityType],
     action_taken: ActionTakenType,
-    target_service: str | None,
+    target_service: Optional[str],
 ) -> UsageLogEntry:
     return UsageLogEntry(
         employee_id=employee_id,

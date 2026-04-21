@@ -6,7 +6,7 @@ P1 기밀유출 -> P2 부적절사용 -> P3 Rate Limit -> Forward -> 출력 스�
 """
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl
@@ -55,8 +55,8 @@ class MonitorChatRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     messages: list[ChatMessage] = Field(..., min_length=1)
-    target_url: HttpUrl | None = None
-    employee_id: str | None = None
+    target_url: Optional[HttpUrl] = None
+    employee_id: Optional[str] = None
 
 
 class MonitorChatResponse(MonitorChatResponseSchema):
@@ -73,16 +73,16 @@ class HealthResponse(BaseModel):
 class RequestContext:
     latest_message: str
     employee_id: str
-    target_url: str | None
+    target_url: Optional[str]
     message_count: int
 
 
 @dataclass(frozen=True)
 class OperationalRecordPlan:
-    policy_violation: str | None
+    policy_violation: Optional[str]
     action_taken: str
     should_create_violation: bool
-    violation_type: str | None = None
+    violation_type: Optional[str] = None
 
 
 def extract_request_context(payload: MonitorChatRequest) -> RequestContext:
@@ -107,10 +107,10 @@ def build_monitor_response(
     content: str,
     blocked: bool,
     stage: StageType,
-    severity: SeverityType | None = None,
-    reason: str | None = None,
-    retry_after_seconds: int | None = None,
-    limit_type: LimitType | None = None,
+    severity: Optional[SeverityType] = None,
+    reason: Optional[str] = None,
+    retry_after_seconds: Optional[int] = None,
+    limit_type: Optional[LimitType] = None,
 ) -> MonitorChatResponse:
     return MonitorChatResponse(
         content=content,
@@ -185,7 +185,7 @@ def build_p4_violation_response(
     context: RequestContext,
     intent_review_result: IntentReviewResult,
     *,
-    severity: SeverityType | None,
+    severity: Optional[SeverityType],
 ) -> MonitorChatResponse:
     return build_monitor_response(
         context,
@@ -207,7 +207,7 @@ def should_review_request_intent(
 def determine_review_severity(
     p1_result: P1DetectionResult,
     p2_result: P2DetectionResult,
-) -> SeverityType | None:
+) -> Optional[SeverityType]:
     if p1_result.severity == "medium" or p2_result.severity == "medium":
         return "medium"
     if p1_result.severity == "low" or p2_result.severity == "low":
@@ -216,7 +216,7 @@ def determine_review_severity(
 
 
 def append_ambiguous_review_reason(
-    base_reason: str | None,
+    base_reason: Optional[str],
     intent_review_result: IntentReviewResult,
 ) -> str:
     review_note = (
@@ -306,7 +306,7 @@ def finalize_response(
 def process_monitor_request(
     payload: MonitorChatRequest,
     *,
-    llm_client: object | None = None,
+    llm_client: Optional[object] = None,
     llm_client_factory=None,
 ) -> MonitorChatResponse:
     return process_monitor_request_with_dependencies(
@@ -320,7 +320,7 @@ def process_monitor_request_with_dependencies(
     payload: MonitorChatRequest,
     *,
     intent_reviewer=review_request_intent,
-    llm_client: object | None = None,
+    llm_client: Optional[object] = None,
     llm_client_factory=None,
     save_usage_log_fn=save_usage_log,
     create_violation_record_fn=create_violation_record,
@@ -359,7 +359,7 @@ def process_monitor_request_with_dependencies(
             create_violation_record_fn=create_violation_record_fn,
         )
 
-    intent_review_result: IntentReviewResult | None = None
+    intent_review_result: Optional[IntentReviewResult] = None
     review_severity = determine_review_severity(p1_result, p2_result)
     if should_review_request_intent(p1_result, p2_result):
         review_client = llm_client

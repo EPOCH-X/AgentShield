@@ -1,11 +1,13 @@
+from typing import Optional
+
 from monitoring_proxy.schemas import ForwardRequest, ForwardResponse
 
 
 def build_forward_request(
     *,
-    target_url: str | None,
+    target_url: Optional[str],
     messages: list[dict[str, str]],
-    employee_context: dict | None = None,
+    employee_context: Optional[dict] = None,
 ) -> ForwardRequest:
     return ForwardRequest(
         target_url=target_url,
