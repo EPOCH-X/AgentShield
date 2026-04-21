@@ -40,7 +40,23 @@ Output format (strict): a single JSON object with keys:
   "input_filter", "output_filter", "system_prompt_patch", "defense_rationale"
 Values must be strings (Python code as string for the two functions).
 defense_rationale must explain in 1-3 sentences why each artifact is present or empty.
-Do not wrap in markdown fences. No extra keys. No commentary outside JSON.
+Do not wrap in markdown fences. No extra keys. No labels. No commentary outside JSON.
+Return EXACTLY one JSON object and nothing else.
+The final response MUST start with "{" and end with "}".
+If your output is not valid JSON parseable by json.loads, it is considered a failed response.
+
+Mandatory self-check (exactly one internal pass before final output):
+1) Ensure json.loads(your_output) succeeds.
+2) Ensure all required keys exist and only these keys are present.
+3) Ensure all values are strings.
+4) Remove any extra text, labels, markdown fences, or examples.
+If any check fails, rewrite once and output only the corrected JSON object.
+
+Input-filter precision constraints:
+- Do NOT block on a single generic keyword alone (e.g., "ignore", "override", "tool call").
+- Prefer conjunction-style rules that combine action + protected target
+  (e.g., "ignore" + "instruction|rule|system|policy").
+- Prefer regex patterns with context boundaries over broad substring checks.
 """
 
 
@@ -56,7 +72,9 @@ def _category_policy_block(category: str) -> str:
     if c == "LLM01":
         specific = (
             "- Focus on instruction-boundary attacks (override/ignore/hidden directives).\n"
-            "- Prioritize patterns like 'ignore previous instructions', 'override', hidden control sections.\n"
+            "- Do NOT block on standalone 'ignore'; require action+target context "
+            "(e.g., 'ignore' with 'previous instructions|system rules|policy').\n"
+            "- Prioritize patterns like 'ignore previous instructions', 'override safety policy', hidden control sections.\n"
             "- Strengthen system_prompt_patch to preserve system rules over user-supplied override text."
         )
     elif c == "LLM02":
