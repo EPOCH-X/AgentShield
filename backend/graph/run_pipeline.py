@@ -42,7 +42,7 @@ def _truncate(text: str, max_len: int = 200) -> str:
     if len(text) <= max_len:
         return text
     return text[:max_len] + "..."
-from backend.rag.chromadb_client import add_attack, get_rag_client, get_rag_status, search_attacks
+from backend.rag.chromadb_client import add_attack, get_attack_category_counts, get_rag_client, get_rag_status, search_attacks
 
 
 def _get_attack_rag_count() -> Optional[int]:
@@ -52,46 +52,10 @@ def _get_attack_rag_count() -> Optional[int]:
         return None
 
 
-# ── 성공 사례 시드 로더 ─────────────────────────────────────────
-
-def _load_success_seeds() -> dict[str, list[str]]:
-    """data/attack_patterns/success_seeds.json에서 카테고리별 성공 전략 로드
-
-    Returns:
-        {"LLM01": ["strategy description...", ...], ...}
-    """
-    seed_path = Path(__file__).resolve().parent.parent.parent / "data" / "attack_patterns" / "success_seeds.json"
-    if not seed_path.exists():
-        return {}
-    try:
-        with open(seed_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-    result: dict[str, list[str]] = {}
-    for cat, strategies in data.items():
-        if cat.startswith("_"):
-            continue
-        if not isinstance(strategies, list):
-            continue
-        texts = []
-        for s in strategies:
-            if isinstance(s, dict) and "strategy" in s:
-                entry = f"[{s['strategy']}] {s.get('description', '')}"
-                if s.get("example_attack"):
-                    entry += f"\nExample: {s['example_attack'][:300]}"
-                texts.append(entry)
-        if texts:
-            result[cat] = texts
-    return result
-
-
-_SUCCESS_SEEDS: dict[str, list[str]] = {}
-
-
-def _load_dynamic_attack_refs(category: str, attack_prompt: str, limit: int = 4) -> list[dict]:
+def _load_dynamic_attack_refs(category: str, attack_prompt: str, limit: Optional[int] = None) -> list[dict]:
     """ChromaDB에서 카테고리별 유사 성공 공격을 불러온다."""
+    if limit is None:
+        limit = settings.RED_RAG_REFERENCE_LIMIT
     query = f"{category} {attack_prompt[:300]}"
     results = search_attacks(query=query, n_results=limit)
 
@@ -199,26 +163,6 @@ async def _load_category_attack_profile(category: str, limit: int = 240) -> dict
         "top_techniques": [name for name, _ in technique_counter.most_common(4)],
         "top_blocked_modes": [name for name, _ in blocked_modes.most_common(3)],
     }
-
-
-def _merge_similar_cases(static_cases: Optional[list[str]], dynamic_cases: list[dict]) -> Optional[list[dict]]:
-    """정적 시드와 동적 RAG 검색 결과를 합쳐 Red Agent reference로 전달한다."""
-    merged: list[dict] = []
-    seen_prompts = set()
-    for case in static_cases or []:
-        if case and case not in seen_prompts:
-            seen_prompts.add(case)
-            merged.append({
-                "attack_prompt": case,
-                "metadata": {"source": "seed"},
-                "techniques": extract_techniques(case),
-            })
-    for case in dynamic_cases:
-        prompt = case.get("attack_prompt", "")
-        if prompt and prompt not in seen_prompts:
-            seen_prompts.add(prompt)
-            merged.append(case)
-    return merged or None
 
 
 def _check_fp_flag(target_response: str) -> Optional[str]:
@@ -379,16 +323,16 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
     모든 라운드는 Red Agent LLM 변형으로 진행한다.
     Red Agent 모델은 settings.OLLAMA_RED_MODEL을 사용한다.
     """
-    # 성공 사례 시드 로드 (Cold Start Bootstrap)
-    global _SUCCESS_SEEDS
-    if not _SUCCESS_SEEDS:
-        _SUCCESS_SEEDS = _load_success_seeds()
-        if _SUCCESS_SEEDS:
-            print(f"  📋 성공 사례 시드 로드: {', '.join(f'{k}({len(v)})' for k, v in _SUCCESS_SEEDS.items())}")
-
     rag_status = get_rag_status()
     if rag_status["available"]:
-        print(f"  🧠 ChromaDB 연결됨: {rag_status['persist_path']}")
+        rag_total = _get_attack_rag_count()
+        rag_by_category = get_attack_category_counts()
+        rag_summary = ", ".join(f"{cat}({count})" for cat, count in rag_by_category.items()) or "no attack cases"
+        print(
+            f"  🧠 ChromaDB 연결됨: {rag_status['persist_path']} | "
+            f"성공사례 {rag_total if rag_total is not None else '?'}건 | "
+            f"top-k={settings.RED_RAG_REFERENCE_LIMIT} | {rag_summary}"
+        )
     else:
         print(f"  ⚠ ChromaDB 미사용: {rag_status['error']}")
 
@@ -420,7 +364,9 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds):
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
             dynamic_refs = _load_dynamic_attack_refs(cat, current_prompt)
-            similar_cases = _merge_similar_cases(_SUCCESS_SEEDS.get(cat), dynamic_refs)
+            similar_cases = dynamic_refs or None
+            if rnd == 1:
+                print(f"    참고 성공사례: rag={len(dynamic_refs)}")
             target_failure_mode = select_target_failure_mode(cat, rnd, prev_failure_modes=used_failure_modes)
 
             red_prompt = build_red_prompt(
