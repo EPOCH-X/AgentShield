@@ -106,6 +106,7 @@ docker-compose.override.yml
 # 프로세스·PID
 *.pid
 CLAUDE.md
+.claudeignore
 results/
 scripts/calibrate_result.txt
 chromadb_data/
