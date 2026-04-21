@@ -74,6 +74,7 @@ adapters/lora-blue/*.safetensors
 gemma4_26b_baseline_분석.md
 LLM_Judge_분석_및_업계동향.md
 남은_과제_로드맵.md
+로컬_AI_모델_비교_20260421.md
 
 # ChromaDB
 chromadb_data/
