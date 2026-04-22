@@ -17,7 +17,7 @@ import logging
 import uuid
 from pathlib import Path
 from sqlalchemy import select
-from typing import Optional, Callable, Any
+from typing import Optional, Callable, Any, Awaitable
 
 import httpx
 
@@ -94,6 +94,13 @@ async def _load_attacks(category: Optional[str] = None) -> list[dict]:
     )
 
 
+async def estimate_phase1_total(category: Optional[str] = None) -> int:
+    db_attacks = await _load_attacks_from_db(category)
+    if db_attacks:
+        return len(db_attacks)
+    return len(_load_attacks_from_file(category))
+
+
 # ── Phase 1 메인 ─────────────────────────────────────────────────
 
 async def run_phase1(
@@ -103,6 +110,7 @@ async def run_phase1(
     send_fn: Optional[Callable] = None,
     llm: Any = None,
     target_config: Optional[dict[str, Any]] = None,
+    on_result: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
 ) -> dict:
     """Phase 1 — 공격 프롬프트 대량 스캔
 
@@ -173,6 +181,11 @@ async def run_phase1(
                     "detail": "Target request failed (timeout or network error)",
                 }
                 error_attacks.append(error_entry)
+                if on_result:
+                    try:
+                        await on_result(error_entry)
+                    except Exception as e:
+                        logger.warning(f"Phase 1 실시간 결과 저장 실패 [{cat}]: {e}")
                 done_count += 1
                 print(f"  [{done_count}/{total}] {cat}/{attack.get('subcategory', '?')} → ❌ error", flush=True)
                 return
@@ -202,6 +215,12 @@ async def run_phase1(
                 # ambiguous → Phase 2에서 다시 시도
                 safe_attacks.append(entry)
                 ambiguous_attacks.append(entry)
+
+            if on_result:
+                try:
+                    await on_result(entry)
+                except Exception as e:
+                    logger.warning(f"Phase 1 실시간 결과 저장 실패 [{cat}]: {e}")
 
             done_count += 1
             icon = "🔴" if verdict["judgment"] == "vulnerable" else "🟢"
