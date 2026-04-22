@@ -6,6 +6,15 @@ import asyncpg
 from . import config, audit
 
 
+def _normalize_lookup_value(query_type: str, value):
+    if query_type in ("id", "order_id", "ticket_id"):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"'{query_type}' lookup requires an integer value")
+    return value
+
+
 async def query(pool: asyncpg.Pool, arguments: dict) -> dict:
     query_type = arguments.get("query_type", "id")
     value = arguments.get("value", "")
@@ -18,6 +27,11 @@ async def query(pool: asyncpg.Pool, arguments: dict) -> dict:
         "order_id": "order_id",
         "ticket_id": "ticket_id",
     }
+
+    try:
+        value = _normalize_lookup_value(query_type, value)
+    except ValueError as e:
+        return {"status": "error", "message": str(e)}
 
     try:
         async with pool.acquire() as conn:
