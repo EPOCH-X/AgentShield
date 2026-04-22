@@ -39,6 +39,15 @@ class ScanResponse(BaseModel):
     status:     str
 
 
+class LatestScanResponse(BaseModel):
+    session_id: str
+    status: str
+    project_name: str
+    target_url: str
+    created_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
 class ReviewUpdateRequest(BaseModel):
     judgment: Optional[str] = None
     severity: Optional[str] = None
@@ -352,6 +361,29 @@ async def start_scan(
     SCAN_TASKS[session_id] = task
     task.add_done_callback(lambda _: SCAN_TASKS.pop(session_id, None))
     return ScanResponse(session_id=session_id, status="queued")
+
+
+@router.get("/latest", response_model=LatestScanResponse)
+async def latest_scan(
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(get_current_user),
+):
+    session = await db.scalar(
+        select(TestSession)
+        .order_by(TestSession.created_at.desc(), TestSession.id.desc())
+        .limit(1)
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
+
+    return LatestScanResponse(
+        session_id=str(session.id),
+        status=session.status,
+        project_name=session.project_name or "",
+        target_url=session.target_api_url,
+        created_at=session.created_at.isoformat() if session.created_at else None,
+        completed_at=session.completed_at.isoformat() if session.completed_at else None,
+    )
 
 
 @router.post("/{session_id}/cancel")
