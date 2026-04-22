@@ -3,6 +3,7 @@
 """
 
 from datetime import date
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -52,8 +53,8 @@ async def monitoring_dashboard(
 
 @router.get("/violations")
 async def list_violations(
-    department:     str | None = None,
-    violation_type: str | None = None,
+    department:     Optional[str] = None,
+    violation_type: Optional[str] = None,
     db:   AsyncSession = Depends(get_db),
     user: UserInfo     = Depends(get_current_user),
 ):
