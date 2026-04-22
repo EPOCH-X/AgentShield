@@ -13,6 +13,7 @@ cosine metric (hnsw:space=cosine) 사용.
 #   → 보안 레드팀에서는 미세한 프레이밍 차이가 핵심이므로 거의 동일 문장만 제외
 
 import uuid
+from datetime import datetime
 from typing import Optional
 from backend.config import settings
 
@@ -73,11 +74,19 @@ class ChromaRAGClient:
             n_results=n_results
         )
     
-    def search_attacks(self, query: str, n_results: int = 3):
+    def search_attacks(self, query: str, n_results: int = 3, where: Optional[dict] = None):
         """Phase 2: 기존 성공한 공격(Red Agent용) 검색"""
         return self.attack_col.query(
             query_texts=[query],
-            n_results=n_results
+            n_results=n_results,
+            where=where,
+        )
+
+    def get_recent_attacks(self, limit: int = 3, where: Optional[dict] = None):
+        """최근 저장된 성공 공격을 메타데이터 필터와 함께 가져온다."""
+        return self.attack_col.get(
+            where=where,
+            include=["metadatas", "documents"],
         )
     
     def add_attack(self, attack_prompt: str, metadata: dict) -> bool:
@@ -101,6 +110,10 @@ class ChromaRAGClient:
 
         # 새로운 공격 패턴 저장
         doc_id = str(uuid.uuid4())
+        metadata = {
+            **metadata,
+            "created_at": metadata.get("created_at") or datetime.utcnow().isoformat(),
+        }
         self.attack_col.add(
             ids=[doc_id],
             documents=[attack_prompt],
@@ -176,6 +189,27 @@ def _flatten_query_results(results: dict) -> list[dict]:
     return flat
 
 
+def _flatten_get_results(results: dict) -> list[dict]:
+    """Chroma get 결과를 호출부가 쓰기 쉬운 list 형태로 변환한다."""
+    documents = results.get("documents") or []
+    metadatas = results.get("metadatas") or []
+    ids = results.get("ids") or []
+
+    flat = []
+    for index, document in enumerate(documents):
+        metadata = metadatas[index] if index < len(metadatas) else {}
+        doc_id = ids[index] if index < len(ids) else None
+        flat.append({
+            "id": doc_id,
+            "document": document,
+            "metadata": metadata or {},
+            "distance": None,
+            "similarity": None,
+            "attack_prompt": document,
+        })
+    return flat
+
+
 def search_defense(query: str, n_results: int = 3) -> list[dict]:
     """방어 패턴 검색 래퍼."""
     try:
@@ -186,13 +220,31 @@ def search_defense(query: str, n_results: int = 3) -> list[dict]:
         return []
 
 
-def search_attacks(query: str, n_results: int = 3) -> list[dict]:
+def search_attacks(query: str, n_results: int = 3, where: Optional[dict] = None) -> list[dict]:
     """성공 공격 검색 래퍼."""
     try:
         client = get_rag_client()
-        return _flatten_query_results(client.search_attacks(query=query, n_results=n_results))
+        return _flatten_query_results(client.search_attacks(query=query, n_results=n_results, where=where))
     except Exception as exc:
         print(f"ChromaDB attack search unavailable: {exc}")
+        return []
+
+
+def get_recent_attacks(limit: int = 3, where: Optional[dict] = None) -> list[dict]:
+    """최근 성공 공격 조회 래퍼."""
+    try:
+        client = get_rag_client()
+        results = client.get_recent_attacks(limit=limit, where=where)
+        flat = _flatten_get_results(results)
+
+        def _sort_key(item: dict) -> tuple[int, str, str]:
+            created_at = (item.get("metadata") or {}).get("created_at") or ""
+            return (1 if created_at else 0, created_at, item.get("id") or "")
+
+        flat.sort(key=_sort_key)
+        return flat[-limit:] if limit > 0 else flat
+    except Exception as exc:
+        print(f"ChromaDB recent attack lookup unavailable: {exc}")
         return []
 
 
@@ -276,3 +328,18 @@ def audit_attack_results(dry_run: bool = True) -> dict:
 
 
 rag_client = _RAGClientProxy()
+
+
+def get_attack_category_counts() -> dict[str, int]:
+    """attack_results 컬렉션의 카테고리별 저장 건수를 반환한다."""
+    try:
+        client = get_rag_client()
+        all_data = client.attack_col.get(include=["metadatas"])
+    except Exception:
+        return {}
+
+    counts: dict[str, int] = {}
+    for metadata in all_data.get("metadatas") or []:
+        category = (metadata or {}).get("category", "unknown")
+        counts[category] = counts.get(category, 0) + 1
+    return dict(sorted(counts.items()))
