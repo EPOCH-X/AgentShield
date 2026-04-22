@@ -152,7 +152,7 @@ def _write_jsonl(pairs: list[dict], train_path: Path, test_path: Path, test_rati
         print(f"저장: {path} ({len(data)}건)")
 
 
-async def export_dpo(source: str, session: str = "latest", file: str | None = None) -> None:
+async def export_dpo(source: str, session: str = "latest", file: Optional[str] = None) -> None:
     if source == "json":
         if not file:
             results_dir = Path(__file__).resolve().parent.parent.parent / "results"

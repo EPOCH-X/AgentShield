@@ -248,6 +248,55 @@ def get_recent_attacks(limit: int = 3, where: Optional[dict] = None) -> list[dic
         return []
 
 
+def list_attack_entries(limit: int = 20, where: Optional[dict] = None) -> list[dict]:
+    """attack_results 컬렉션의 문서를 최근순 preview 형태로 반환한다."""
+    try:
+        client = get_rag_client()
+        results = client.attack_col.get(where=where, include=["metadatas", "documents"])
+        flat = _flatten_get_results(results)
+
+        def _sort_key(item: dict) -> tuple[int, str, str]:
+            created_at = (item.get("metadata") or {}).get("created_at") or ""
+            return (1 if created_at else 0, created_at, item.get("id") or "")
+
+        flat.sort(key=_sort_key, reverse=True)
+        return flat[:limit] if limit > 0 else flat
+    except Exception as exc:
+        print(f"ChromaDB attack listing unavailable: {exc}")
+        return []
+
+
+def delete_attack_entries(ids: Optional[list[str]] = None, seed_ids: Optional[list[str]] = None) -> dict:
+    """attack_results 컬렉션에서 id 또는 seed_id 기준으로 문서를 삭제한다."""
+    ids = [item for item in (ids or []) if item]
+    seed_ids = [item for item in (seed_ids or []) if item]
+    if not ids and not seed_ids:
+        return {"deleted": 0, "ids": []}
+
+    try:
+        client = get_rag_client()
+        delete_ids = list(ids)
+
+        if seed_ids:
+            all_data = client.attack_col.get(include=["metadatas"])
+            all_ids = all_data.get("ids") or []
+            metadatas = all_data.get("metadatas") or []
+            for index, doc_id in enumerate(all_ids):
+                metadata = metadatas[index] if index < len(metadatas) else {}
+                if (metadata or {}).get("seed_id") in seed_ids:
+                    delete_ids.append(doc_id)
+
+        delete_ids = list(dict.fromkeys(delete_ids))
+        if not delete_ids:
+            return {"deleted": 0, "ids": []}
+
+        client.attack_col.delete(ids=delete_ids)
+        return {"deleted": len(delete_ids), "ids": delete_ids}
+    except Exception as exc:
+        print(f"ChromaDB attack delete unavailable: {exc}")
+        return {"deleted": 0, "ids": [], "error": str(exc)}
+
+
 def add_attack(attack_prompt: Optional[str] = None, metadata: Optional[dict] = None, **kwargs) -> bool:
     """성공 공격 저장 래퍼.
 

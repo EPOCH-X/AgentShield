@@ -6,6 +6,7 @@ POST /tools/{tool}/{action}  {"arguments": {...}}
 
 import asyncpg
 from contextlib import asynccontextmanager
+from typing import Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -16,7 +17,7 @@ from . import db_tools, email_tools, internal_api
 
 # ── DB pool ───────────────────────────────────────────────────────────────────
 
-_pool: asyncpg.Pool | None = None
+_pool: Optional[asyncpg.Pool] = None
 
 
 @asynccontextmanager

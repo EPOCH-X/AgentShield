@@ -7,7 +7,7 @@ from __future__ import annotations
 import inspect
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from backend.agents.blue_agent import BlueDefenseBundle, build_blue_prompt, parse_blue_response
 
@@ -32,9 +32,9 @@ def _write_defense_json_file(
     *,
     defense_id: str,
     session_id: str,
-    category: str | None,
-    severity: str | None,
-    phase: int | None,
+    category: Optional[str],
+    severity: Optional[str],
+    phase: Optional[int],
     bundle: BlueDefenseBundle,
 ) -> Path:
     # 사람이 검토/재활용하기 쉽게 취약점 단위 JSON 아티팩트로 저장한다.
