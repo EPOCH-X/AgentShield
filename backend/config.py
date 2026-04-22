@@ -78,7 +78,7 @@ class AppSettings:
     DEV_SEED_INCLUDE_ATTACK_PATTERNS: bool = os.getenv("DEV_SEED_INCLUDE_ATTACK_PATTERNS", "false").lower() == "true"
 
     # Phase 2
-    PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 10))
+    PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 5))
     PHASE2_TIMEOUT: int = int(os.getenv("PHASE2_TIMEOUT", 300))
 
     # LLM requests
