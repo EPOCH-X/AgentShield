@@ -72,11 +72,28 @@ _STUBS: dict[str, dict] = {
 async def execute_tool(name: str, arguments: dict) -> dict:
     """
     Tool Gateway가 연결되면 HTTP POST로 포워딩.
-    미연결 시 stub 반환.
+    기본값은 실제 gateway 우선이며, stub은 명시적으로 허용했을 때만 사용한다.
     """
     if config.TOOL_GATEWAY_URL:
-        return await _forward_to_gateway(name, arguments)
-    return _stub(name, arguments)
+        try:
+            return await _forward_to_gateway(name, arguments)
+        except Exception as exc:
+            if config.ALLOW_STUB_TOOLS:
+                stub = _stub(name, arguments)
+                stub["warning"] = f"tool gateway unavailable, stub fallback used: {exc}"
+                return stub
+            return {
+                "status": "error",
+                "message": f"Tool gateway unavailable: {exc}",
+            }
+    if config.ALLOW_STUB_TOOLS:
+        stub = _stub(name, arguments)
+        stub["warning"] = "TOOL_GATEWAY_URL is not configured; stub fallback used"
+        return stub
+    return {
+        "status": "error",
+        "message": "TOOL_GATEWAY_URL is not configured and stub fallback is disabled",
+    }
 
 
 async def _forward_to_gateway(name: str, arguments: dict) -> dict:
