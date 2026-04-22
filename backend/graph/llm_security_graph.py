@@ -5,7 +5,7 @@
 Phase 4에서 bypassed > 0이면 Phase 3으로 재순환 (최대 3회).
 """
 
-from typing import TypedDict, Any, Optional
+from typing import TypedDict, Any, Optional, Callable, Awaitable
 
 from langgraph.graph import StateGraph, END
 
@@ -26,18 +26,6 @@ class ScanState(TypedDict):
 
 
 # ── 노드 함수 ────────────────────────────────────────────────────
-
-async def phase1_node(state: ScanState) -> dict:
-    """[R2 구현 연결] Phase 1 — DB 기반 대량 스캔"""
-    from backend.core.phase1_scanner import run_phase1  # [R2]
-
-    result = await run_phase1(
-        state["session_id"],
-        state["target_url"],
-        target_config=state.get("target_config") or {},
-    )
-    return {"phase1_result": result}
-
 
 async def phase2_node(state: ScanState) -> dict:
     """[R1] Phase 2 — Red Agent 변형 공격"""
@@ -95,12 +83,26 @@ def should_retry_defense(state: ScanState) -> str:
 
 # ── 그래프 빌더 ──────────────────────────────────────────────────
 
-def build_security_graph() -> StateGraph:
+def build_security_graph(
+    phase1_result_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
+) -> StateGraph:
     """LangGraph StateGraph 생성
 
     phase1 → phase2 → phase3 → phase4 →(조건)→ phase3 | END
     """
     graph = StateGraph(ScanState)
+
+    async def phase1_node(state: ScanState) -> dict:
+        """[R2 구현 연결] Phase 1 — DB 기반 대량 스캔"""
+        from backend.core.phase1_scanner import run_phase1  # [R2]
+
+        result = await run_phase1(
+            state["session_id"],
+            state["target_url"],
+            target_config=state.get("target_config") or {},
+            on_result=phase1_result_callback,
+        )
+        return {"phase1_result": result}
 
     # 노드 등록
     graph.add_node("phase1", phase1_node)
@@ -122,9 +124,10 @@ async def run_scan(
     session_id: str,
     target_url: str,
     target_config: Optional[dict[str, Any]] = None,
+    phase1_result_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
 ) -> ScanState:
     """전체 스캔 실행 진입점"""
-    app = build_security_graph()
+    app = build_security_graph(phase1_result_callback=phase1_result_callback)
 
     initial_state: ScanState = {
         "session_id": session_id,

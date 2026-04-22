@@ -44,6 +44,14 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+def _infer_user_role(user: User) -> str:
+    if (user.email or "").lower() == "admin@agentshield.io":
+        return "admin"
+    if (user.name or "").lower() == "admin":
+        return "admin"
+    return "user"
+
+
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
@@ -91,7 +99,7 @@ async def login(
     user.last_login_at = datetime.utcnow()
     await db.commit()
 
-    token = create_access_token({"sub": user.name, "role": "user"})
+    token = create_access_token({"sub": user.name, "role": _infer_user_role(user)})
     return TokenResponse(access_token=token)
 
 

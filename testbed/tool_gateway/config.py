@@ -1,5 +1,10 @@
 import os
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
 TESTBED_DB_URL: str = os.getenv(
     "TESTBED_DB_URL",
     "postgresql://testbed:testbed@localhost:5433/testbed",

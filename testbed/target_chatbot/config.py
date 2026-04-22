@@ -1,6 +1,11 @@
 import os
 from typing import Optional
 
+from dotenv import load_dotenv
+
+
+load_dotenv()
+
 OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
 

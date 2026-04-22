@@ -389,25 +389,40 @@ RED_AGENT_SYSTEM_PROMPT = get_system_prompt(AGENT_MODEL)
 _AGENT_LABEL = AGENT_MODEL.split("/")[-1].split(":")[0][:20]
 # 타겟 모델 — 보안 테스트 대상 (CLI --target 으로 변경 가능)
 TARGET_MODEL = settings.OLLAMA_MODEL
+# 외부 챗봇 URL — CLI --target-url 로 지정 시 Ollama 직접 호출 대신 사용
+TARGET_CHATBOT_URL: Optional[str] = None
 
 
 # ── 타겟 LLM 호출 ───────────────────────────────────────────────
 
 async def send_to_target(client: httpx.AsyncClient, prompt: str) -> str:
-    """타겟 LLM(기업 챗봇)에 공격 프롬프트 전송"""
-    payload = {
-        "model": TARGET_MODEL,
-        "messages": [
-            {"role": "system", "content": TARGET_SYSTEM_PROMPT},
-            {"role": "user", "content": prompt},
-        ],
-        "stream": False,
-        "options": {"num_predict": 4096, "temperature": 0.7},
-    }
-    resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
-    resp.raise_for_status()
-    content = resp.json().get("message", {}).get("content", "").strip()
-    return content if content else "[empty response]"
+    """타겟 챗봇에 공격 프롬프트 전송.
+
+    TARGET_CHATBOT_URL이 설정된 경우 해당 URL의 POST /chat 엔드포인트로 전송.
+    미설정 시 Ollama 직접 호출 (ABCBot 시스템 프롬프트 사용).
+    """
+    if TARGET_CHATBOT_URL:
+        # testbed 챗봇 형식: POST /chat {"messages": [{"role": "user", "content": ...}]}
+        payload = {"messages": [{"role": "user", "content": prompt}]}
+        resp = await client.post(TARGET_CHATBOT_URL, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        content = (data.get("content") or data.get("message", {}).get("content") or "").strip()
+        return content if content else "[empty response]"
+    else:
+        payload = {
+            "model": TARGET_MODEL,
+            "messages": [
+                {"role": "system", "content": TARGET_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
+            "stream": False,
+            "options": {"num_predict": 4096, "temperature": 0.7},
+        }
+        resp = await client.post(f"{OLLAMA_BASE_URL}/api/chat", json=payload)
+        resp.raise_for_status()
+        content = resp.json().get("message", {}).get("content", "").strip()
+        return content if content else "[empty response]"
 
 
 # ── Red Agent 변형 생성 ──────────────────────────────────────────
@@ -1164,16 +1179,24 @@ def _load_phase1_from_json(path: str = None, category: str = None) -> dict:
 
 async def async_main(args):
     # CLI에서 타겟 모델 지정 시 글로벌 변수 업데이트
-    global TARGET_MODEL
+    global TARGET_MODEL, TARGET_CHATBOT_URL
     if args.target:
         TARGET_MODEL = args.target
+    if args.target_url:
+        TARGET_CHATBOT_URL = args.target_url.rstrip("/")
+        # /chat 없으면 붙여줌
+        if not TARGET_CHATBOT_URL.endswith("/chat"):
+            TARGET_CHATBOT_URL = TARGET_CHATBOT_URL + "/chat"
 
     print("=" * 72)
     print("  AgentShield — Phase 1 + Phase 2 파이프라인 [R1]")
     print("=" * 72)
     print(f"  Red Agent: {AGENT_MODEL}")
     print(f"  Judge: {settings.OLLAMA_JUDGE_MODEL}")
-    print(f"  타겟 (테스트 대상):   {TARGET_MODEL}")
+    if TARGET_CHATBOT_URL:
+        print(f"  타겟 (테스트 대상):   {TARGET_CHATBOT_URL}  [외부 챗봇]")
+    else:
+        print(f"  타겟 (테스트 대상):   {TARGET_MODEL}  [Ollama 직접]")
     if args.category:
         print(f"  카테고리: {args.category}")
     print(f"  Phase 2 라운드: 최대 {args.rounds}회")
@@ -1184,11 +1207,26 @@ async def async_main(args):
     # Ollama 연결 확인 — 에이전트 모델 + 타겟 모델
     target_url = f"{OLLAMA_BASE_URL}/api/chat"
 
+    # 외부 챗봇 URL 사용 시 health 체크
+    if TARGET_CHATBOT_URL:
+        health_url = TARGET_CHATBOT_URL.replace("/chat", "/health")
+        print(f"  타겟 챗봇 확인... ", end="", flush=True)
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as tc:
+                r = await tc.get(health_url)
+                r.raise_for_status()
+            print(f"✅ {health_url}")
+        except Exception as e:
+            print(f"❌ {health_url}: {e}")
+            print("     → testbed가 실행 중인지 확인하세요")
+            return
+
     model_checks = [("Red Agent", AGENT_MODEL)]
     if args.llm_judge:
         model_checks.append(("Judge", settings.OLLAMA_JUDGE_MODEL))
     model_checks.append(("Guard (L2)", settings.OLLAMA_GUARD_MODEL))
-    model_checks.append(("타겟", TARGET_MODEL))
+    if not TARGET_CHATBOT_URL:
+        model_checks.append(("타겟", TARGET_MODEL))
 
     seen_models = set()
     for label, model in model_checks:
@@ -1306,7 +1344,8 @@ def main():
     parser.add_argument("-m", "--max-attacks", type=int, default=0, help="최대 공격 수 (0=전체)")
     parser.add_argument("-r", "--rounds", type=int, default=5, help="Phase 2 최대 라운드 (기본 5)")
     parser.add_argument("--harvest-rounds-after-success", type=int, default=2, help="성공 후 추가 harvest 변종 수 (기본 2, 벤치마크 점수 미포함)")
-    parser.add_argument("-t", "--target", default=None, help="타겟 모델 (기본: gemma4:e2b)")
+    parser.add_argument("-t", "--target", default=None, help="타겟 모델 (기본: gemma4:e2b, --target-url 사용 시 무시)")
+    parser.add_argument("--target-url", default=None, help="외부 챗봇 URL (예: http://localhost:8010) — 지정 시 Ollama 직접 호출 대신 해당 챗봇 공격")
     parser.add_argument("--phase1-only", action="store_true", help="Seed 테스트만 (Phase 2 안 함)")
     parser.add_argument("--phase2-only", action="store_true", help="Phase 1 건너뛰고 Phase 2만 (이전 결과 로드)")
     parser.add_argument("--from-result", default=None, help="--phase2-only용: 로드할 결과 JSON 경로 (미지정 시 최신)")
