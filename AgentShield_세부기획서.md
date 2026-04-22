@@ -48,7 +48,7 @@ AgentShield는 두 가지 문제를 푼다.
 
 - 기본 저장소 설정은 로컬 PostgreSQL / 로컬 Chroma 기준이다.
 - 공유 PostgreSQL / 공유 Chroma 모드는 별도 운영 설정이 있어야 한다.
-- 팀 공용 운영 기준은 `TEAM_SHARED_OPS.md` 와 `.env.shared.example` 를 따른다.
+- 팀 공용 운영 기준은 `팀_검수_운영_가이드.md` 와 `.env.shared.example` 를 따른다.
 
 ### 단계 2. Phase 1 대량 공격
 

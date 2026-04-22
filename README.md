@@ -117,14 +117,14 @@ AgentShield
 - 공격 데이터 기준본은 파일이 아니라 PostgreSQL `attack_patterns` 테이블이다.
 - 결과 DB는 원본 기록 저장소이고, 학습 데이터는 `backend/data_cleaning/` 정제 export를 기준으로 본다.
 - 저장소 기본값은 공유형이 아니라 로컬형이다. PostgreSQL 기본값은 `localhost:5432/agentshield`, Chroma 기본값은 `./chromadb_data` 다.
-- 팀이 같은 DB/Chroma를 보려면 공용 운영 모드로 따로 전환해야 한다. 기준은 [TEAM_SHARED_OPS.md](/Users/parkyeonggon/Projects/final_project/AgentShield/TEAM_SHARED_OPS.md) 와 [.env.shared.example](/Users/parkyeonggon/Projects/final_project/AgentShield/.env.shared.example) 를 따른다.
+- 팀이 같은 DB/Chroma를 보려면 공용 운영 모드로 따로 전환해야 한다. 기준은 [팀_검수_운영_가이드.md](/Users/parkyeonggon/Projects/final_project/AgentShield/팀_검수_운영_가이드.md) 와 [.env.shared.example](/Users/parkyeonggon/Projects/final_project/AgentShield/.env.shared.example) 를 따른다.
 
 ## 개발 및 검증 참고 문서
 
 - [AgentShield_개요.md](/Users/parkyeonggon/Projects/final_project/AgentShield/AgentShield_개요.md): 팀 내부용 제품 방향, 처음 목표와 현재 목표, 기술 스택 정리
 - [AgentShield_세부기획서.md](/Users/parkyeonggon/Projects/final_project/AgentShield/AgentShield_세부기획서.md): 전체 파이프라인, 인터페이스, 폴더/파일 구조, 내부 운영 기준
 - [AgentShield_기능별_파이프라인.md](/Users/parkyeonggon/Projects/final_project/AgentShield/AgentShield_기능별_파이프라인.md): 역할별 최종 형태와 충돌 방지 기준
-- [TEAM_QA_GUIDE.md](/Users/parkyeonggon/Projects/final_project/AgentShield/TEAM_QA_GUIDE.md): 팀원별 실행, DB 점검, 테스트 절차
+- [팀_검수_운영_가이드.md](/Users/parkyeonggon/Projects/final_project/AgentShield/팀_검수_운영_가이드.md): 팀원 검토 기준, JSON 산출, 운영 절차, 공용 DB 전환 기준
 
 ## 운영 원칙
 
