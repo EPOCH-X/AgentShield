@@ -9,7 +9,7 @@ scripts/seed_testbed.py
 
 실행 방법:
 python scripts/seed_testbed.py
-python scripts/seed_testbed.py --db-url postgresql://agentshield:agentshield@localhost:5432/agentshield
+python scripts/seed_testbed.py --db-url postgresql://testbed:testbed@localhost:5433/testbed
 
 요구 사항:
 pip install asyncpg  (requirements.txt에 포함)
@@ -27,7 +27,7 @@ import asyncpg
 random.seed(42)
 
 # ── 기본 접속 URL ──
-DEFAULT_DB_URL = "postgresql://agentshield:agentshield@localhost:5432/agentshield"
+DEFAULT_DB_URL = "postgresql://testbed:testbed@localhost:5433/testbed"
 
 # ── 샘플 데이터 풀 ──
 LAST_NAMES = ["김", "이", "박", "최", "정", "강", "윤", "임", "한", "오"]
