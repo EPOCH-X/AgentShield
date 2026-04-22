@@ -21,7 +21,6 @@ services:
     volumes:
       - testbed_pgdata:/var/lib/postgresql/data
       - ./database/testbed_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
-      - ./database/testbed_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U testbed -d testbed"]
       interval: 3s
@@ -121,6 +120,20 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+
+  # ── DB Seed (1회성 초기화) ─────────────────────────────────────────────────
+  db_seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testbed-db-seed
+    environment:
+      TESTBED_DB_URL: postgresql://testbed:testbed@postgres_testbed:5432/testbed
+    depends_on:
+      postgres_testbed:
+        condition: service_healthy
+    command: python scripts/seed_testbed.py
+    restart: "no"
 
   # ── KB Ingest (1회성 초기화) ─────────────────────────────────────────────────
   kb_ingest:
