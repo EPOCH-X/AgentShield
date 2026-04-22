@@ -3,8 +3,11 @@
 """
 
 import asyncio
+import json
 import logging
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
@@ -34,6 +37,15 @@ class ScanRequest(BaseModel):
 class ScanResponse(BaseModel):
     session_id: str
     status:     str
+
+
+class LatestScanResponse(BaseModel):
+    session_id: str
+    status: str
+    project_name: str
+    target_url: str
+    created_at: Optional[str] = None
+    completed_at: Optional[str] = None
 
 
 class ReviewUpdateRequest(BaseModel):
@@ -188,6 +200,72 @@ async def _persist_phase4_summary(
     await db.flush()
 
 
+async def _auto_export_session(db: AsyncSession, *, session_id: str, session_status: str) -> None:
+    """스캔 완료/실패/취소 후 결과를 results/review_exports/<session_id>_<timestamp>/ 에 자동 저장."""
+    try:
+        sid = UUID(session_id)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        export_dir = Path("results") / "review_exports" / f"{session_id}_{timestamp}"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        # status.json
+        total_rows = await db.scalar(
+            select(func.count()).select_from(TestResult).where(TestResult.session_id == sid)
+        ) or 0
+        vulnerable = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "vulnerable")
+        ) or 0
+        status_data = {
+            "session_id": session_id,
+            "status": session_status,
+            "exported_at": datetime.utcnow().isoformat(),
+            "total_results": total_rows,
+            "vulnerable_count": vulnerable,
+            "safe_count": max(0, total_rows - vulnerable),
+        }
+        (export_dir / "status.json").write_text(
+            json.dumps(status_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        # results.json — 전체 행 전부
+        all_rows = (await db.scalars(
+            select(TestResult).where(TestResult.session_id == sid).order_by(TestResult.id)
+        )).all()
+        results_data = [_result_dict(r, session_id) for r in all_rows]
+        (export_dir / "results.json").write_text(
+            json.dumps(results_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        # review_queue.json — vulnerable + manual_review_needed 필터
+        queue_rows = (await db.scalars(
+            select(TestResult)
+            .where(
+                TestResult.session_id == sid,
+                TestResult.phase.in_([1, 2]),
+                (TestResult.manual_review_needed == True)  # noqa: E712
+                | (TestResult.judgment == "vulnerable"),
+            )
+            .order_by(TestResult.phase.asc(), TestResult.id.asc())
+        )).all()
+        queue_data = [_result_dict(r, session_id) for r in queue_rows]
+        (export_dir / "review_queue.json").write_text(
+            json.dumps(queue_data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        print(
+            f"[scan:{session_id}] auto-export 완료 → {export_dir} "
+            f"(results={len(results_data)}, queue={len(queue_data)})",
+            flush=True,
+        )
+        logger.info(
+            "[scan:%s] auto-export done → %s (results=%d, queue=%d)",
+            session_id, export_dir, len(results_data), len(queue_data),
+        )
+    except Exception:
+        logger.exception("[scan:%s] auto-export 실패 (스캔 결과에는 영향 없음)", session_id)
+
+
 async def _execute_scan_background(
     *,
     session_id: str,
@@ -227,6 +305,7 @@ async def _execute_scan_background(
             session.status = "completed"
             session.completed_at = datetime.utcnow()
             await db.commit()
+            await _auto_export_session(db, session_id=session_id, session_status="completed")
             print(f"[scan:{session_id}] background scan completed", flush=True)
             logger.info("[scan:%s] background scan completed", session_id)
         except asyncio.CancelledError:
@@ -236,6 +315,7 @@ async def _execute_scan_background(
                 session.status = "cancelled"
                 session.completed_at = datetime.utcnow()
                 await db.commit()
+                await _auto_export_session(db, session_id=session_id, session_status="cancelled")
             print(f"[scan:{session_id}] background scan cancelled", flush=True)
             logger.info("[scan:%s] background scan cancelled", session_id)
             raise
@@ -246,6 +326,7 @@ async def _execute_scan_background(
                 session.status = "failed"
                 session.completed_at = datetime.utcnow()
                 await db.commit()
+                await _auto_export_session(db, session_id=session_id, session_status="failed")
             print(f"[scan:{session_id}] background scan failed", flush=True)
             logger.exception("[scan:%s] background scan failed", session_id)
 
@@ -280,6 +361,29 @@ async def start_scan(
     SCAN_TASKS[session_id] = task
     task.add_done_callback(lambda _: SCAN_TASKS.pop(session_id, None))
     return ScanResponse(session_id=session_id, status="queued")
+
+
+@router.get("/latest", response_model=LatestScanResponse)
+async def latest_scan(
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(get_current_user),
+):
+    session = await db.scalar(
+        select(TestSession)
+        .order_by(TestSession.created_at.desc(), TestSession.id.desc())
+        .limit(1)
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
+
+    return LatestScanResponse(
+        session_id=str(session.id),
+        status=session.status,
+        project_name=session.project_name or "",
+        target_url=session.target_api_url,
+        created_at=session.created_at.isoformat() if session.created_at else None,
+        completed_at=session.completed_at.isoformat() if session.completed_at else None,
+    )
 
 
 @router.post("/{session_id}/cancel")
