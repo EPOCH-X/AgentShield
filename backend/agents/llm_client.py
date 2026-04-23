@@ -65,6 +65,7 @@ class AgentShieldLLM:
                 "top_k": 64,
                 "num_ctx": 8192,
                 "adapter_path": os.path.join(root, "adapters", "lora-red"),
+                "think": False,  # disable thinking — red agent needs direct prompt output
             },
             "blue": {
                 "local_model": self.local_base_models["blue"],
@@ -189,6 +190,10 @@ class AgentShieldLLM:
                 "stream": False,
                 "options": options,
             }
+            # Pass think parameter for thinking-capable models (Ollama 0.6+)
+            think_val = role_config.get("think")
+            if think_val is not None:
+                payload["think"] = think_val
             if response_model:
                 payload["format"] = response_model.model_json_schema()
 
@@ -203,7 +208,13 @@ class AgentShieldLLM:
                         response = await client.post(url, json=payload)
 
                     response.raise_for_status()
-                    raw_text = response.json().get("response", "")
+                    resp_json = response.json()
+                    raw_text = resp_json.get("response", "")
+                    # Ollama 0.6+ separates thinking from response for thinking models.
+                    # If response is empty but thinking is present, use thinking content
+                    # so the generation is not silently dropped.
+                    if not raw_text.strip() and resp_json.get("thinking"):
+                        raw_text = resp_json["thinking"]
                     cleaned_text = self.parse_thinking_output(raw_text)
                     if response_model:
                         try:
