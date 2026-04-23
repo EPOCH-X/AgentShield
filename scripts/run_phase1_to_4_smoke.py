@@ -29,9 +29,14 @@ if str(PROJECT_ROOT) not in sys.path:
 from backend.graph.llm_security_graph import run_scan
 
 
+def _log_ts() -> str:
+    """로컬 시각(초). [INFO]/[TRACE]/[WARN] 공통."""
+    return datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
+
+
 def _trace(enabled: bool, msg: str) -> None:
     if enabled:
-        print(f"[TRACE] {msg}", flush=True)
+        print(f"[TRACE] [{_log_ts()}] {msg}", flush=True)
 
 
 @contextmanager
@@ -377,13 +382,13 @@ async def _ensure_test_session(session_id: str, target_url: str) -> None:
         from backend.database import async_session
         from backend.models.test_session import TestSession
     except Exception as e:
-        print(f"[WARN] skip test_session pre-create (import failed): {e}")
+        print(f"[WARN] [{_log_ts()}] skip test_session pre-create (import failed): {e}")
         return
 
     try:
         session_uuid = uuid.UUID(str(session_id))
     except ValueError:
-        print(f"[WARN] skip test_session pre-create (invalid session_id): {session_id}")
+        print(f"[WARN] [{_log_ts()}] skip test_session pre-create (invalid session_id): {session_id}")
         return
 
     try:
@@ -397,23 +402,23 @@ async def _ensure_test_session(session_id: str, target_url: str) -> None:
             db.add(row)
             await db.commit()
     except Exception as e:
-        print(f"[WARN] test_session pre-create failed: {e}")
+        print(f"[WARN] [{_log_ts()}] test_session pre-create failed: {e}")
 
 
 async def _main(args: argparse.Namespace) -> int:
     session_id = args.session_id or str(uuid.uuid4())
-    print(f"[INFO] session_id={session_id}")
-    print(f"[INFO] target_url={args.target_url}")
-    print(f"[INFO] category={args.category or 'ALL'}")
-    print(f"[INFO] max_attacks={args.max_attacks if args.max_attacks is not None else 'ALL'}")
-    print(f"[INFO] phase2_rounds={args.phase2_rounds if args.phase2_rounds is not None else 'DEFAULT'}")
-    print(f"[INFO] llm_timeout={args.llm_timeout if args.llm_timeout is not None else 'NONE'}")
-    print(f"[INFO] verbose_trace={'ON' if args.verbose_trace else 'OFF'}")
+    print(f"[INFO] [{_log_ts()}] session_id={session_id}")
+    print(f"[INFO] [{_log_ts()}] target_url={args.target_url}")
+    print(f"[INFO] [{_log_ts()}] category={args.category or 'ALL'}")
+    print(f"[INFO] [{_log_ts()}] max_attacks={args.max_attacks if args.max_attacks is not None else 'ALL'}")
+    print(f"[INFO] [{_log_ts()}] phase2_rounds={args.phase2_rounds if args.phase2_rounds is not None else 'DEFAULT'}")
+    print(f"[INFO] [{_log_ts()}] llm_timeout={args.llm_timeout if args.llm_timeout is not None else 'NONE'}")
+    print(f"[INFO] [{_log_ts()}] verbose_trace={'ON' if args.verbose_trace else 'OFF'}")
     if args.shuffle:
-        print(f"[INFO] shuffle=ON (seed={args.seed})")
+        print(f"[INFO] [{_log_ts()}] shuffle=ON (seed={args.seed})")
     else:
-        print("[INFO] shuffle=OFF")
-    print("[INFO] Phase1 -> 2 -> 3 -> 4 실행 시작")
+        print(f"[INFO] [{_log_ts()}] shuffle=OFF")
+    print(f"[INFO] [{_log_ts()}] Phase1 -> 2 -> 3 -> 4 실행 시작")
     await _ensure_test_session(session_id, args.target_url)
 
     with _patched_phase1_loader(
@@ -429,7 +434,7 @@ async def _main(args: argparse.Namespace) -> int:
                         final_state = await run_scan(session_id=session_id, target_url=args.target_url)
 
     summary = _short_summary(final_state)
-    print("\n=== SUMMARY ===")
+    print(f"\n[INFO] [{_log_ts()}] === SUMMARY ===")
     print(json.dumps(summary, ensure_ascii=False, indent=2))
 
     if args.save_full:
@@ -438,9 +443,9 @@ async def _main(args: argparse.Namespace) -> int:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_path = out_dir / f"phase1to4_smoke_{ts}.json"
         out_path.write_text(json.dumps(final_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        print(f"\n[INFO] full state saved: {out_path}")
+        print(f"\n[INFO] [{_log_ts()}] full state saved: {out_path}")
         review_path = _write_review_log(final_state, out_dir, ts)
-        print(f"[INFO] review log saved: {review_path}")
+        print(f"[INFO] [{_log_ts()}] review log saved: {review_path}")
 
     return 0
 
