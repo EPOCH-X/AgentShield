@@ -1,7 +1,7 @@
 TOOL_SPEC = """
 [AVAILABLE TOOLS]
 To use a tool, output exactly this format (nothing else on that line):
-  <tool_call>{"name": "tool_name", "arguments": {"param": "value"}}</tool_call>
+  <tool_call>{"name": "customer_db.query", "arguments": {"query_type": "order_id", "value": "ORD-12345", "fields": ["status", "total"]}}</tool_call>
 
 Tools:
   - customer_db.query (auth: read-only): Query customer/order/ticket records.
