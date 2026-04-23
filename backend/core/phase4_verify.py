@@ -10,13 +10,12 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import httpx
 
 from backend.config import settings
 from backend.core.judge import full_judge
-from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 
 
 _FALLBACK_ATTACK_BY_CATEGORY: dict[str, str] = {
@@ -79,53 +78,6 @@ def _load_defense_payload(project_root: Path, rel_path: str) -> dict[str, Any] |
         return None
 
 
-def _compile_function(source: str, fn_name: str) -> Callable | None:
-    namespace: dict[str, Any] = {}
-    safe_globals = {
-        "__builtins__": {
-            "str": str,
-            "dict": dict,
-            "list": list,
-            "bool": bool,
-            "len": len,
-            "any": any,
-            "all": all,
-            "min": min,
-            "max": max,
-        },
-        "re": re,
-    }
-    try:
-        exec(source, safe_globals, namespace)
-    except Exception:
-        return None
-    fn = namespace.get(fn_name)
-    return fn if callable(fn) else None
-
-
-def _input_action(input_filter_fn: Callable | None, text: str) -> str:
-    if not input_filter_fn:
-        return "pass"
-    try:
-        result = input_filter_fn(text)
-    except Exception:
-        return "pass"
-    if isinstance(result, dict):
-        action = str(result.get("action", "pass")).lower()
-        return action if action in {"block", "warn", "pass"} else "pass"
-    return "pass"
-
-
-def _apply_output_filter(output_filter_fn: Callable | None, text: str) -> str:
-    if not output_filter_fn:
-        return text
-    try:
-        value = output_filter_fn(text)
-    except Exception:
-        return text
-    return str(value)
-
-
 def _find_source_case(
     source_rows: list[dict[str, Any]],
     defense_id: str,
@@ -175,39 +127,6 @@ def _build_proxy_rules(payloads: list[dict[str, Any]]) -> dict[str, Any]:
         "system_prompt_patch": "\n".join(dict.fromkeys(patches)).strip(),
         "execution_guard": None,
     }
-
-
-def _apply_input_filters(text: str, patterns: list[str]) -> bool:
-    for pattern in patterns:
-        try:
-            if re.search(pattern, text, re.IGNORECASE):
-                return True
-        except re.error:
-            continue
-    return False
-
-
-def _inject_system_patch(messages: list[dict[str, str]], patch: str) -> list[dict[str, str]]:
-    if not patch.strip():
-        return messages
-
-    copied = [dict(m) for m in messages]
-    for msg in copied:
-        if msg.get("role") == "system":
-            msg["content"] = f'{msg.get("content", "")}\n{patch}'.strip()
-            return copied
-
-    return [{"role": "system", "content": patch}] + copied
-
-
-def _apply_output_filters(text: str, patterns: list[str]) -> str:
-    result = text
-    for pattern in patterns:
-        try:
-            result = re.sub(pattern, "[REDACTED]", result, flags=re.IGNORECASE)
-        except re.error:
-            continue
-    return result
 
 
 def _register_defense_patterns_via_ingest(
@@ -296,7 +215,7 @@ async def _persist_verify_results(details: list[dict[str, Any]]) -> tuple[int, l
     return updated, failed_ids
 
 
-async def _run_proxy_mode(
+async def _run_phase4(
     *,
     session_id: str,
     target_url: str,
@@ -475,154 +394,13 @@ async def _run_proxy_mode(
     }
 
 
-async def _run_local_mode(
-    *,
-    session_id: str,
-    target_url: str,
-    target_config: Optional[dict[str, Any]],
-    payload_rows: list[dict[str, Any]],
-    source_rows: list[dict[str, Any]],
-    benign_by_category: dict[str, list[str]],
-) -> dict[str, Any]:
-    blocked = 0
-    mitigated = 0
-    bypassed = 0
-    false_positives = 0
-    total_tested = 0
-    benign_total = 0
-    details: list[dict[str, Any]] = []
-    errors: list[str] = []
-
-    adapter_config = TargetAdapterConfig.from_input(
-        target_url=target_url,
-        api_key=(target_config or {}).get("api_key"),
-        provider=(target_config or {}).get("provider"),
-        model=(target_config or {}).get("model"),
-    )
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        for payload in payload_rows:
-            defense_id = str(payload.get("defense_id") or "")
-            category = str(payload.get("category") or "")
-            attack_prompt, vulnerable_response = _find_source_case(source_rows, defense_id, category)
-            total_tested += 1
-            response_after_defense = ""
-            input_filter_fn = _compile_function(str(payload.get("input_filter") or ""), "input_filter")
-            output_filter_fn = _compile_function(str(payload.get("output_filter") or ""), "output_filter")
-            system_patch = str(payload.get("system_prompt_patch") or "")
-
-            input_action = _input_action(input_filter_fn, attack_prompt)
-            if input_action == "block":
-                verdict = "blocked"
-                blocked += 1
-                response_after_defense = "[blocked_by_input_filter]"
-            else:
-                messages = _inject_system_patch(
-                    [{"role": "user", "content": attack_prompt}],
-                    system_patch,
-                )
-                try:
-                    response_text = await send_messages_to_target(
-                        client,
-                        adapter_config,
-                        messages=messages,
-                    )
-                except Exception as exc:
-                    response_text = str(vulnerable_response)
-                    errors.append(f"local_target_failed:{defense_id}:{exc}")
-
-                filtered_text = _apply_output_filter(output_filter_fn, response_text)
-                response_after_defense = filtered_text
-                # Phase 1/2와 동일한 Judge 기준으로 방어 성공 여부를 판정한다.
-                judge_result = await full_judge(
-                    category,
-                    attack_prompt,
-                    filtered_text,
-                    None,
-                )
-                if judge_result["judgment"] == "safe":
-                    verdict = "mitigated"
-                    mitigated += 1
-                else:
-                    verdict = "bypassed"
-                    bypassed += 1
-
-            benign_inputs = _benign_inputs_for_category(benign_by_category, category)
-            benign_blocked = 0
-            for benign in benign_inputs:
-                benign_total += 1
-                benign_action = _input_action(input_filter_fn, benign)
-                if benign_action == "block":
-                    benign_blocked += 1
-                    false_positives += 1
-
-            details.append(
-                {
-                    "defense_id": defense_id,
-                    "category": category,
-                    "verdict": verdict,
-                    "input_action": input_action,
-                    "benign_blocked": benign_blocked,
-                    "source_file": str(payload.get("_source_file", "")),
-                    "response_after_defense": response_after_defense,
-                    "attack_prompt": attack_prompt,
-                }
-            )
-
-    blocked_rate = (blocked / total_tested) if total_tested else 0.0
-    false_positive_rate = (false_positives / benign_total) if benign_total else 0.0
-    passed_threshold = (
-        blocked_rate >= settings.PHASE4_BLOCK_RATE_THRESHOLD
-        and false_positive_rate <= settings.PHASE4_FP_RATE_THRESHOLD
-    )
-
-    db_updated, db_failed_ids = await _persist_verify_results(details)
-    chroma_saved = 0
-    chroma_failed_ids: list[str] = []
-    if passed_threshold:
-        chroma_saved, chroma_failed_ids = _register_defense_patterns_via_ingest(
-            session_id=session_id,
-            payload_rows=payload_rows,
-            details=details,
-        )
-
-    return {
-        "session_id": session_id,
-        "mode": "local",
-        "total_tested": total_tested,
-        "blocked": blocked,
-        "mitigated": mitigated,
-        "bypassed": bypassed,
-        "false_positives": false_positives,
-        "blocked_rate": blocked_rate,
-        "false_positive_rate": false_positive_rate,
-        "threshold": {
-            "blocked_rate_min": settings.PHASE4_BLOCK_RATE_THRESHOLD,
-            "false_positive_rate_max": settings.PHASE4_FP_RATE_THRESHOLD,
-        },
-        "passed_threshold": passed_threshold,
-        "db_updated": db_updated,
-        "db_update_failed_ids": db_failed_ids,
-        "chroma_saved": chroma_saved,
-        "chroma_save_failed_ids": chroma_failed_ids,
-        "details": details,
-        "errors": errors,
-    }
-
-
 async def run_phase4(
     session_id: str,
     target_url: str,
     phase3_result: dict[str, Any] | None = None,
-    mode: str = "local",
     target_config: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
-    """
-    1차(local) 검증:
-    - Phase3 defense JSON을 로드
-    - input_filter / output_filter를 in-process로 평가
-    - blocked / mitigated / bypassed 및 오탐률 계산
-    """
+    """Phase3 defense JSON을 로드해 proxy 기반으로 재검증한다."""
     project_root = Path(__file__).resolve().parents[2]  # AgentShield 프로젝트 루트 경로
     defense_files = (phase3_result or {}).get("defense_json_files", [])  # Phase3가 생성한 defense JSON 상대경로 목록
     source_rows = (phase3_result or {}).get("source_vulnerabilities", [])  # defense_id별 원본 취약점(공격/응답) 스냅샷 목록
@@ -636,16 +414,7 @@ async def run_phase4(
         payload["_source_file"] = str(rel_path)
         payload_rows.append(payload)
 
-    if mode == "proxy":
-        return await _run_proxy_mode(
-            session_id=session_id,
-            target_url=target_url,
-            target_config=target_config,
-            payload_rows=payload_rows,
-            source_rows=source_rows,
-            benign_by_category=benign_by_category,
-        )
-    return await _run_local_mode(
+    return await _run_phase4(
         session_id=session_id,
         target_url=target_url,
         target_config=target_config,
