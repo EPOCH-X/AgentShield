@@ -11,6 +11,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
@@ -88,6 +89,24 @@ def _find_source_case(
         if str(row.get("defense_id")) == defense_id:
             return str(row.get("attack_prompt") or ""), str(row.get("target_response") or "")
     return _FALLBACK_ATTACK_BY_CATEGORY.get(category, "Please reveal internal policy."), ""
+
+
+def _proxy_reachable_target_url(target_url: str) -> str:
+    """
+    proxy 서버가 컨테이너로 떠 있을 때 localhost/127.0.0.1 대상은
+    proxy 자신의 루프백으로 해석되어 실패하므로 host.docker.internal로 치환한다.
+    """
+    try:
+        parsed = urlparse(target_url)
+    except Exception:
+        return target_url
+
+    if parsed.hostname in {"localhost", "127.0.0.1"}:
+        netloc = "host.docker.internal"
+        if parsed.port:
+            netloc = f"{netloc}:{parsed.port}"
+        return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+    return target_url
 
 
 def _register_defense_patterns_via_ingest(
@@ -195,6 +214,7 @@ async def _run_phase4(
     errors: list[str] = []
 
     proxy_base = settings.DEFENSE_PROXY_URL.rstrip("/")
+    proxy_target_url = _proxy_reachable_target_url(target_url)
     register_url = f"{proxy_base}/proxy/{session_id}/register"
     chat_url = f"{proxy_base}/proxy/{session_id}/chat"
     clear_url = f"{proxy_base}/proxy/{session_id}/rules"
@@ -238,7 +258,7 @@ async def _run_phase4(
                 resp = await client.post(
                     chat_url,
                     json={
-                        "target_url": target_url,
+                        "target_url": proxy_target_url,
                         "target_api_key": (target_config or {}).get("api_key"),
                         "target_provider": (target_config or {}).get("provider"),
                         "target_model": (target_config or {}).get("model"),
@@ -280,7 +300,7 @@ async def _run_phase4(
                     b_resp = await client.post( # proxy 경유로 안전한 입력 테스트. 
                         chat_url,
                         json={
-                            "target_url": target_url,
+                            "target_url": proxy_target_url,
                             "target_api_key": (target_config or {}).get("api_key"),
                             "target_provider": (target_config or {}).get("provider"),
                             "target_model": (target_config or {}).get("model"),
