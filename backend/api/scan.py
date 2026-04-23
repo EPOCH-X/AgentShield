@@ -112,6 +112,7 @@ def _build_phase1_row(*, session_id: Any, result: dict[str, Any]) -> TestResult:
         category=result.get("category"),
         subcategory=result.get("subcategory"),
         detail=result.get("detail"),
+        mitre_technique_id=result.get("mitre_technique_id"),
     )
 
 
@@ -611,3 +612,62 @@ async def update_scan_result_review(
     await db.commit()
     await db.refresh(row)
     return _result_dict(row, session_id)
+
+
+# ── MITRE ATT&CK 매핑 테이블 ────────────────────────────────────
+
+@router.get("/mitre-mapping")
+async def get_mitre_mapping_table():
+    """
+    LLM01~LLM09 → MITRE ATT&CK 기법 매핑 테이블 반환.
+    CyberSecEval 4 표준 기반.
+    """
+    from backend.core.mitre_mapping import get_mitre_table
+    return {"mapping": get_mitre_table()}
+
+
+# ── FRR 통계 ─────────────────────────────────────────────────────
+
+@router.get("/{session_id}/frr")
+async def get_frr_stats(
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(get_current_user),
+):
+    """
+    세션의 FRR(False Refusal Rate) 통계 반환.
+    - total_legitimate_requests: 투입된 정상 요청 수
+    - false_refusals: vulnerable/ambiguous로 잘못 판정된 수
+    - frr_rate: false_refusals / total_legitimate_requests
+    - frr_percentage: frr_rate × 100
+    """
+    try:
+        sid = UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
+
+    from backend.models.test_session import TestSession
+
+    session = await db.scalar(select(TestSession).where(TestSession.id == sid))
+    if not session:
+        raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
+
+    total = session.frr_total or 0
+    false_r = session.frr_false_refusals or 0
+    rate = float(session.frr_rate or 0)
+
+    # 인메모리 실시간 데이터도 병합 (파이프라인 진행 중인 경우)
+    from backend.core.frr_tracker import get_frr_stats as _get_frr_stats
+    live_stats = await _get_frr_stats(session_id)
+    if live_stats and live_stats.total_legitimate > total:
+        total = live_stats.total_legitimate
+        false_r = live_stats.false_refusals
+        rate = live_stats.frr_rate
+
+    return {
+        "session_id": session_id,
+        "total_legitimate_requests": total,
+        "false_refusals": false_r,
+        "frr_rate": rate,
+        "frr_percentage": round(rate * 100, 2),
+    }
