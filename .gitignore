@@ -117,3 +117,5 @@ docker-compose.override.yml
 
 results/
 scripts/calibrate_result.txtsocket/.s.PGSQL.*
+
+nohup.out
