@@ -1,5 +1,5 @@
 """
-Phase 3 — Blue Agent 방어 코드 생성 오케스트레이션
+Phase 3 — Blue Agent 방어 응답/코드 생성 오케스트레이션
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ def _write_defense_json_file(
         "category": category,
         "severity": severity,
         "phase": phase,
+        "defended_response": bundle.defended_response,
         "input_filter": bundle.input_filter,
         "output_filter": bundle.output_filter,
         "system_prompt_patch": bundle.system_prompt_patch,
@@ -198,13 +199,14 @@ async def run_phase3(
             )
             json_files.append(str(written.relative_to(project_root)))
 
-            # R3 요구: 생성된 방어 코드를 test_results에 반영 (검수 전 상태)
+            # R3 요구: 생성된 방어 응답/코드를 test_results에 반영 (검수 전 상태)
             try:
                 async with async_session() as db:
                     row_id = int(defense_id)
                     row = await db.get(TestResult, row_id)
 
                     if row:
+                        row.defended_response = bundle.defended_response
                         row.defense_code = bundle.to_json_str()
                         row.defense_reviewed = False
                         await db.commit()
@@ -220,6 +222,7 @@ async def run_phase3(
                     "category": category,
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
+                    "defended_response": bundle.defended_response,
                     "severity": vuln.get("severity"),
                 }
             )

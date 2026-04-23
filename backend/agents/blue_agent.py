@@ -1,5 +1,5 @@
 """
-Blue Agent — 방어 코드 생성 프롬프트 빌더 + LLM 응답 파서
+Blue Agent — 방어 응답/코드 생성 프롬프트 빌더 + LLM 응답 파서
 
 Phase 3에서 LLM에 넣을 프롬프트를 만들고, 돌아온 문자열에서 JSON을 꺼낸다.
 실제 generate() 호출은 R4 llm_client — 여기서는 문자열만 다룬다.
@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 # ---------------------------------------------------------------------------
-# 방어 코드 작성 가이드 (LLM 시스템/유저 지시에 포함)
+# 방어 응답/코드 작성 가이드 (LLM 시스템/유저 지시에 포함)
 # 기획서의 3종 가이드를 요약해 두고, 필요하면 문장만 늘리면 된다.
 # ---------------------------------------------------------------------------
 DEFENSE_WRITING_GUIDE = """
@@ -21,6 +21,10 @@ Generate ONLY the defenses that are necessary for this vulnerability.
 If an artifact is not needed, return an empty string "" for that field.
 
 Artifacts:
+
+0) defended_response — the primary output for this vulnerability.
+   Return a concise safer response text the chatbot should output to this exact attack prompt.
+   Keep it policy-aligned, avoid leaking secrets/system prompt/tool internals, and preserve helpfulness when possible.
 
 1) input_filter — Python source for a function:
    def input_filter(text: str) -> dict:
@@ -37,7 +41,7 @@ Artifacts:
    If policy patching is unnecessary, return "".
 
 Output format (strict): a single JSON object with keys:
-  "input_filter", "output_filter", "system_prompt_patch", "defense_rationale"
+  "defended_response", "input_filter", "output_filter", "system_prompt_patch", "defense_rationale"
 Values must be strings (Python code as string for the two functions).
 defense_rationale must explain in 1-3 sentences why each artifact is present or empty.
 Do not wrap in markdown fences. No extra keys. No labels. No commentary outside JSON.
@@ -158,6 +162,7 @@ category: {category}
 class BlueDefenseBundle:
     """파싱 결과를 다루기 쉬운 객체 (DB에는 JSON 문자열로 저장해도 됨)."""
 
+    defended_response: str
     input_filter: str
     output_filter: str
     system_prompt_patch: str
@@ -166,6 +171,7 @@ class BlueDefenseBundle:
     def to_json_str(self) -> str:
         return json.dumps(
             {
+                "defended_response": self.defended_response,
                 "input_filter": self.input_filter,
                 "output_filter": self.output_filter,
                 "system_prompt_patch": self.system_prompt_patch,
@@ -193,6 +199,7 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
     try:
         data: dict[str, Any] = json.loads(text)
         return BlueDefenseBundle(
+            defended_response=str(data.get("defended_response", "")),
             input_filter=str(data.get("input_filter", "")),
             output_filter=str(data.get("output_filter", "")),
             system_prompt_patch=str(data.get("system_prompt_patch", "")),
@@ -222,15 +229,22 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
                     .replace("\\t", "\t")
                 )
 
+        defended_response = _extract_field_value("defended_response", text)
         input_filter = _extract_field_value("input_filter", text)
         output_filter = _extract_field_value("output_filter", text)
         system_prompt_patch = _extract_field_value("system_prompt_patch", text)
         defense_rationale = _extract_field_value("defense_rationale", text)
 
-        if input_filter is None or output_filter is None or system_prompt_patch is None:
+        if (
+            defended_response is None
+            or input_filter is None
+            or output_filter is None
+            or system_prompt_patch is None
+        ):
             raise
 
         return BlueDefenseBundle(
+            defended_response=defended_response,
             input_filter=input_filter,
             output_filter=output_filter,
             system_prompt_patch=system_prompt_patch,
