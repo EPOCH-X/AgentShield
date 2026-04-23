@@ -30,7 +30,7 @@ from typing import Optional
 
 import httpx
 
-from backend.agents.red_agent import analyze_defense_signal, build_red_prompt, detect_chatbot_domain, get_system_prompt, _is_abliterated_model, extract_techniques, normalize_attack_prompt_output, select_target_failure_mode, validate_attack_prompt_output, _extract_structural_anchor
+from backend.agents.red_agent import AdaptiveRedAgent, analyze_defense_signal, build_red_prompt, detect_chatbot_domain, get_system_prompt, _is_abliterated_model, extract_techniques, normalize_attack_prompt_output, select_target_failure_mode, validate_attack_prompt_output, _extract_structural_anchor
 from backend.config import settings
 from backend.core.judge import full_judge, _has_refusal, _has_meta_analysis
 from backend.core.phase1_scanner import run_phase1
@@ -475,6 +475,9 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
         print(f"\n  [{i}/{len(safe_attacks)}] Red Agent: {cat}/{subcat}")
         print(f"    원본: {_truncate(current_prompt, 150)}")
 
+        # AdaptiveRedAgent: 이 챗봇 세션 전용 기법 성공률 추적기 (attack 단위로 초기화)
+        adaptive_agent = AdaptiveRedAgent(settings.OLLAMA_RED_MODEL)
+
         # B: 라운드 간 사용된 기법 추적
         used_techniques: list[str] = []
         used_failure_modes: list[str] = []
@@ -493,6 +496,13 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                 )
             target_failure_mode = select_target_failure_mode(cat, rnd, prev_failure_modes=used_failure_modes)
 
+            # AdaptiveRedAgent: 이번 세션에서 학습한 기법 성공률을 category_attack_profile에 병합
+            base_profile = dict(category_profiles.get(cat) or {})
+            if adaptive_agent.success_rate_map:
+                best = sorted(adaptive_agent.success_rate_map.items(), key=lambda x: -x[1])[:3]
+                base_profile["session_top_techniques"] = [t for t, _ in best]
+                base_profile["session_success_rates"] = dict(best)
+
             red_prompt = build_red_prompt(
                 attack_prompt=current_prompt,
                 target_response=current_response,
@@ -503,7 +513,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                 cross_category_intel=cross_category_intel if cross_category_intel else None,
                 successful_attack_refs=similar_cases,
                 failure_intel=category_failure_intel.get(cat),
-                category_attack_profile=category_profiles.get(cat),
+                category_attack_profile=base_profile if base_profile else None,
                 target_failure_mode=target_failure_mode,
                 judge_detail=current_judge_detail,
                 domain_context=domain_context,
@@ -638,6 +648,9 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                     f"failure_mode={verdict.get('failure_mode') or target_failure_mode}. Attack excerpt: {new_attack}"
                 )
                 cross_category_intel[cat] = intel_summary
+
+                # AdaptiveRedAgent: 성공 판정 기록 (score=1.0)
+                adaptive_agent.evaluate_attack(new_attack, target_response, 1.0)
 
                 if harvest_rounds_after_success > 0 and not fp_flag:
                     print(f"      🧪 Harvest mode: 추가 변종 최대 {harvest_rounds_after_success}건")
@@ -837,6 +850,8 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                 current_prompt = new_attack
                 current_response = target_response
                 current_judge_detail = verdict.get("detail", "")
+                # AdaptiveRedAgent: 차단 판정 기록 (score=0.0)
+                adaptive_agent.evaluate_attack(new_attack, target_response, 0.0)
         else:
             print(f"    → {max_rounds}라운드 모두 방어 성공 ✅")
 
