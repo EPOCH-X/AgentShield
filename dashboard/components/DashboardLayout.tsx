@@ -10,6 +10,7 @@ interface DashboardLayoutProps {
 }
 
 const navItems = [
+  { icon: "account_tree", label: "플랫폼 개요", href: "/overview" },
   { icon: "security", label: "LLM 보안 스캔", href: "/scan" },
   { icon: "visibility", label: "모니터링 및 위반", href: "/monitoring" },
   { icon: "admin_panel_settings", label: "관리자", href: "/monitoring/admin" },
@@ -31,24 +32,27 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   function isActive(href: string): boolean {
     if (href === "/scan") return pathname === "/scan" || pathname.startsWith("/scan/");
+    if (href === "/overview") return pathname === "/overview";
+    if (href === "/monitoring") return pathname === "/monitoring";
+    if (href === "/monitoring/admin") {
+      return pathname === "/monitoring/admin" || pathname.startsWith("/monitoring/admin/");
+    }
     return pathname === href || (href !== "/" && pathname.startsWith(href));
   }
 
   return (
     <div className="min-h-screen bg-background text-on-surface">
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#010e24] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
+      <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#050F1A] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
         <div className="p-8 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center shadow-lg shadow-primary/20 neon-glow-primary">
-            <span
-              className="material-symbols-outlined text-on-primary-container font-bold text-xl"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              security
-            </span>
-          </div>
+          {/* Logo Image */}
+          <img
+            src="/logo3.png"
+            alt="AgentShield"
+            className="w-14 h-14 object-contain rounded-xl neon-glow-primary flex-shrink-0"
+          />
           <div>
-            <h1 className="text-xl font-extrabold tracking-tighter text-[#00A3FF]">
+            <h1 className="text-xl font-extrabold tracking-tighter text-primary">
               AgentShield
             </h1>
             <p className="text-[9px] uppercase tracking-[0.3em] text-on-surface-variant/70 font-bold">
@@ -66,7 +70,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
                   active
-                    ? "text-primary bg-primary/10 border border-primary/20 font-bold shadow-[0_0_15px_rgba(152,203,255,0.05)]"
+                    ? "text-primary bg-primary/10 border border-primary/20 font-bold shadow-[0_0_15px_rgba(14,165,165,0.12)]"
                     : "text-on-surface-variant hover:bg-surface-container hover:text-white group"
                 }`}
               >
@@ -116,7 +120,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2 px-4 py-1.5 rounded-full bg-tertiary/5 border border-tertiary/10">
-              <span className="w-1.5 h-1.5 rounded-full bg-tertiary shadow-[0_0_8px_rgba(60,227,106,0.6)] animate-pulse" />
+              <span className="w-1.5 h-1.5 rounded-full bg-tertiary shadow-[0_0_8px_rgba(58,134,255,0.7)] animate-pulse" />
               <span className="text-[10px] font-bold text-tertiary tracking-[0.15em] uppercase">
                 SYSTEM SECURE
               </span>

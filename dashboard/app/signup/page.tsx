@@ -45,20 +45,17 @@ export default function SignupPage() {
       className="min-h-screen bg-background flex items-center justify-center p-4"
       style={{
         backgroundImage:
-          "radial-gradient(circle at 50% 0%, #0d1c32 0%, #041329 100%)",
+          "radial-gradient(circle at 50% 0%, #091E30 0%, #071824 100%)",
       }}
     >
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex flex-col items-center mb-10">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-primary to-primary-container flex items-center justify-center shadow-lg shadow-primary/30 neon-glow-primary mb-5">
-            <span
-              className="material-symbols-outlined text-on-primary-container text-3xl"
-              style={{ fontVariationSettings: "'FILL' 1" }}
-            >
-              security
-            </span>
-          </div>
+          <img
+            src="/logo3.png"
+            alt="AgentShield"
+            className="w-32 h-32 object-contain rounded-2xl neon-glow-primary mb-5"
+          />
           <h1 className="text-3xl font-extrabold tracking-tighter text-white font-headline">
             AgentShield
           </h1>
@@ -73,9 +70,9 @@ export default function SignupPage() {
             /* 가입 완료 상태 */
             <div className="text-center space-y-6">
               <div className="flex justify-center">
-                <div className="w-16 h-16 rounded-full bg-tertiary/10 border border-tertiary/30 flex items-center justify-center">
+                <div className="w-16 h-16 rounded-full bg-secondary/10 border border-secondary/30 flex items-center justify-center">
                   <span
-                    className="material-symbols-outlined text-tertiary text-4xl"
+                    className="material-symbols-outlined text-secondary text-4xl"
                     style={{ fontVariationSettings: "'FILL' 1" }}
                   >
                     check_circle
@@ -94,7 +91,7 @@ export default function SignupPage() {
               </div>
               <button
                 onClick={() => router.push("/login")}
-                className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary via-[#4DA8FF] to-primary-container text-on-primary-container font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(0,163,255,0.3)] hover:shadow-[0_15px_40px_rgba(0,163,255,0.4)] hover:-translate-y-0.5 transition-all active:scale-[0.98] neon-glow-primary"
+                className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary-container via-primary to-[#2DD4D4] text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(14,165,165,0.35)] hover:shadow-[0_15px_40px_rgba(14,165,165,0.5)] hover:-translate-y-0.5 transition-all active:scale-[0.98] neon-glow-primary"
               >
                 로그인 페이지로
               </button>
@@ -108,6 +105,9 @@ export default function SignupPage() {
                 </h2>
                 <p className="text-sm text-on-surface-variant mt-1">
                   AgentShield 보안 콘솔 접근 권한을 신청합니다.
+                </p>
+                <p className="text-[10px] text-outline mt-2 leading-relaxed">
+                  백엔드가 없으면 비밀번호 8자 이상만 맞으면 목업 가입 성공 응답이 옵니다.
                 </p>
               </div>
 
@@ -206,11 +206,11 @@ export default function SignupPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary via-[#4DA8FF] to-primary-container text-on-primary-container font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(0,163,255,0.3)] hover:shadow-[0_15px_40px_rgba(0,163,255,0.4)] hover:-translate-y-0.5 transition-all active:scale-[0.98] active:translate-y-0 neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                  className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary-container via-primary to-[#2DD4D4] text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(14,165,165,0.35)] hover:shadow-[0_15px_40px_rgba(14,165,165,0.5)] hover:-translate-y-0.5 transition-all active:scale-[0.98] active:translate-y-0 neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
-                      <span className="w-4 h-4 border-2 border-on-primary-container border-t-transparent rounded-full animate-spin" />
+                      <span className="w-4 h-4 border-2 border-on-primary border-t-transparent rounded-full animate-spin" />
                       처리 중...
                     </span>
                   ) : (

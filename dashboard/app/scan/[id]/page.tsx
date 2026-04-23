@@ -208,11 +208,11 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
           <div className="md:col-span-5 p-8 rounded-[2rem] glass-panel flex flex-col items-center justify-center gap-6 relative overflow-hidden">
             <div className="absolute -bottom-10 -left-10 w-32 h-32 bg-primary/5 rounded-full blur-2xl" />
             <div className="relative w-40 h-40">
-              <svg className="w-full h-full -rotate-90 drop-shadow-[0_0_15px_rgba(152,203,255,0.3)]" viewBox="0 0 36 36">
+              <svg className="w-full h-full -rotate-90 drop-shadow-[0_0_15px_rgba(14,165,165,0.45)]" viewBox="0 0 36 36">
                 <defs>
                   <linearGradient id="progGrad" x1="0%" x2="100%" y1="0%" y2="0%">
-                    <stop offset="0%" stopColor="#98cbff" />
-                    <stop offset="100%" stopColor="#00a3ff" />
+                    <stop offset="0%" stopColor="#0A7272" />
+                    <stop offset="100%" stopColor="#2DD4D4" />
                   </linearGradient>
                 </defs>
                 <circle className="stroke-surface-container-highest" cx="18" cy="18" fill="none" r="16" strokeWidth="2.5" />
@@ -319,7 +319,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
           </div>
           <div
             ref={logRef}
-            className="p-8 font-mono text-[11px] overflow-y-auto space-y-2 flex-1 bg-[#010e24]/80 relative scroll-smooth"
+            className="p-8 font-mono text-[11px] overflow-y-auto space-y-2 flex-1 bg-[#0E0819]/80 relative scroll-smooth"
           >
             {isRunning && <div className="scan-line" />}
             {logs.map((log, i) => (

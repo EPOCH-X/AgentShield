@@ -1,8 +1,12 @@
 {
   "permissions": {
     "allow": [
+<<<<<<< HEAD
       "Bash(find \"C:\\\\Nami\\\\막프_보안잡았으\\\\AgentShield\\\\dashboard\\\\note\" -name \"*.html\" -exec wc -l {} \\\\;)",
       "Bash(grep -E \"\\\\.tsx$\")"
+=======
+      "mcp__Claude_in_Chrome__tabs_context_mcp"
+>>>>>>> 27632c1 (Merge branch 'develop' of https://github.com/EPOCH-X/AgentShield into develop)
     ]
   }
 }
