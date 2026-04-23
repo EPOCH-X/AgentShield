@@ -28,6 +28,7 @@ class TestResult(Base):
     subcategory = Column(String(50), nullable=True)
     detail = Column(Text, nullable=True)  # Judge 판정 상세 사유
     defense_code = Column(Text, nullable=True)
+    defended_response = Column(Text, nullable=True)  # Phase 3 방어 응답 (방어 코드 적용 후 챗봇 응답)
     defense_reviewed = Column(Boolean, default=False)
     verify_result = Column(String(20), nullable=True)  # blocked/bypassed/mitigated
     created_at = Column(DateTime, server_default=func.now())
