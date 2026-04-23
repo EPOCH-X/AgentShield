@@ -12,6 +12,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from backend.core.mitre_mapping import get_mitre_mapping
+
 # ---------------------------------------------------------------------------
 # 방어 응답/코드 작성 가이드 (LLM 시스템/유저 지시에 포함)
 # 기획서의 3종 가이드를 요약해 두고, 필요하면 문장만 늘리면 된다.
@@ -118,6 +120,8 @@ def build_blue_prompt(
     attack_prompt: str,
     target_response: str,
     *,
+    failure_mode: str | None = None,
+    mitre_technique_id: str | None = None,
     owasp_recommendation: str = "",
     rag_defense_examples: str = "",
 ) -> str:
@@ -134,6 +138,28 @@ def build_blue_prompt(
         if rag_defense_examples.strip()
         else ""
     )
+    mitre_block = ""
+    if failure_mode or mitre_technique_id:
+        mapping = get_mitre_mapping(category, failure_mode)
+        primary = mapping.get("primary", {})
+        mapped_id = str(primary.get("technique_id", ""))
+        display_id = mitre_technique_id or mapped_id
+        technique_name = str(primary.get("name", "Unknown Technique"))
+        tactic = str(primary.get("tactic", "Unknown Tactic"))
+        ref_url = str(primary.get("url", ""))
+        mode_line = f"- Failure mode: {failure_mode}\n" if failure_mode else ""
+        mismatch_line = ""
+        if mitre_technique_id and mapped_id and mitre_technique_id != mapped_id:
+            mismatch_line = f"- Category mapping default: {mapped_id}\n"
+        mitre_block = (
+            "[MITRE ATT&CK context]\n"
+            f"- Technique: {display_id} — {technique_name}\n"
+            f"- Tactic: {tactic}\n"
+            f"- Reference: {ref_url}\n"
+            f"{mode_line}"
+            f"{mismatch_line}"
+            "- Reflect this ATT&CK technique's mitigation strategy in the defense artifacts.\n\n"
+        )
     category_policy_block = _category_policy_block(category)
 
     return f"""You are the Blue Agent for an LLM security product. Generate defenses for the finding below.
@@ -147,7 +173,7 @@ category: {category}
 [Model response that exhibited the issue]
 {target_response}
 
-{owasp_block}{rag_block}
+{owasp_block}{rag_block}{mitre_block}
 {category_policy_block}
 
 [Defense authoring rules]
