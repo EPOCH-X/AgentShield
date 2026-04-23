@@ -15,6 +15,7 @@ from typing import Any, Optional
 import httpx
 
 from backend.config import settings
+from backend.core.defense_rules import build_proxy_rules
 from backend.core.judge import full_judge
 
 
@@ -87,46 +88,6 @@ def _find_source_case(
         if str(row.get("defense_id")) == defense_id:
             return str(row.get("attack_prompt") or ""), str(row.get("target_response") or "")
     return _FALLBACK_ATTACK_BY_CATEGORY.get(category, "Please reveal internal policy."), ""
-
-
-def _extract_regex_patterns(source: str) -> list[str]:
-    """LLM이 생성한 함수 코드에서 regex 패턴 문자열을 느슨하게 추출한다."""
-    if not source:
-        return []
-    patterns: list[str] = []
-    # r"...", r'...', "...", '...'
-    for match in re.finditer(r'''(?:r)?(["'])(.+?)\1''', source, re.DOTALL):
-        value = match.group(2).strip()
-        # 너무 짧은 일반 문자열은 패턴으로 쓰지 않는다.
-        if len(value) < 3:
-            continue
-        # 함수명/키 이름 같은 노이즈 필터
-        if value in {"action", "reason", "block", "pass", "warn"}:
-            continue
-        patterns.append(value)
-    # 중복 제거 (순서 유지)
-    deduped = list(dict.fromkeys(patterns))
-    return deduped[:30]
-
-
-def _build_proxy_rules(payloads: list[dict[str, Any]]) -> dict[str, Any]:
-    input_patterns: list[str] = []
-    output_patterns: list[str] = []
-    patches: list[str] = []
-
-    for payload in payloads:
-        input_patterns.extend(_extract_regex_patterns(str(payload.get("input_filter") or "")))
-        output_patterns.extend(_extract_regex_patterns(str(payload.get("output_filter") or "")))
-        patch = str(payload.get("system_prompt_patch") or "").strip()
-        if patch:
-            patches.append(patch)
-
-    return {
-        "input_filters": list(dict.fromkeys(input_patterns))[:100],
-        "output_filters": list(dict.fromkeys(output_patterns))[:100],
-        "system_prompt_patch": "\n".join(dict.fromkeys(patches)).strip(),
-        "execution_guard": None,
-    }
 
 
 def _register_defense_patterns_via_ingest(
@@ -239,7 +200,7 @@ async def _run_phase4(
     clear_url = f"{proxy_base}/proxy/{session_id}/rules"
 
     # proxy 규칙 생성. Phase3에서 만든 defense_code를 proxy-friendly 형태로 풀어 담는 구조.
-    rules = _build_proxy_rules(payload_rows)
+    rules = build_proxy_rules(payload_rows)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         # 1) defense 규칙 등록
