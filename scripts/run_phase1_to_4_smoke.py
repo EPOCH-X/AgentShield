@@ -351,6 +351,13 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
             else:
                 lines.append("(방어코드 없음)")
             lines.append("")
+            lines.append("### 3.5) 방어 응답(defended_response)")
+            defended_response = str(row.get("defended_response") or "").strip()
+            if defended_response:
+                lines.append(_response_body_for_review(defended_response))
+            else:
+                lines.append("(방어 응답 없음)")
+            lines.append("")
             lines.append("### 4) 방어 후 응답 값")
             after_resp = phase4_row.get("response_after_defense")
             if after_resp in (None, ""):
