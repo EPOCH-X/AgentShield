@@ -43,16 +43,16 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   return (
     <div className="min-h-screen bg-background text-on-surface">
       {/* Sidebar */}
-      <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#060F2A] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
+      <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#050F1A] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
         <div className="p-8 flex items-center gap-3">
           {/* Logo Image */}
           <img
-            src="/logo.png"
+            src="/logo3.png"
             alt="AgentShield"
-            className="w-10 h-10 object-contain neon-glow-primary"
+            className="w-14 h-14 object-contain rounded-xl neon-glow-primary flex-shrink-0"
           />
           <div>
-            <h1 className="text-xl font-extrabold tracking-tighter text-[#E62024]">
+            <h1 className="text-xl font-extrabold tracking-tighter text-primary">
               AgentShield
             </h1>
             <p className="text-[9px] uppercase tracking-[0.3em] text-on-surface-variant/70 font-bold">
@@ -70,7 +70,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
                 href={item.href}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-300 ${
                   active
-                    ? "text-primary bg-primary/10 border border-primary/20 font-bold shadow-[0_0_15px_rgba(230,32,36,0.1)]"
+                    ? "text-primary bg-primary/10 border border-primary/20 font-bold shadow-[0_0_15px_rgba(14,165,165,0.12)]"
                     : "text-on-surface-variant hover:bg-surface-container hover:text-white group"
                 }`}
               >
