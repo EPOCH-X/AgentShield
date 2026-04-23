@@ -10,12 +10,16 @@ Layer 4: 출력 필터
 
 from __future__ import annotations
 
-import re
 from typing import Any, Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
+from backend.core.defense_rules import (
+    apply_input_filters,
+    apply_output_filters,
+    inject_system_patch,
+)
 from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 import httpx
 
@@ -45,45 +49,6 @@ class ProxyChatRequest(BaseModel):
 
 # 세션별 방어 규칙 저장소 (MVP: in-memory)
 DEFENSE_STORE: dict[str, DefenseRules] = {}
-
-
-# ------------------------------------------------------------------
-# [R3 산출물] 유틸
-# ------------------------------------------------------------------
-def _apply_input_filters(text: str, patterns: list[str]) -> bool:
-    """차단 여부만 반환 (True=blocked)."""
-    for p in patterns:
-        try:
-            if re.search(p, text, re.IGNORECASE):
-                return True
-        except re.error:
-            # 잘못된 regex는 무시 (실서비스에서는 로그 남기기)
-            continue
-    return False
-
-
-def _inject_system_patch(messages: list[dict[str, str]], patch: str) -> list[dict[str, str]]:
-    if not patch.strip():
-        return messages
-
-    copied = [dict(m) for m in messages]
-    for msg in copied:
-        if msg.get("role") == "system":
-            msg["content"] = f'{msg.get("content", "")}\n{patch}'.strip()
-            return copied
-
-    # system 메시지가 없으면 맨 앞 삽입
-    return [{"role": "system", "content": patch}] + copied
-
-
-def _apply_output_filters(text: str, patterns: list[str]) -> str:
-    result = text
-    for p in patterns:
-        try:
-            result = re.sub(p, "[REDACTED]", result, flags=re.IGNORECASE)
-        except re.error:
-            continue
-    return result
 
 
 # ------------------------------------------------------------------
@@ -118,11 +83,11 @@ async def proxy_chat(session_id: str, req: ProxyChatRequest) -> dict[str, Any]:
     user_text = req.messages[-1].get("content", "")
 
     # Layer 1: 입력 필터
-    if _apply_input_filters(user_text, rules.input_filters):
+    if apply_input_filters(user_text, rules.input_filters):
         return {"content": "보안 정책에 의해 요청이 차단되었습니다.", "blocked": True}
 
     # Layer 2: 시스템 프롬프트 패치
-    patched_messages = _inject_system_patch(req.messages, rules.system_prompt_patch)
+    patched_messages = inject_system_patch(req.messages, rules.system_prompt_patch)
     adapter_config = TargetAdapterConfig.from_input(
         target_url=req.target_url,
         api_key=req.target_api_key,
@@ -142,7 +107,7 @@ async def proxy_chat(session_id: str, req: ProxyChatRequest) -> dict[str, Any]:
         raise HTTPException(status_code=502, detail=f"Target call failed: {e}")
 
     # Layer 4: 출력 필터
-    filtered_text = _apply_output_filters(response_text, rules.output_filters)
+    filtered_text = apply_output_filters(response_text, rules.output_filters)
 
     # Layer 5: execution guard (다음 단계)
     return {"content": filtered_text, "blocked": False}
