@@ -45,16 +45,16 @@ export default function SignupPage() {
       className="min-h-screen bg-background flex items-center justify-center p-4"
       style={{
         backgroundImage:
-          "radial-gradient(circle at 50% 0%, #0D1E50 0%, #0A1A44 100%)",
+          "radial-gradient(circle at 50% 0%, #091E30 0%, #071824 100%)",
       }}
     >
       <div className="w-full max-w-md">
         {/* Logo */}
         <div className="flex flex-col items-center mb-10">
           <img
-            src="/logo.png"
+            src="/logo3.png"
             alt="AgentShield"
-            className="w-20 h-20 object-contain neon-glow-primary mb-5"
+            className="w-32 h-32 object-contain rounded-2xl neon-glow-primary mb-5"
           />
           <h1 className="text-3xl font-extrabold tracking-tighter text-white font-headline">
             AgentShield
@@ -91,7 +91,7 @@ export default function SignupPage() {
               </div>
               <button
                 onClick={() => router.push("/login")}
-                className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary-container via-primary to-[#FF3535] text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(230,32,36,0.35)] hover:shadow-[0_15px_40px_rgba(230,32,36,0.5)] hover:-translate-y-0.5 transition-all active:scale-[0.98] neon-glow-primary"
+                className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary-container via-primary to-[#2DD4D4] text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(14,165,165,0.35)] hover:shadow-[0_15px_40px_rgba(14,165,165,0.5)] hover:-translate-y-0.5 transition-all active:scale-[0.98] neon-glow-primary"
               >
                 로그인 페이지로
               </button>
@@ -206,7 +206,7 @@ export default function SignupPage() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary-container via-primary to-[#FF3535] text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(230,32,36,0.35)] hover:shadow-[0_15px_40px_rgba(230,32,36,0.5)] hover:-translate-y-0.5 transition-all active:scale-[0.98] active:translate-y-0 neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
+                  className="w-full py-4 rounded-[1.25rem] bg-gradient-to-r from-primary-container via-primary to-[#2DD4D4] text-on-primary font-extrabold text-sm tracking-[0.1em] uppercase shadow-[0_10px_30px_rgba(14,165,165,0.35)] hover:shadow-[0_15px_40px_rgba(14,165,165,0.5)] hover:-translate-y-0.5 transition-all active:scale-[0.98] active:translate-y-0 neon-glow-primary disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:translate-y-0"
                 >
                   {loading ? (
                     <span className="flex items-center justify-center gap-2">
