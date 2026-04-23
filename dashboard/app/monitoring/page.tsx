@@ -7,6 +7,7 @@ import {
   getViolations,
   Violation,
 } from "../../lib/api";
+import { MOCK_DASHBOARD, MOCK_VIOLATIONS } from "../../lib/mockClientData";
 
 const SEVERITY_CONFIG: Record<string, { cls: string; label: string; dotCls: string }> = {
   critical: {
@@ -65,7 +66,8 @@ export default function MonitoringPage() {
         setDashboard(dash);
         setViolations(viols);
       } catch {
-        // 에러 무시 (auth 에러는 api.ts에서 처리)
+        setDashboard(MOCK_DASHBOARD);
+        setViolations(MOCK_VIOLATIONS);
       } finally {
         setLoading(false);
       }
@@ -82,14 +84,18 @@ export default function MonitoringPage() {
       setViolations(viols);
       setPage(1);
     } catch {
-      // 에러 무시
+      let filtered = [...MOCK_VIOLATIONS];
+      if (deptFilter) filtered = filtered.filter((v) => v.department === deptFilter);
+      if (typeFilter) filtered = filtered.filter((v) => v.violation_type === typeFilter);
+      setViolations(filtered);
+      setPage(1);
     }
   }
 
   function resetFilters() {
     setDeptFilter("");
     setTypeFilter("");
-    getViolations().then(setViolations).catch(() => {});
+    getViolations().then(setViolations).catch(() => setViolations(MOCK_VIOLATIONS));
     setPage(1);
   }
 

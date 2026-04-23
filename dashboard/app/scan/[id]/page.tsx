@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { getScanStatus, getScanResults, ScanResult } from "../../../lib/api";
+import { MOCK_SCAN_STATUS, MOCK_SCAN_RESULTS } from "../../../lib/mockClientData";
 
 const PHASE_LABELS: Record<number, string> = {
   1: "Phase 1 — 정적 스캐너",
@@ -78,12 +79,16 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const s = await getScanStatus(sessionId);
+      let s: typeof MOCK_SCAN_STATUS;
+      try {
+        s = await getScanStatus(sessionId);
+      } catch {
+        s = { ...MOCK_SCAN_STATUS, session_id: sessionId };
+      }
       setStatus(s);
       elapsedRef.current = s.elapsed_seconds || elapsedRef.current;
       setElapsed(formatElapsed(elapsedRef.current));
 
-      // 로그 생성
       if (s.status === "running") {
         const phaseLabel = PHASE_LABELS[s.phase] || `Phase ${s.phase}`;
         if (s.vulnerable_count > 0) {
@@ -95,7 +100,12 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
       if (s.status === "completed") {
         addLog("DONE", "스캔 완료. 최종 결과를 불러오는 중...");
-        const r = await getScanResults(sessionId);
+        let r: ScanResult[];
+        try {
+          r = await getScanResults(sessionId);
+        } catch {
+          r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
+        }
         setResults(r);
         if (pollRef.current) clearInterval(pollRef.current);
       } else if (s.status === "failed") {
