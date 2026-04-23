@@ -48,7 +48,7 @@ def _load_attacks_from_file(category: Optional[str] = None) -> list[dict]:
         # prompt_text 키가 있는 항목만 (attack pattern 형식)
         valid = [a for a in data if "prompt_text" in a and "category" in a]
         for a in valid:
-            a["seed_id"] = str(uuid.uuid4())
+            a.setdefault("seed_id", str(uuid.uuid4()))  # 기존 seed_id 보존 (ChromaDB 중복 체크용)
         attacks.extend(valid)
     if category:
         attacks = [a for a in attacks if a["category"] == category]

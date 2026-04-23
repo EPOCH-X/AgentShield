@@ -59,6 +59,7 @@ CREATE TABLE test_results (
     subcategory VARCHAR(50),
     detail TEXT,
     defense_code TEXT,
+    defended_response TEXT,
     defense_reviewed BOOLEAN DEFAULT FALSE,
     verify_result VARCHAR(20),
     created_at TIMESTAMP DEFAULT NOW()
