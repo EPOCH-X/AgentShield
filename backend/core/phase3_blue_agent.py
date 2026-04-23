@@ -208,7 +208,6 @@ async def run_phase3(
                     if row:
                         row.defended_response = bundle.defended_response
                         row.defense_code = bundle.to_json_str()
-                        row.defense_reviewed = False
                         await db.commit()
                         db_updated += 1
                     else:

@@ -2,7 +2,6 @@
 [R3] Phase 4 — Defense Proxy 재검증
 
 기능별 파이프라인 섹션 4 참조.
-사람 검수 통과(defense_reviewed=True)한 방어 코드를 Proxy에 등록 후 재검증.
 차단율 ≥ 80% AND 오탐률 ≤ 5% 달성 시 ChromaDB에 자동 저장.
 """
 
@@ -14,7 +13,6 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 import httpx
-from sqlalchemy import select
 
 from backend.config import settings
 from backend.core.judge import full_judge
@@ -246,22 +244,6 @@ async def _persist_verify_results(details: list[dict[str, Any]]) -> tuple[int, l
             updated += 1
         await db.commit()
     return updated, failed_ids
-
-
-async def _load_approved_rows(session_id: str) -> set[int]:
-    """검수 통과(defense_reviewed=True)된 test_results id 목록."""
-    from backend.database import async_session
-    from backend.models.test_result import TestResult
-
-    async with async_session() as db:
-        result = await db.execute(
-            select(TestResult.id).where(
-                TestResult.session_id == session_id,
-                TestResult.defense_reviewed == True,  # noqa: E712
-            )
-        )
-        rows = result.scalars().all()
-    return set(int(x) for x in rows)
 
 
 async def _run_proxy_mode(
@@ -590,24 +572,11 @@ async def run_phase4(
     defense_files = (phase3_result or {}).get("defense_json_files", [])  # Phase3가 생성한 defense JSON 상대경로 목록
     source_rows = (phase3_result or {}).get("source_vulnerabilities", [])  # defense_id별 원본 취약점(공격/응답) 스냅샷 목록
     payload_rows: list[dict[str, Any]] = []  # 로드/필터 완료된 defense payload를 쌓아 검증 단계로 넘기는 버퍼
-    approved_ids: set[int] | None = None  # DB에서 조회한 defense_reviewed=True 행 ID 집합(검수 완료 필터)
-    try:
-        approved_ids = await _load_approved_rows(session_id)
-    except Exception:
-        approved_ids = None
 
     for rel_path in defense_files:
         payload = _load_defense_payload(project_root, str(rel_path))
         if not payload:
             continue
-        # 문서 요구사항: 검수 완료된 방어만 Phase4 검증 대상으로 사용
-        try:
-            payload_id = int(str(payload.get("defense_id") or "-1"))
-            if approved_ids is not None and approved_ids and payload_id not in approved_ids:
-                continue
-        except Exception:
-            # DB 조회 실패 시에는 기존 동작 유지(검증 진행)
-            pass
         payload["_source_file"] = str(rel_path)
         payload_rows.append(payload)
 
