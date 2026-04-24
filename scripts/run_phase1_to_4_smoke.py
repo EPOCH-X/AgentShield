@@ -155,11 +155,11 @@ def _patched_phase1_loader(
     """phase1_scanner의 공격 로더를 테스트 옵션에 맞게 임시 패치."""
     from backend.core import phase1_scanner
 
-    original_loader = phase1_scanner._load_attacks_from_file
+    original_loader = phase1_scanner._load_attacks
 
-    def wrapped_loader(requested_category: str | None = None) -> list[dict]:
+    async def wrapped_loader(requested_category: str | None = None) -> list[dict]:
         selected_category = category if category is not None else requested_category
-        attacks = original_loader(selected_category)
+        attacks = await original_loader(selected_category)
         if shuffle:
             rng = random.Random(seed)
             rng.shuffle(attacks)
@@ -167,11 +167,11 @@ def _patched_phase1_loader(
             attacks = attacks[:max_attacks]
         return attacks
 
-    phase1_scanner._load_attacks_from_file = wrapped_loader
+    phase1_scanner._load_attacks = wrapped_loader
     try:
         yield
     finally:
-        phase1_scanner._load_attacks_from_file = original_loader
+        phase1_scanner._load_attacks = original_loader
 
 
 @contextmanager
