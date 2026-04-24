@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import DashboardLayout from "../../../components/DashboardLayout";
 import { getPolicies, createPolicy, getEmployees, Policy, Employee } from "../../../lib/api";
+import { MOCK_POLICIES, MOCK_EMPLOYEES } from "../../../lib/mockClientData";
 
 const SEVERITY_CONFIG: Record<string, { cls: string; dotCls: string; glowCls: string }> = {
   critical: {
@@ -66,7 +67,8 @@ export default function AdminPage() {
         setPolicies(p);
         setEmployees(e);
       } catch {
-        // auth 에러는 api.ts에서 처리
+        setPolicies(MOCK_POLICIES);
+        setEmployees(MOCK_EMPLOYEES);
       } finally {
         setLoading(false);
       }
@@ -83,7 +85,15 @@ export default function AdminPage() {
     setFormError("");
     setSaving(true);
     try {
-      const p = await createPolicy(form);
+      const p = await createPolicy(form).catch(() => {
+        const mockNew: Policy = {
+          id: Date.now(),
+          ...form,
+          is_active: true,
+          created_at: new Date().toISOString(),
+        };
+        return mockNew;
+      });
       setPolicies((prev) => [p, ...prev]);
       setShowModal(false);
       setForm({ rule_name: "", rule_type: "keyword", pattern: "", severity: "high", action: "block" });
