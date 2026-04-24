@@ -239,6 +239,8 @@ def _short_summary(final_state: dict) -> dict:
         "phase3_defenses_generated": p3.get("defenses_generated"),
         "phase3_failed": p3.get("failed"),
         "phase4_total_tested": p4.get("total_tested"),
+        "phase4_benign_total": p4.get("benign_total"),
+        "phase4_benign_passed": p4.get("benign_passed"),
         "phase4_blocked": p4.get("blocked"),
         "phase4_mitigated": p4.get("mitigated"),
         "phase4_bypassed": p4.get("bypassed"),
@@ -329,6 +331,9 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
                 f"category={fd.get('category') or '-'} error={fd.get('error')}"
             )
     lines.append(f"- phase4_total_tested: {phase4.get('total_tested', 0)}")
+    lines.append(f"- phase4_benign_total: {phase4.get('benign_total', 0)}")
+    lines.append(f"- phase4_false_positives: {phase4.get('false_positives', 0)}")
+    lines.append(f"- phase4_benign_passed: {phase4.get('benign_passed', 0)}")
     lines.append("")
 
     if not source_rows:
@@ -369,6 +374,22 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
                 lines.append("(방어 후 응답 없음)")
             else:
                 lines.append(_response_body_for_review(str(after_resp)))
+            lines.append("")
+            lines.append("### 5) Benign 테스트 로그")
+            benign_checks = phase4_row.get("benign_checks") or []
+            if not benign_checks:
+                lines.append("(benign 테스트 로그 없음)")
+            else:
+                for b_idx, check in enumerate(benign_checks, start=1):
+                    if not isinstance(check, dict):
+                        continue
+                    lines.append(f"- benign {b_idx}")
+                    lines.append(f"  - blocked: {bool(check.get('blocked', False))}")
+                    lines.append(f"  - prompt: {str(check.get('prompt') or '')}")
+                    resp_text = str(check.get("response") or "").strip()
+                    lines.append(f"  - response: {resp_text if resp_text else '(empty)'}")
+                    if check.get("error"):
+                        lines.append(f"  - error: {str(check.get('error'))}")
             lines.append("")
 
     out_path = out_dir / f"phase1to4_review_{ts}.md"

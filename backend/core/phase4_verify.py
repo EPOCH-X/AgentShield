@@ -232,6 +232,8 @@ async def _run_phase4(
                 "session_id": session_id,
                 "mode": "proxy",
                 "total_tested": 0,
+                "benign_total": 0,
+                "benign_passed": 0,
                 "blocked": 0,
                 "mitigated": 0,
                 "bypassed": 0,
@@ -294,6 +296,7 @@ async def _run_phase4(
 
             benign_inputs = _benign_inputs_for_category(benign_by_category, category)
             benign_blocked = 0
+            benign_checks: list[dict[str, Any]] = []
             for benign in benign_inputs:
                 benign_total += 1
                 try:
@@ -309,11 +312,27 @@ async def _run_phase4(
                     )
                     b_resp.raise_for_status()
                     b_data = b_resp.json()
-                    if bool(b_data.get("blocked", False)):
+                    benign_is_blocked = bool(b_data.get("blocked", False))
+                    benign_checks.append(
+                        {
+                            "prompt": benign,
+                            "blocked": benign_is_blocked,
+                            "response": str(b_data.get("content", "")),
+                        }
+                    )
+                    if benign_is_blocked:
                         benign_blocked += 1
                         false_positives += 1
                 except Exception as exc:
                     errors.append(f"proxy_benign_failed:{defense_id}:{exc}")
+                    benign_checks.append(
+                        {
+                            "prompt": benign,
+                            "blocked": False,
+                            "response": "",
+                            "error": str(exc),
+                        }
+                    )
 
             details.append(
                 {
@@ -322,6 +341,7 @@ async def _run_phase4(
                     "verdict": verdict,
                     "input_action": "proxy_runtime",
                     "benign_blocked": benign_blocked,
+                    "benign_checks": benign_checks,
                     "source_file": str(payload.get("_source_file", "")),
                     "response_after_defense": response_text,
                     "attack_prompt": attack_prompt,
@@ -355,6 +375,8 @@ async def _run_phase4(
         "session_id": session_id,
         "mode": "proxy",
         "total_tested": total_tested,
+        "benign_total": benign_total,
+        "benign_passed": benign_total - false_positives,
         "blocked": blocked,
         "mitigated": mitigated,
         "bypassed": bypassed,
