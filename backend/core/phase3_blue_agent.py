@@ -1,5 +1,5 @@
 """
-Phase 3 — Blue Agent 방어 코드 생성 오케스트레이션
+Phase 3 — Blue Agent 방어 응답/코드 생성 오케스트레이션
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ def _write_defense_json_file(
         "category": category,
         "severity": severity,
         "phase": phase,
+        "defended_response": bundle.defended_response,
         "input_filter": bundle.input_filter,
         "output_filter": bundle.output_filter,
         "system_prompt_patch": bundle.system_prompt_patch,
@@ -161,6 +162,8 @@ async def run_phase3(
         category = str(vuln.get("category") or "")  # OWASP 카테고리
         attack_prompt = str(vuln.get("attack_prompt") or "")  # 공격 프롬프트
         target_response = str(vuln.get("target_response") or "")  # 타겟 응답 원문
+        failure_mode = str(vuln.get("failure_mode") or "").strip() or None
+        mitre_technique_id = str(vuln.get("mitre_technique_id") or "").strip() or None
 
         rag_examples = ""  # defense_patterns에서 가져온 유사 방어 예시 텍스트
         try:
@@ -179,6 +182,8 @@ async def run_phase3(
             category=category,
             attack_prompt=attack_prompt,
             target_response=target_response,
+            failure_mode=failure_mode,
+            mitre_technique_id=mitre_technique_id,
             owasp_recommendation=owasp_recommendation,
             rag_defense_examples=rag_examples,
         )
@@ -198,15 +203,17 @@ async def run_phase3(
             )
             json_files.append(str(written.relative_to(project_root)))
 
-            # R3 요구: 생성된 방어 코드를 test_results에 반영 (검수 전 상태)
+            # R3 요구: 생성된 방어 응답/코드를 test_results에 반영 (검수 전 상태)
             try:
                 async with async_session() as db:
                     row_id = int(defense_id)
                     row = await db.get(TestResult, row_id)
 
                     if row:
+                        row.defended_response = bundle.defended_response
                         row.defense_code = bundle.to_json_str()
-                        row.defense_reviewed = False
+                        if mitre_technique_id:
+                            row.mitre_technique_id = mitre_technique_id
                         await db.commit()
                         db_updated += 1
                     else:
@@ -220,7 +227,10 @@ async def run_phase3(
                     "category": category,
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
+                    "defended_response": bundle.defended_response,
                     "severity": vuln.get("severity"),
+                    "failure_mode": failure_mode,
+                    "mitre_technique_id": mitre_technique_id,
                 }
             )
             generated += 1
