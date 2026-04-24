@@ -103,7 +103,11 @@ export default function MonitoringPage() {
       setViolations(viols);
       setPage(1);
     } catch {
-      // 에러 무시
+      let filtered = [...MOCK_VIOLATIONS];
+      if (deptFilter) filtered = filtered.filter((v) => v.department === deptFilter);
+      if (typeFilter) filtered = filtered.filter((v) => v.violation_type === typeFilter);
+      setViolations(filtered);
+      setPage(1);
     }
   }
 

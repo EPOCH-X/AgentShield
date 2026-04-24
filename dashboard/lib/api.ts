@@ -96,13 +96,12 @@ export async function getMe(): Promise<{ username: string; role: string }> {
 export async function startScan(
   target_url: string,
   project_name: string,
-  target_api_key?: string,
-  target_provider?: string,
-  target_model?: string,
+  api_key?: string,
+  scan_mode?: string
 ): Promise<{ session_id: string; status: string }> {
   const res = await apiFetch("/api/v1/scan/llm-security", {
     method: "POST",
-    body: JSON.stringify({ target_url, project_name, target_api_key, target_provider, target_model }),
+    body: JSON.stringify({ target_url, project_name, api_key, scan_mode }),
   });
   if (!res.ok) throw new Error("스캔을 시작할 수 없습니다.");
   return res.json();

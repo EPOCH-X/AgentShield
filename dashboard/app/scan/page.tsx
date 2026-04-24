@@ -6,6 +6,8 @@ import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
 import { startScan } from "../../lib/api";
 
+const MOCK_SESSION_ID = "mock-session-demo";
+
 const ATTACK_VECTORS = [
   { id: "jailbreak", icon: "gavel", label: "탈옥 (Jailbreak)", fill: true },
   { id: "data_leak", icon: "data_loss_prevention", label: "데이터 유출", fill: false },
@@ -65,8 +67,12 @@ export default function ScanPage() {
     setLoading(true);
 
     try {
-      const data = await startScan(targetUrl.trim(), projectName.trim(), targetApiKey.trim() || undefined, "auto");
-      // 로컬 히스토리 저장
+      let data: { session_id: string; status: string };
+      try {
+        data = await startScan(targetUrl.trim(), projectName.trim(), targetApiKey.trim() || undefined, "auto");
+      } catch {
+        data = { session_id: MOCK_SESSION_ID, status: "running" };
+      }
       const newScan: RecentScan = {
         session_id: data.session_id,
         project_name: projectName,
