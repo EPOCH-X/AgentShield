@@ -1,0 +1,157 @@
+version: "3.9"
+
+# AgentShield Testbed — 기존 docker-compose.yml과 독립적으로 동작
+# 기존 포트(8000~8004, 5432) 와 충돌 없음
+#
+# 실행: docker compose -f docker-compose.testbed.yml up -d
+# 종료: docker compose -f docker-compose.testbed.yml down
+
+services:
+
+  # ── PostgreSQL (testbed 전용, 포트 5433) ────────────────────────────────────
+  postgres_testbed:
+    image: postgres:16-alpine
+    container_name: testbed-postgres
+    environment:
+      POSTGRES_DB: testbed
+      POSTGRES_USER: testbed
+      POSTGRES_PASSWORD: testbed
+    ports:
+      - "5433:5432"
+    volumes:
+      - testbed_pgdata:/var/lib/postgresql/data
+      - ./database/testbed_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U testbed -d testbed"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 10s
+
+  # ── ChromaDB (testbed 전용, 포트 8005) ──────────────────────────────────────
+  chromadb_testbed:
+    image: chromadb/chroma:latest
+    container_name: testbed-chroma
+    ports:
+      - "8005:8000"
+    volumes:
+      - testbed_chromadata:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ALLOW_RESET=TRUE
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/v1/heartbeat || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # ── Mailpit (이메일 샌드박스) ────────────────────────────────────────────────
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: testbed-mailpit
+    ports:
+      - "1025:1025"   # SMTP
+      - "8025:8025"   # Web UI
+    environment:
+      MP_MAX_MESSAGES: 500
+      MP_SMTP_AUTH_ACCEPT_ANY: 1
+      MP_SMTP_AUTH_ALLOW_INSECURE: 1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8025 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Tool Gateway (포트 8020) ─────────────────────────────────────────────────
+  tool_gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testbed-tool-gateway
+    ports:
+      - "8020:8020"
+    environment:
+      TESTBED_DB_URL: postgresql://testbed:testbed@postgres_testbed:5432/testbed
+      TESTBED_CHROMADB_HOST: chromadb_testbed
+      TESTBED_CHROMADB_PORT: 8000
+      MAILPIT_HOST: mailpit
+      MAILPIT_SMTP_PORT: 1025
+      TOOL_DRY_RUN: "false"
+      FILE_STORAGE_ROOT: /app/data/testbed_kb
+    depends_on:
+      postgres_testbed:
+        condition: service_healthy
+      chromadb_testbed:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    volumes:
+      - ./data/testbed_kb:/app/data/testbed_kb:ro
+    command: uvicorn testbed.tool_gateway.app:app --host 0.0.0.0 --port 8020 --reload
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8020/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  # ── Target Chatbot (포트 8010) ───────────────────────────────────────────────
+  target_chatbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testbed-chatbot
+    ports:
+      - "8010:8010"
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: gemma4:e2b
+      TESTBED_SECURITY_MODE: weak
+      TOOL_GATEWAY_URL: http://tool_gateway:8020
+      TESTBED_PORT: 8010
+    depends_on:
+      tool_gateway:
+        condition: service_healthy
+    command: uvicorn testbed.target_chatbot.app:app --host 0.0.0.0 --port 8010 --reload
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8010/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  # ── DB Seed (1회성 초기화) ─────────────────────────────────────────────────
+  db_seed:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testbed-db-seed
+    environment:
+      TESTBED_DB_URL: postgresql://testbed:testbed@postgres_testbed:5432/testbed
+    depends_on:
+      postgres_testbed:
+        condition: service_healthy
+    command: python scripts/seed_testbed.py
+    restart: "no"
+
+  # ── KB Ingest (1회성 초기화) ─────────────────────────────────────────────────
+  kb_ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testbed-kb-ingest
+    environment:
+      TESTBED_CHROMADB_HOST: chromadb_testbed
+      TESTBED_CHROMADB_PORT: 8000
+    depends_on:
+      chromadb_testbed:
+        condition: service_healthy
+    volumes:
+      - ./data/testbed_kb:/app/data/testbed_kb:ro
+    command: python scripts/ingest_testbed_kb.py
+    restart: "no"
+
+volumes:
+  testbed_pgdata:
+  testbed_chromadata:

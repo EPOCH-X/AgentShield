@@ -69,10 +69,17 @@ def ingest_defense_patterns():
         return
     
     ids, docs, metas = [], [], []
+    id_counts: dict[str, int] = {}
     for item in all_patterns:
-        ids.append(str(item.get("id", uuid.uuid4())))
+        base_id = str(item.get("id", uuid.uuid4()))
+        seen = id_counts.get(base_id, 0)
+        id_counts[base_id] = seen + 1
+        # Chroma upsert는 한 배치 내 중복 ID를 허용하지 않으므로 suffix를 붙여 유니크 보장.
+        chroma_id = base_id if seen == 0 else f"{base_id}__dup{seen}"
+        ids.append(chroma_id)
         docs.append(f"[{item.get('category', 'UNK')}] {item.get('title', 'No Title')}: {item.get('explanation', '')}")
         metas.append({
+            "source_id": base_id,
             "category": item.get("category", "Unknown"),
             "title": item.get("title", "No Title"),
             "defense_code": item.get("defense_code", ""),
@@ -113,28 +120,26 @@ async def ingest_attack_patterns():
             CREATE TABLE attack_patterns (
                 id SERIAL PRIMARY KEY,
                 prompt_text TEXT NOT NULL,
+                intention TEXT,
                 category VARCHAR(10) NOT NULL,
                 subcategory VARCHAR(50),
-                severity VARCHAR(10) DEFAULT 'Medium',
-                source VARCHAR(50),
-                language VARCHAR(10) DEFAULT 'en'
+                severity VARCHAR(10) DEFAULT 'Medium'
             )
         """)
 
         records = [
             (
                 a.get("prompt_text", ""),
+                a.get("intention"),
                 a.get("category", "Unknown")[:10],
                 a.get("subcategory"),
                 a.get("severity", "Medium")[:10],
-                a.get("source", "unknown")[:50],
-                a.get("language", "en")[:10]
             ) for a in all_attacks
         ]
 
         await conn.executemany("""
-            INSERT INTO attack_patterns (prompt_text, category, subcategory, severity, source, language)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO attack_patterns (prompt_text, intention, category, subcategory, severity)
+            VALUES ($1, $2, $3, $4, $5)
         """, records)
 
         print(f"{len(all_attacks)}건의 공격 패턴 적재 성공!")

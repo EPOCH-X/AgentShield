@@ -1,331 +1,134 @@
 # AgentShield
 
-> AI Agent 보안 테스트 + 직원 AI 사용 모니터링 플랫폼
+AgentShield는 기업이나 기관이 운영하는 AI 챗봇과 AI 에이전트가 얼마나 안전한지 점검하고, 취약한 부분을 찾아 개선안까지 제시하는 보안 프로젝트다. 단순히 “공격이 되는지”만 보는 것이 아니라, 실제로 어떤 입력이 위험했고 어떤 응답이 문제가 되었는지, 그리고 더 안전한 응답은 어떤 모습이어야 하는지까지 한 흐름으로 보여주는 것을 목표로 한다.
 
-AgentShield는 기존 도구들처럼 "방어만" 하거나 "발견만" 하는 한계를 넘어, Find(발견) → Fix(방어 코드 생성) → Verify(실제 검증) 과정을 단일 파이프라인으로 자동화한 프로젝트입니다. 프롬프트 인젝션, 민감정보 유출 등 OWASP LLM Top 10의 핵심 위협으로부터 기업의 AI 에이전트를 안전하게 보호하고, 내부 직원의 AI 사용을 모니터링합니다.
+이 저장소에는 두 가지 제품 축이 함께 들어 있다.
 
-## 프로젝트 구조
+- 기능 A: 고객이 제공한 챗봇 URL을 대상으로 취약점을 찾고, 방어 응답을 만들고, 다시 검증하는 보안 점검 파이프라인
+- 기능 B: 직원이 사용하는 AI 요청을 중간에서 검사하고, 민감정보 유출이나 부적절 사용을 막고, 로그를 남기는 운영용 모니터링 프록시
 
+## AgentShield가 해결하려는 문제
+
+기업이 AI를 붙인 서비스는 단순한 질의응답을 넘어서 고객정보 조회, 문서 검색, 환불 처리, 내부 API 호출 같은 도구 사용까지 포함하는 경우가 많다. 이런 구조에서는 다음과 같은 위험이 동시에 생긴다.
+
+- 프롬프트 인젝션으로 보안 규칙이 무시되는 문제
+- 다른 고객의 개인정보나 내부 문서가 노출되는 문제
+- 권한이 없는 도구 호출이나 관리자 기능 오남용 문제
+- 시스템 프롬프트, 내부 규칙, 토큰 형식이 새는 문제
+
+AgentShield는 이런 문제를 `공격 -> 판정 -> 개선안 생성 -> 재검증` 흐름으로 연결해, 단순 경고가 아니라 실제 개선에 바로 쓸 수 있는 결과를 만드는 데 초점을 둔다.
+
+## 지금 기준의 제품 정의
+
+현재 1차 제품 목표는 `단일 target URL 기반 검증 + 개선안 생성`이다. 즉 고객은 기본적으로 검사받을 챗봇 URL 하나와 필요 시 API key만 제공하면 되고, AgentShield가 내부에서 공격, 판정, 방어 응답 생성, 재검증, 보고서 구성을 수행한다.
+
+다만 이 프로젝트를 단순 1회성 스캔 도구로만 보면 안 된다. 현재 제품 경험은 `URL 기준 스캔`으로 시작하지만, 내부적으로는 성공 공격 축적, 수동 검수, Chroma 재적재, cleaned export, 파인튜닝으로 이어지는 지속 개선형 플랫폼을 지향한다.
+
+여기서 중요한 해석 기준은 다음과 같다.
+
+- Blue Agent의 1차 산출물은 `방어 응답(defended response)` 이다.
+- 방어 코드나 정책은 필요할 때 함께 제안하는 보조 산출물이다.
+- 상시 런타임 차단 프록시는 장기 방향이지만, 현재 MVP의 핵심은 `검증과 개선안 제시`다.
+
+## 저장소에 포함된 주요 구성
+
+### 기능 A. 보안 테스트 파이프라인
+
+- 공격 자산을 기준으로 타깃에 실제 입력을 보낸다.
+- Judge가 취약 여부를 판정한다.
+- Red Agent가 우회 공격을 만들어 다시 시도한다.
+- Blue Agent가 더 안전한 방어 응답을 만든다.
+- Verify 계층이 같은 공격으로 다시 확인한다.
+- 결과는 Dashboard와 Report API에서 조회할 수 있게 저장한다.
+
+여기서 Dashboard는 두 층으로 나뉜다.
+
+- 고객 또는 일반 운영자가 보는 층: scan 시작, 상태, 결과 요약, 방어 응답 비교
+- 내부 운영/검수 담당이 보는 층: review queue 수정, Chroma 삭제/재적재, defense 승인
+
+즉 review queue 수정이나 Chroma 관리 UI는 고객사 일반 사용자 화면이 아니라 내부 운영자 도구에 가깝다.
+
+### 기능 B. 직원 AI 모니터링 프록시
+
+- 직원 요청을 정책 기준으로 검사한다.
+- 허용된 요청만 실제 타깃 AI로 전달한다.
+- 응답을 마스킹하고 usage log, violation record를 남긴다.
+
+### Testbed
+
+- 실제 DB, KB, Tool Gateway가 연결된 테스트용 챗봇 환경이다.
+- mock-only 데모가 아니라, 개인정보 조회, 내부 문서 검색, 도구 오남용 같은 시나리오를 실제처럼 재현하기 위한 내부 기준 환경이다.
+- 기본 테스트 URL은 `http://localhost:8010/chat` 이다.
+
+## 핵심 특징
+
+- 단일 URL 기반 검증: 고객은 복잡한 내부 포맷을 직접 맞추지 않아도 된다.
+- 멀티에이전트 구조: Red, Judge, Blue, Verify가 역할을 나눠 한 흐름을 만든다.
+- 실제형 testbed: DB/KB/도구가 연결된 타깃으로 공격을 재현할 수 있다.
+- 결과 축적: 세션, 결과, 수동 검토 대상, 위반 로그를 DB에 남긴다.
+- 개선안 생성: 취약 응답을 단순 표시하는 데서 끝나지 않고 방어 응답 초안을 만든다.
+
+## 현재 구조를 한눈에 보면
+
+```text
+고객 URL 입력
+  -> Scan API
+  -> Phase 1 대량 공격
+  -> Phase 2 우회 공격
+  -> Phase 3 방어 응답 생성
+  -> Phase 4 재검증
+  -> 결과 저장 / 보고서 / 대시보드
+
+직원 AI 요청
+  -> Monitoring Proxy
+  -> 정책 검사
+  -> 허용 요청만 타깃 AI 전달
+  -> 마스킹 / 로그 / 위반 저장
 ```
-AgentShield/
+
+## 저장소 구조
+
+```text
+AgentShield
+├── adapters/               # LoRA adapter 실험 자산, 모델별 산출물
 ├── backend/
-│   ├── api/
-│   │   ├── auth.py               # [R7] JWT 인증
-│   │   ├── scan.py               # [R7] 스캔 API
-│   │   ├── report.py             # [R7] 보고서 API
-│   │   └── monitoring.py         # [R7] 모니터링 API
-│   ├── models/
-│   │   ├── attack_pattern.py     # [R2] 공격 패턴 모델
-│   │   ├── test_session.py       # [R7] 테스트 세션 모델
-│   │   ├── test_result.py        # [R7] 테스트 결과 모델
-│   │   ├── employee.py           # [R5] 직원 모델
-│   │   ├── usage_log.py          # [R5] 사용 로그 모델
-│   │   ├── violation.py          # [R5] 위반 모델
-│   │   └── policy_rule.py        # [R5] 정책 규칙 모델
-│   ├── core/
-│   │   ├── phase1_scanner.py     # [R2] 정적 스캐너
-│   │   ├── phase2_red_agent.py   # [R1] Red Agent 공격
-│   │   ├── phase3_blue_agent.py  # [R3] Blue Agent 방어
-│   │   ├── phase4_verify.py      # [R3] 방어 검증
-│   │   └── judge.py              # [R1] 판정 로직
-│   ├── agents/
-│   │   ├── llm_client.py         # [R4] Ollama LLM 클라이언트
-│   │   ├── red_agent.py          # [R1] Red Agent
-│   │   ├── blue_agent.py         # [R3] Blue Agent
-│   │   └── judge_agent.py        # [R1] Judge Agent
-│   ├── rag/
-│   │   ├── chromadb_client.py    # [R4] ChromaDB 연결
-│   │   ├── embedder.py           # [R4] 임베딩 생성
-│   │   └── ingest.py             # [R4] 데이터 수집
-│   ├── graph/
-│   │   └── llm_security_graph.py # [R1] LangGraph 오케스트레이션
-│   ├── report/
-│   │   ├── generator.py          # [R7] 보고서 생성
-│   │   └── templates/
-│   │       └── security_report.html  # [R7] 보고서 템플릿
-│   ├── finetuning/
-│   │   ├── prepare_data.py       # [R4] 학습 데이터 전처리
-│   │   ├── train_lora.py         # [R4] QLoRA 학습
-│   │   └── merge_adapter.py      # [R4] 어댑터 병합
-│   ├── config.py                 # [R7] 환경 설정
-│   ├── database.py               # [R7] DB 연결
-│   └── main.py                   # [R7] FastAPI 엔트리포인트
-│
-├── dashboard/                    # [R6] 프론트엔드 전체
-│   ├── app/
-│   │   ├── layout.tsx            # [R6] 공통 레이아웃
-│   │   ├── page.tsx              # [R6] 랜딩 페이지
-│   │   ├── login/page.tsx        # [R6] 로그인
-│   │   ├── scan/page.tsx         # [R6] 스캔 시작
-│   │   ├── scan/[id]/page.tsx    # [R6] 스캔 결과
-│   │   ├── monitoring/page.tsx   # [R6] 모니터링
-│   │   ├── monitoring/admin/page.tsx  # [R6] 관리자 설정
-│   │   └── report/[id]/page.tsx  # [R6] 보고서 뷰어
-│   ├── components/
-│   │   ├── VulnerabilityMap.tsx   # [R6] 취약점 맵
-│   │   ├── ScanProgress.tsx      # [R6] 스캔 진행률
-│   │   ├── DefenseCodeViewer.tsx  # [R6] 방어 코드 뷰어
-│   │   ├── BeforeAfterCompare.tsx # [R6] 전후 비교
-│   │   └── MonitoringDashboard.tsx # [R6] 모니터링 대시보드
-│   └── mocks/
-│       └── mockData.ts           # [R6] Mock 데이터
-│
-├── defense_proxy/
-│   └── proxy_server.py           # [R3] 방어 프록시 서버
-│
-├── monitoring_proxy/
-│   └── monitor_server.py         # [R5] 모니터링 프록시 서버
-│
-├── data/
-│   ├── attack_patterns/          # [R2] 공격 패턴 데이터
-│   ├── defense_patterns/         # [R3] 방어 패턴 데이터
-│   └── finetuning/               # [R4] 학습 데이터
-│
-├── adapters/
-│   ├── lora-red/                 # [R1] Red Agent 어댑터
-│   ├── lora-judge/               # [R1] Judge 어댑터
-│   └── lora-blue/                # [R3] Blue Agent 어댑터
-│
-├── docker-compose.yml            # [R7] 컨테이너 구성
-├── Dockerfile                    # [R7] 빌드 설정
-├── requirements.txt              # [R7] Python 의존성
-└── .env.example                  # [R7] 환경 변수 템플릿
+│   ├── agents/             # Red/Blue/Judge LLM prompt 및 호출 래퍼
+│   ├── api/                # FastAPI 엔드포인트, Dashboard/외부 연동 진입점
+│   ├── core/               # Phase 1~4, judge, mutation, 공통 adapter
+│   ├── graph/              # LangGraph 기반 전체 오케스트레이션
+│   ├── models/             # ORM 모델
+│   ├── rag/                # ChromaDB 검색/적재
+│   └── report/             # 리포트 생성/요약 산출물
+├── dashboard/              # Next.js 대시보드
+├── data/                   # 공격/방어 패턴, 학습용 데이터, phase 산출물
+├── database/               # PostgreSQL schema, testbed schema
+├── defense_proxy/          # 방어 코드 적용 후 재검증 프록시
+├── monitoring_proxy/       # 직원 AI 사용 모니터링 프록시
+├── testbed/                # 실제 타겟 챗봇, tool gateway, KB, 시드 스크립트
+├── chromadb_data/          # 로컬 Chroma persist 디렉터리
+└── results/                # 파이프라인 실행 결과 JSON/TXT
 ```
 
-## 기술 스택
-
-| 계층          | 기술                                               |
-| ------------- | -------------------------------------------------- |
-| LLM           | Gemma 4 E2B (2.3B effective / 5.1B PLE) via Ollama |
-| Backend       | FastAPI + async SQLAlchemy + PostgreSQL 16         |
-| RAG           | ChromaDB + all-MiniLM-L6-v2 (384d)                 |
-| Orchestration | LangGraph StateGraph                               |
-| Fine-tuning   | QLoRA 4-bit NF4, r=16, lora_alpha=32               |
-| Frontend      | Next.js 14 (App Router) + Chart.js                 |
-| Infra         | Docker Compose                                     |
-
-## 로컬 실행
-
-```bash
-# 1. 환경 변수 설정
-cp .env.example .env
-
-# 2. 컨테이너 기동
-docker-compose up -d
-
-# 3. 프론트엔드 (별도 터미널)
-cd dashboard
-npm install
-npm run dev
-```
-
-### 처음부터 순서대로 (Windows · Docker 없이 · 백엔드+DB만)
-
-**준비물:** Python 3.11 이상, PostgreSQL 설치 완료(서비스가 떠 있어야 함).
-
-**1) PostgreSQL에서 유저·DB 만들기**  
-pgAdmin 또는 `psql`을 열고 *postgres* 슈퍼유저로 접속한 뒤 아래를 실행합니다.
-
-```sql
-CREATE USER agentshield WITH PASSWORD 'agentshield';
-CREATE DATABASE agentshield OWNER agentshield;
-```
-
-**주의 — `CREATE USER`를 cmd/ PowerShell에 그대로 치면 안 됩니다.**  
-`CREATE`는 Windows 명령이 아니라 **PostgreSQL용 SQL**입니다. 검은 화면(cmd)에 붙여넣으면 `'CREATE'은(는) 내부 또는 외부 명령...` 오류가 납니다.
-
-- **pgAdmin:** 왼쪽에서 서버 연결 → **Tools → Query Tool** → 위 SQL 두 줄 붙여넣기 → 실행(▶).
-- **psql:** 시작 메뉴에서 “SQL Shell (psql)” 실행 → 서버/포트/DB는 기본값(Enter) → **User name에 `postgres`** → 비밀번호 입력 후, 프롬프트 `postgres=#`에서 위 SQL 입력 후 세미콜론까지 입력하고 Enter.
-
-또는 PowerShell에서 한 번에 (설치 경로·비번은 본인 환경에 맞게):
-
-```powershell
-& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -c "CREATE USER agentshield WITH PASSWORD 'agentshield';"
-& "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -c "CREATE DATABASE agentshield OWNER agentshield;"
-```
-
-**`docker` 명령이 안 될 때:** Docker Desktop이 설치되어 있지 않거나 PATH에 없는 상태입니다. **Docker 없이** 진행하려면 로컬 PostgreSQL만 설치하고 위처럼 `psql`/pgAdmin을 쓰면 됩니다. Docker를 쓰려면 [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) 설치 후 PC 재시작(또는 터미널 재실행)하세요. `docker compose`는 **`AgentShield` 폴더**(`docker-compose.yml` 있는 곳)에서 실행합니다. 지금 경로가 `...\agent`만 열려 있으면 `cd AgentShield` 후 실행합니다.
-
-**2) 프로젝트 폴더로 이동** (본인 경로에 맞게 수정)
-
-```powershell
-cd "C:\Users\user\Desktop\파이널 프로젝트\agent\AgentShield"
-```
-
-**3) 가상환경 + 패키지**
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-실행 정책 오류가 나면 관리자 PowerShell에서 한 번만:  
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-
-**4) 환경 변수 파일**
-
-```powershell
-Copy-Item .env.example .env
-```
-
-`localhost:5432`, 유저/DB `agentshield` 그대로 쓰면 `.env` 수정 없이 진행 가능합니다. 포트·비밀번호를 바꿨다면 `.env`의 `DATABASE_URL`만 고칩니다.
-
-**5) 테이블 생성 + 시드 데이터**
-
-```powershell
-python -m backend.dev_seed
-```
-
-**6) DB에 잘 붙었는지·행 수 확인**
-
-```powershell
-python -m backend.db_inspect
-```
-
-**7) API 서버 기동**
-
-```powershell
-uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-**8) 동작 확인**  
-브라우저에서 `http://127.0.0.1:8000/health` → `{"status":"ok"}`  
-또는 PowerShell:
-
-```powershell
-Invoke-RestMethod -Uri "http://127.0.0.1:8000/health"
-```
-
-로그인·스캔 API는 아직 스텁인 경우가 많으니, 위까지 되면 **DB + 백엔드 골격**은 정상입니다.
-
----
-
-**Docker로 DB만 쓰고 싶을 때:** Docker Desktop 설치 후 `AgentShield`에서 `docker compose up -d db` → `.env`의 `DATABASE_URL`을 `postgresql+asyncpg://agentshield:agentshield@localhost:5432/agentshield`로 두고, **5)~8)** 을 같은 PowerShell에서 진행하면 됩니다.
-
-### Docker 없이 백엔드 + PostgreSQL만 실행
-
-1. **PostgreSQL**을 설치하고, `.env.example`과 맞는 DB·유저를 만듭니다. (기본값: DB 이름 `agentshield`, 유저/비밀번호 `agentshield`)
-
-   ```sql
-   CREATE USER agentshield WITH PASSWORD 'agentshield';
-   CREATE DATABASE agentshield OWNER agentshield;
-   ```
-
-2. **환경 변수**: `cp .env.example .env` 후 필요 시 `DATABASE_URL`만 본인 환경에 맞게 수정합니다.  
-   형식은 반드시 `postgresql+asyncpg://USER:PASSWORD@HOST:PORT/DBNAME` 입니다.
-
-3. **의존성** (저장소 루트 `AgentShield/`에서):
-
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **서버 기동** — 반드시 `AgentShield/` 디렉터리에서 실행합니다 (`backend` 패키지 기준 경로).
-
-   ```bash
-   uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
-   ```
-
-   앱이 뜰 때 `lifespan`에서 `init_db()`가 한 번 실행되며, **없는 테이블만** SQLAlchemy `create_all`로 생성됩니다.
-
-#### 테이블 생성 여부 확인
-
-- **API**: 브라우저나 `curl`로 `http://localhost:8000/health` → `{"status":"ok"}` 이면 서버는 기동된 상태입니다. (DB 연결 실패 시 여기까지 안 올라올 수 있으니 터미널 로그를 함께 봅니다.)
-
-- **PostgreSQL**에서 테이블 목록:
-
-  ```bash
-  psql -h localhost -U agentshield -d agentshield -c "\dt"
-  ```
-
-  다음 7개가 보이면 스키마가 반영된 것입니다:  
-  `attack_patterns`, `test_sessions`, `test_results`, `employees`, `usage_logs`, `violations`, `policy_rules`
-
-#### DATABASE_URL 맞추기
-
-- **형식:** `postgresql+asyncpg://사용자:비밀번호@호스트:포트/데이터베이스이름`
-- 로컬 기본 예: `postgresql+asyncpg://agentshield:agentshield@localhost:5432/agentshield`
-- PostgreSQL을 다른 포트로 띄웠다면 `5432`만 바꿉니다.
-- `.env`에만 두면 됩니다. `backend/config.py`가 자동으로 읽습니다.
-
-#### 개발용 초기 데이터(시드)
-
-Phase 1 등에서 테이블을 읽을 최소 데이터를 넣으려면, 테이블 생성 후 **한 번** 실행합니다.
-
-```bash
-# AgentShield/ 에서, venv 활성화 후
-python -m backend.dev_seed
-```
-
-- `attack_patterns`: 카테고리 LLM01/02/06/07 샘플 4건 (`source=seed_dev`)
-- `policy_rules`: 정규식 예시 1건
-- `employees`: `employee_id=dev-user-001` 테스트 직원 1명
-
-이미 `seed_dev` 패턴이 있으면 다시 넣지 않습니다. 대량 적재는 R2 파이프라인·별도 스크립트로 진행합니다.
-
-팀에 안내할 때는 위 «Docker 없이…» + «DATABASE_URL» + «dev_seed» 세 덩어리를 함께내면 됩니다.
-
-#### 공유 DB에서 “저장되는지” 확인하기
-
-- **같은 데이터를 보려면** 팀 전원의 `.env`에 **동일한 `DATABASE_URL`**이 있어야 합니다.  
-  각자 PC에만 PostgreSQL을 깔고 `localhost`로만 붙으면, **본인 DB에만** 쌓이고 서로 안 보입니다.
-- **공유하는 방법 예:** 한 대의 서버/클라우드(RDS, Supabase, 팀용 VM 등)에 DB 하나 두고, URL을 `postgresql+asyncpg://...@그서버주소:5432/agentshield` 형태로 공유합니다.
-
-저장·조회가 되는지 빠르게 보려면:
-
-```bash
-python -m backend.db_inspect
-```
-
-테이블별 **행 개수**가 나옵니다. 누군가 스캔/모니터링으로 데이터를 넣으면 `test_results`, `usage_logs` 등 숫자가 늘어납니다.  
-또는 `psql`로 `SELECT COUNT(*) FROM test_results;` 같이 직접 조회해도 됩니다.
-
-### 팀에 DB 스키마만 먼저 줄 때 (세부기획서 §6 그대로)
-
-저장소에 **`database/schema.sql`** 이 있습니다. 기획서와 동일한 DDL입니다.
-
-**R7이 팀에 전달할 순서:**
-
-1. **Git으로 공유:** `database/schema.sql` 이 포함된 브랜치/저장소를 팀원이 `git pull` 한다.
-2. **각자(또는 공용 서버에서) PostgreSQL에 DB·유저 준비** — 예: `agentshield` DB, 유저 `agentshield`.
-3. **스키마 적용 (한 번만):** `AgentShield` 폴더에서 아래 중 하나 실행.
-
-   ```powershell
-   # PostgreSQL bin 경로·비밀번호는 본인 환경에 맞게
-   & "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U agentshield -d agentshield -f database/schema.sql
-   ```
-
-   `postgres` 슈퍼유저로 `agentshield` DB에 넣을 때:
-
-   ```powershell
-   & "C:\Program Files\PostgreSQL\16\bin\psql.exe" -U postgres -d agentshield -f database/schema.sql
-   ```
-
-4. **`.env`에 `DATABASE_URL`** 동일하게 맞추기.
-5. **(선택)** `python -m backend.dev_seed` — 샘플 행만 추가. 스키마는 이미 SQL로 있으므로 **필수는 아님**.
-6. **백엔드:** `uvicorn ...` 기동 시 `init_db()`의 `create_all`은 **이미 있는 테이블은 건드리지 않음**.
-
-**주의:** 같은 DB에 `schema.sql`을 **두 번** 실행하면 `already exists` 오류가 납니다. 초기화가 필요하면 DB를 드롭 후 재생성하거나, 팀 규칙으로 Alembic 마이그레이션으로 전환합니다.
-
-**ORM과의 관계:** `backend/models/*` 는 이 스키마와 맞춰 두었습니다. 스키마는 **이 SQL 파일이 기준**이면 됩니다.
-
-## 담당자 가이드
-
-각 파일 상단에 `[R1]`~`[R7]` 태그로 담당자가 표시되어 있습니다.
-`TODO:` 검색으로 자신의 담당 영역을 확인하세요.
-
-```bash
-# 자기 담당 TODO 검색 예시 (R1)
-grep -rn "TODO.*\[R1\]" backend/
-```
-
-| 역할 | 담당 영역                                                  |
-| ---- | ---------------------------------------------------------- |
-| R1   | Red Agent, Judge, LangGraph 오케스트레이션, LoRA-Red/Judge |
-| R2   | Phase 1 정적 스캐너, 공격 패턴 DB, OWASP 분류              |
-| R3   | Blue Agent, Defense Proxy, Phase 3-4, LoRA-Blue            |
-| R4   | RAG 파이프라인, Ollama 통합, QLoRA 학습 코드               |
-| R5   | Monitoring Proxy, 정책 엔진, 위반 탐지                     |
-| R6   | Next.js 대시보드 (프론트엔드 전체)                         |
-| R7   | 보고서 생성, DB 스키마, API 통합                           |
+## 빠르게 이해해야 할 현재 상태
+
+- 기능 A는 `고객 타깃 URL 검증 + 개선안 제시` 방향으로 정리돼 있다.
+- 기능 B는 `직원 AI 사용 통제` 경로로 분리돼 있다.
+- testbed는 기능 B 본체가 아니라, 기능 A를 재현하고 검증하는 공통 공격 타깃이다.
+- 공격 데이터 기준본은 파일이 아니라 PostgreSQL `attack_patterns` 테이블이다.
+- 결과 DB는 원본 기록 저장소이고, 학습 데이터는 `backend/data_cleaning/` 정제 export를 기준으로 본다.
+- 저장소 기본값은 공유형이 아니라 로컬형이다. PostgreSQL 기본값은 `localhost:5432/agentshield`, Chroma 기본값은 `./chromadb_data` 다.
+- 팀이 같은 DB/Chroma를 보려면 공용 운영 모드로 따로 전환해야 한다. 기준은 [팀_검수_운영_가이드.md](/Users/parkyeonggon/Projects/final_project/AgentShield/팀_검수_운영_가이드.md) 와 [.env.shared.example](/Users/parkyeonggon/Projects/final_project/AgentShield/.env.shared.example) 를 따른다.
+
+## 개발 및 검증 참고 문서
+
+- [AgentShield_개요.md](/Users/parkyeonggon/Projects/final_project/AgentShield/AgentShield_개요.md): 팀 내부용 제품 방향, 처음 목표와 현재 목표, 기술 스택 정리
+- [AgentShield_세부기획서.md](/Users/parkyeonggon/Projects/final_project/AgentShield/AgentShield_세부기획서.md): 전체 파이프라인, 인터페이스, 폴더/파일 구조, 내부 운영 기준
+- [AgentShield_기능별_파이프라인.md](/Users/parkyeonggon/Projects/final_project/AgentShield/AgentShield_기능별_파이프라인.md): 역할별 최종 형태와 충돌 방지 기준
+- [팀_검수_운영_가이드.md](/Users/parkyeonggon/Projects/final_project/AgentShield/팀_검수_운영_가이드.md): 팀원 검토 기준, JSON 산출, 운영 절차, 공용 DB 전환 기준
+
+## 운영 원칙
+
+- 공통 계약을 바꾸면 README, 개요, 세부기획서, 기능별 문서를 같이 갱신한다.
+- 공격 데이터 기준은 개인 파일이 아니라 공용 DB를 우선한다.
+- testbed는 데모용 폴더가 아니라 팀 공통 검증 기준 환경이다.
+- 결과 DB는 원본 저장소이고, 학습은 cleaned export 기준으로 본다.
