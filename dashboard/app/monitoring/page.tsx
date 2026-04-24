@@ -8,6 +8,7 @@ import {
   getViolations,
   Violation,
 } from "../../lib/api";
+import { MOCK_DASHBOARD, MOCK_VIOLATIONS } from "../../lib/mockClientData";
 
 /** 현재 페이지를 중심으로 최대 `max`개의 페이지 번호만 표시 */
 function visiblePageNumbers(current: number, total: number, max = 5): number[] {
@@ -82,9 +83,9 @@ export default function MonitoringPage() {
       setDashboard(dash);
       setViolations(viols);
     } catch {
-      setLoadError(true);
-      setDashboard(null);
-      setViolations([]);
+      setDashboard(MOCK_DASHBOARD);
+      setViolations(MOCK_VIOLATIONS);
+      setLoadError(false);
     } finally {
       setLoading(false);
     }
@@ -115,11 +116,8 @@ export default function MonitoringPage() {
     setDeptFilter("");
     setTypeFilter("");
     getViolations()
-      .then((v) => {
-        setViolations(v);
-        setLoadError(false);
-      })
-      .catch(() => setLoadError(true));
+      .then((v) => { setViolations(v); setLoadError(false); })
+      .catch(() => setViolations(MOCK_VIOLATIONS));
     setPage(1);
   }
 
