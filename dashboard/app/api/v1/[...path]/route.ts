@@ -43,7 +43,7 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
     });
   } catch {
     // 백엔드 연결 실패 → 목업 폴백
-    const mock = buildMockResponse(segments, method, search, bodyText);
+    const mock = buildMockResponse(["v1", ...segments], method, search, bodyText);
     if (mock) return mock;
     return NextResponse.json({ detail: "백엔드 연결 실패 및 목업 없음" }, { status: 502 });
   }
