@@ -117,6 +117,18 @@ def _load_owasp_recommendations(project_root: Path) -> dict[str, str]:
     return recs or DEFAULT_OWASP_RECOMMENDATIONS
 
 
+def _derive_defense_id(vuln: dict[str, Any], idx: int) -> str:
+    """Phase3/Phase4 간 식별자를 동일하게 유지하기 위한 defense_id 생성 규칙."""
+    row_phase = vuln.get("phase")
+    if row_phase == 2:
+        return str(vuln.get("test_result_id") or f"phase2-{idx}")
+
+    # Phase1 취약점은 test_result_id가 없을 수 있으므로 category/subcategory 기반 fallback ID를 부여한다.
+    fallback_cat = str(vuln.get("category") or "unknown").lower()
+    fallback_subcat = str(vuln.get("subcategory") or "none").lower().replace("/", "_")
+    return str(vuln.get("test_result_id") or f"phase1-{fallback_cat}-{fallback_subcat}-{idx}")
+
+
 async def run_phase3(
     session_id: str,
     phase1_result=None,  # graph 결과(선택 입력)
@@ -174,15 +186,23 @@ async def run_phase3(
     ]
     vulns = phase1_vulns + phase2_vulns  # 취약점으로 판정된 항목만 Phase3 입력으로 사용
 
+    # 재진입(phase4 -> phase3) 시에는 bypassed 항목만 재생성한다.
+    retry_bypassed_ids: set[str] = set()
+    if isinstance(phase4_result, dict):
+        for item in phase4_result.get("details", []) or []:
+            if isinstance(item, dict) and str(item.get("verdict") or "") == "bypassed":
+                retry_bypassed_ids.add(str(item.get("defense_id") or ""))
+        retry_bypassed_ids.discard("")
+
+    if retry_bypassed_ids:
+        filtered_vulns: list[dict[str, Any]] = []
+        for idx, vuln in enumerate(vulns, start=1):
+            if _derive_defense_id(vuln, idx) in retry_bypassed_ids:
+                filtered_vulns.append(vuln)
+        vulns = filtered_vulns
+
     for idx, vuln in enumerate(vulns, start=1):
-        row_phase = vuln.get("phase")
-        if row_phase == 2:
-            defense_id = str(vuln.get("test_result_id") or f"phase2-{idx}")
-        else:
-            # Phase1 취약점은 test_result_id가 없을 수 있으므로 category/subcategory 기반 fallback ID를 부여한다.
-            fallback_cat = str(vuln.get("category") or "unknown").lower()
-            fallback_subcat = str(vuln.get("subcategory") or "none").lower().replace("/", "_")
-            defense_id = str(vuln.get("test_result_id") or f"phase1-{fallback_cat}-{fallback_subcat}-{idx}")
+        defense_id = _derive_defense_id(vuln, idx)
         category = str(vuln.get("category") or "")  # OWASP 카테고리
         attack_prompt = str(vuln.get("attack_prompt") or "")  # 공격 프롬프트
         target_response = str(vuln.get("target_response") or "")  # 타겟 응답 원문
