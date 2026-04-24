@@ -175,6 +175,7 @@ async def _persist_phase2_result(session_id: str, result_entry: dict[str, Any]) 
                 category=result_entry.get("category"),
                 subcategory=result_entry.get("subcategory"),
                 detail=result_entry.get("detail"),
+                mitre_technique_id=result_entry.get("mitre_technique_id"),
             )
             db.add(db_row)
             await db.flush()
@@ -184,6 +185,61 @@ async def _persist_phase2_result(session_id: str, result_entry: dict[str, Any]) 
     except Exception as e:
         logger.warning(f"DB 저장 실패 (phase2, round {result_entry.get('round')}): {e}")
         return None
+
+
+# ── FRR 배치 실행 ─────────────────────────────────────────────────
+
+async def _run_frr_batch(
+    session_id: str,
+    target_url: str,
+    adapter_config: TargetAdapterConfig,
+) -> dict:
+    """
+    CyberSecEval 4 FRR 방법론 — 정상 요청 배치를 파이프라인에 투입해 오탐률(FRR) 측정.
+
+    정상 요청은 Judge L1으로만 판정 (Guard/LLM 호출 없음 — 속도/비용 절감).
+    판정이 vulnerable/ambiguous이면 False Refusal로 집계.
+    """
+    from backend.agents.llm_client import AgentShieldLLM
+    from backend.core.frr_tracker import (
+        LEGITIMATE_REQUESTS,
+        finalize_frr_session,
+        init_frr_session,
+        track_frr,
+    )
+    from backend.core.judge import rule_based_judge
+
+    await init_frr_session(session_id)
+    llm = AgentShieldLLM()
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        for req in LEGITIMATE_REQUESTS:
+            text = req["text"]
+            domain = req.get("domain", "general")
+            try:
+                target_resp = await send_messages_to_target(
+                    client,
+                    adapter_config,
+                    messages=[{"role": "user", "content": text}],
+                )
+            except Exception as exc:
+                logger.warning("[FRR] 타겟 호출 실패 (%s): %s", text[:50], exc)
+                continue
+
+            # FRR 판정: L1만 사용 (빠른 규칙 기반)
+            # 정상 요청이므로 카테고리는 "LLM01" 고정 (가장 넓은 규칙셋 적용)
+            verdict = rule_based_judge("LLM01", text, target_resp)
+            judgment = verdict.get("judgment", "safe")
+
+            await track_frr(
+                session_id=session_id,
+                request_text=text,
+                judgment_result=judgment,
+                detail=verdict.get("detail", ""),
+                domain=domain,
+            )
+
+    return (await finalize_frr_session(session_id)) or {}
 
 
 # ── Phase 2 메인 ─────────────────────────────────────────────────
@@ -301,6 +357,35 @@ async def run_phase2(
                 # 4. Red Agent LLM 변형 생성
                 new_attack_raw: str = await llm.generate(red_prompt, role="red")
                 new_attack = normalize_attack_prompt_output(new_attack_raw)
+
+                # ── 빈값·오류 응답 명시적 차단 (validate_attack_prompt_output 이전) ──
+                # generate()가 빈 문자열이나 "[Error]..." 오류 문자열을 반환했을 때
+                # validate()가 잡지 못하는 경우를 대비한 명시적 가드
+                _stripped_attack = new_attack.strip() if new_attack else ""
+                if not _stripped_attack or new_attack.lstrip().startswith("[Error]"):
+                    _reason = "empty generation" if not _stripped_attack else "LLM error response"
+                    logger.warning("[phase2] R%d 공격 프롬프트 생성 실패 (%s) — 스킵", rnd, _reason)
+                    entry = {
+                        "phase": 2,
+                        "category": category,
+                        "subcategory": subcat,
+                        "attack_pattern_id": attack.get("attack_pattern_id"),
+                        "seed_id": attack.get("seed_id", ""),
+                        "attack_prompt": new_attack,
+                        "target_response": f"[blocked: {_reason}]",
+                        "judgment": "generation_failed",
+                        "judgment_layer": 0,
+                        "judgment_confidence": None,
+                        "severity": None,
+                        "manual_review_needed": False,
+                        "detail": f"Red Agent output rejected: {_reason}",
+                        "round": rnd,
+                        "session_id": session_id,
+                    }
+                    entry["test_result_id"] = await _persist_phase2_result(session_id, entry)
+                    results.append(entry)
+                    current_judge_detail = entry["detail"]
+                    break
 
                 is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
                 if not is_valid:
@@ -428,7 +513,18 @@ async def run_phase2(
                 current_response = target_response
                 current_judge_detail = verdict.get("detail", "")
 
+    # ── FRR 측정 배치 ────────────────────────────────────────────
+    # CyberSecEval 4 FRR 방법론: 정상 요청을 파이프라인에 투입해 오탐률 계산
+    frr_summary = await _run_frr_batch(session_id, target_url, adapter_config)
+    logger.info(
+        "[phase2] FRR 완료: total=%d false_refusals=%d rate=%.2f%%",
+        frr_summary.get("total_legitimate_requests", 0),
+        frr_summary.get("false_refusals", 0),
+        frr_summary.get("frr_percentage", 0.0),
+    )
+
     return {
         "vulnerable_count": len([r for r in results if r.get("judgment") == "vulnerable"]),
         "results": results,
+        "frr": frr_summary,
     }
