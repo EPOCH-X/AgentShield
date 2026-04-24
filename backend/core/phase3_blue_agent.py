@@ -119,11 +119,12 @@ def _load_owasp_recommendations(project_root: Path) -> dict[str, str]:
 
 async def run_phase3(
     session_id: str,
+    phase1_result=None,  # graph 결과(선택 입력)
     phase2_result=None,  # graph 결과(필수 입력)
     phase4_result=None,  # graph 호환용(현재 미사용)
 ) -> dict[str, Any]:
     """
-    1) phase2_result의 vulnerable 결과 사용
+    1) phase1_result + phase2_result의 vulnerable 결과를 합쳐 사용
     2) defense_patterns에서 유사 방어 예시 검색(RAG)
     3) Blue prompt 생성
     4) llm.generate(role='blue')
@@ -150,15 +151,38 @@ async def run_phase3(
     failure_raw_dir = _phase3_failure_raw_dir(project_root, session_id)  # 파싱 실패 원문 저장 디렉터리
     owasp_recommendations = _load_owasp_recommendations(project_root)  # 카테고리별 권고문 매핑
 
-    phase2_rows = (phase2_result or {}).get("results", []) if isinstance(phase2_result, dict) else []  # 원본 Phase2 결과 목록
-    vulns = [
+    phase1_rows = (
+        (phase1_result or {}).get("vulnerable_attacks", [])
+        if isinstance(phase1_result, dict)
+        else []
+    )  # 원본 Phase1 취약점 목록
+    phase2_rows = (
+        (phase2_result or {}).get("results", [])
+        if isinstance(phase2_result, dict)
+        else []
+    )  # 원본 Phase2 결과 목록
+
+    phase1_vulns = [
+        row
+        for row in phase1_rows
+        if isinstance(row, dict) and row.get("judgment") == "vulnerable"
+    ]
+    phase2_vulns = [
         row
         for row in phase2_rows
         if isinstance(row, dict) and row.get("judgment") == "vulnerable"
-    ]  # 취약점으로 판정된 항목만 Phase3 입력으로 사용
+    ]
+    vulns = phase1_vulns + phase2_vulns  # 취약점으로 판정된 항목만 Phase3 입력으로 사용
 
     for idx, vuln in enumerate(vulns, start=1):
-        defense_id = str(vuln.get("test_result_id") or f"phase2-{idx}")  # 파일명/리포트 추적용 식별자
+        row_phase = vuln.get("phase")
+        if row_phase == 2:
+            defense_id = str(vuln.get("test_result_id") or f"phase2-{idx}")
+        else:
+            # Phase1 취약점은 test_result_id가 없을 수 있으므로 category/subcategory 기반 fallback ID를 부여한다.
+            fallback_cat = str(vuln.get("category") or "unknown").lower()
+            fallback_subcat = str(vuln.get("subcategory") or "none").lower().replace("/", "_")
+            defense_id = str(vuln.get("test_result_id") or f"phase1-{fallback_cat}-{fallback_subcat}-{idx}")
         category = str(vuln.get("category") or "")  # OWASP 카테고리
         attack_prompt = str(vuln.get("attack_prompt") or "")  # 공격 프롬프트
         target_response = str(vuln.get("target_response") or "")  # 타겟 응답 원문
@@ -206,8 +230,9 @@ async def run_phase3(
             # R3 요구: 생성된 방어 응답/코드를 test_results에 반영 (검수 전 상태)
             try:
                 async with async_session() as db:
-                    row_id = int(defense_id)
-                    row = await db.get(TestResult, row_id)
+                    row = None
+                    if str(defense_id).isdigit():
+                        row = await db.get(TestResult, int(defense_id))
 
                     if row:
                         row.defended_response = bundle.defended_response

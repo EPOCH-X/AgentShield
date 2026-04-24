@@ -46,6 +46,7 @@ async def phase3_node(state: ScanState) -> dict:
 
     result = await run_phase3(
         session_id=state["session_id"],
+        phase1_result=state["phase1_result"],
         phase2_result=state["phase2_result"],
         phase4_result=state.get("phase4_result"),
     )
