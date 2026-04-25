@@ -21,7 +21,8 @@ from backend.agents.red_agent import (
     validate_attack_prompt_output,
 )
 from backend.config import settings
-from backend.core.judge import _has_meta_analysis, _has_refusal, full_judge
+from backend.core.judge import full_judge
+from backend.core.judge_utils import _has_meta_analysis, _has_refusal
 from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 from backend.database import async_session
 from backend.models.test_result import TestResult

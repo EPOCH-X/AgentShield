@@ -23,7 +23,8 @@ import httpx
 
 from backend.config import settings
 from backend.database import async_session
-from backend.core.judge import rule_based_judge, full_judge
+from backend.core.judge import full_judge
+from backend.core.judge_utils import rule_based_judge
 from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 from backend.models.attack_pattern import AttackPattern
 
