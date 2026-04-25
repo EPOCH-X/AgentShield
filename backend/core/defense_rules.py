@@ -8,6 +8,16 @@ import re
 from typing import Any
 
 
+_META_WORDS = {"action", "reason", "block", "pass", "warn"}
+_REDACT_TOKEN = "[REDACTED]"
+
+
+def _looks_like_replacement_literal(value: str) -> bool:
+    """치환 결과 리터럴([TOKEN]) 형태는 정규식 후보에서 제외한다."""
+    # 예: [INTERNAL_ESCALATION_CODE], [ADMIN_TOKEN_MASK]
+    return bool(re.fullmatch(r"\[[A-Z0-9_]{3,}\]", value))
+
+
 def extract_regex_patterns(source: str) -> list[str]:
     """생성된 코드에서 정규식 후보 문자열을 느슨하게 추출한다."""
     if not source:
@@ -17,7 +27,10 @@ def extract_regex_patterns(source: str) -> list[str]:
         value = match.group(2).strip()
         if len(value) < 3:
             continue
-        if value in {"action", "reason", "block", "pass", "warn"}:
+        if value in _META_WORDS:
+            continue
+        # 치환 토큰 리터럴을 regex로 취급하면 문자클래스로 해석되어 과매칭/폭증을 유발한다.
+        if _looks_like_replacement_literal(value):
             continue
         patterns.append(value)
     return list(dict.fromkeys(patterns))[:30]
@@ -70,6 +83,9 @@ def apply_output_filters(text: str, patterns: list[str]) -> str:
     result = text
     for pattern in patterns:
         try:
+            # [REDACTED] 토큰 자체를 다시 치환하는 루프를 차단한다.
+            if _REDACT_TOKEN in result and re.search(pattern, _REDACT_TOKEN, re.IGNORECASE):
+                continue
             result = re.sub(pattern, "[REDACTED]", result, flags=re.IGNORECASE)
         except re.error:
             continue
