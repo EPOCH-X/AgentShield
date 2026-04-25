@@ -201,6 +201,12 @@ async def run_phase3(
                 filtered_vulns.append(vuln)
         vulns = filtered_vulns
 
+    total_vulns = len(vulns)
+    if total_vulns:
+        print(f"[phase3] start defenses: total={total_vulns}", flush=True)
+    else:
+        print("[phase3] no vulnerable cases to defend", flush=True)
+
     for idx, vuln in enumerate(vulns, start=1):
         defense_id = _derive_defense_id(vuln, idx)
         category = str(vuln.get("category") or "")  # OWASP 카테고리
@@ -208,6 +214,10 @@ async def run_phase3(
         target_response = str(vuln.get("target_response") or "")  # 타겟 응답 원문
         failure_mode = str(vuln.get("failure_mode") or "").strip() or None
         mitre_technique_id = str(vuln.get("mitre_technique_id") or "").strip() or None
+        print(
+            f"[phase3] [{idx}/{total_vulns}] defense_id={defense_id} category={category or 'unknown'} generating",
+            flush=True,
+        )
 
         rag_examples = ""  # defense_patterns에서 가져온 유사 방어 예시 텍스트
         try:
@@ -279,6 +289,10 @@ async def run_phase3(
                 }
             )
             generated += 1
+            print(
+                f"[phase3] [{idx}/{total_vulns}] done (generated={generated}, failed={failed})",
+                flush=True,
+            )
         except Exception as e:
             # 한 건 실패가 전체 실패로 이어지지 않도록 누적 후 다음 건 계속 처리.
             logger.exception(
@@ -309,6 +323,10 @@ async def run_phase3(
                     "raw_response_file": raw_failure_path,
                     "raw_response_preview": raw_preview,
                 }
+            )
+            print(
+                f"[phase3] [{idx}/{total_vulns}] failed (generated={generated}, failed={failed})",
+                flush=True,
             )
             continue
 

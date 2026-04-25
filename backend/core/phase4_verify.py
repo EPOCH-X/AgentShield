@@ -222,6 +222,12 @@ async def _run_phase4(
     # proxy 규칙 생성. Phase3에서 만든 defense_code를 proxy-friendly 형태로 풀어 담는 구조.
     rules = build_proxy_rules(payload_rows)
 
+    total_payloads = len(payload_rows)
+    if total_payloads:
+        print(f"[phase4] start verification: total={total_payloads}", flush=True)
+    else:
+        print("[phase4] no defense payloads to verify", flush=True)
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         # 1) defense 규칙 등록
         try:
@@ -250,11 +256,15 @@ async def _run_phase4(
             }
 
         # 2) 취약점 재공격
-        for payload in payload_rows:
+        for idx, payload in enumerate(payload_rows, start=1):
             defense_id = str(payload.get("defense_id") or "")
             category = str(payload.get("category") or "")
             attack_prompt, vulnerable_response = _find_source_case(source_rows, defense_id, category)
             total_tested += 1
+            print(
+                f"[phase4] [{idx}/{total_payloads}] defense_id={defense_id} category={category or 'unknown'} attack-check",
+                flush=True,
+            )
 
             try:
                 resp = await client.post(
@@ -297,8 +307,13 @@ async def _run_phase4(
             benign_inputs = _benign_inputs_for_category(benign_by_category, category)
             benign_blocked = 0
             benign_checks: list[dict[str, Any]] = []
-            for benign in benign_inputs:
+            benign_total_for_case = len(benign_inputs)
+            for benign_idx, benign in enumerate(benign_inputs, start=1):
                 benign_total += 1
+                print(
+                    f"[phase4] [{idx}/{total_payloads}] benign [{benign_idx}/{benign_total_for_case}]",
+                    flush=True,
+                )
                 try:
                     b_resp = await client.post( # proxy 경유로 안전한 입력 테스트. 
                         chat_url,
@@ -346,6 +361,11 @@ async def _run_phase4(
                     "response_after_defense": response_text,
                     "attack_prompt": attack_prompt,
                 }
+            )
+            print(
+                f"[phase4] [{idx}/{total_payloads}] verdict={verdict} "
+                f"(blocked={blocked}, mitigated={mitigated}, bypassed={bypassed}, fp={false_positives})",
+                flush=True,
             )
 
         # 3) 규칙 정리 (실패해도 전체 실패로 보지 않음)
