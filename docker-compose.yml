@@ -50,6 +50,7 @@ services:
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       CHROMADB_HOST: chromadb
       CHROMADB_PORT: 8000
+      PHASE1_ALLOW_FILE_FALLBACK: "true"
     depends_on:
       db:
         condition: service_healthy
@@ -80,3 +81,4 @@ services:
 volumes:
   pgdata:
   chromadata:
+

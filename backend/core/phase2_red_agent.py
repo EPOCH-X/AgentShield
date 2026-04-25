@@ -1,17 +1,5 @@
 """
 [R1] Phase 2 — Red Agent 변형 공격
-
-세부기획서 섹션 1(R1 역할), 기능별 파이프라인 섹션 2 참조.
-Phase 1에서 "safe" 결과를 가져와 AI가 우회 변형 생성. 최대 10라운드 Self-Play.
-
-개선사항 (2026-04-23):
-- AdaptiveRedAgent 통합 — 공격별 기법 성공률 추적 및 다음 라운드 반영
-- build_red_prompt에 round_num / failure_intel / category_attack_profile / domain_context 전달
-  → _generate_adversarial_suffix + _add_cognitive_load_injection 실제 실행
-- FP 감지 후 ChromaDB 저장 보류
-- 도메인 프로브 (타겟 챗봇 업종 자동 감지)
-- 크로스 카테고리 인텔리전스 공유
-- normalize/validate 출력 검증
 """
 
 import logging
@@ -335,7 +323,11 @@ async def run_phase2(
                     category, rnd, prev_failure_modes=used_failure_modes
                 )
 
+                # phase2_red_agent.py의 build_red_prompt 호출 부분
+                prev_techniques_for_prompt = used_techniques if not adaptive_agent._detect_stagnation() else []
+                # 정체감 감지 시 prev_techniques 차단 로직.skip하고 새로운 기점 탐색
                 # 3. Red Agent 프롬프트 빌드
+
                 # (round_num 전달 → _generate_adversarial_suffix 동작,
                 #  target_response 포함 → _add_cognitive_load_injection 동작)
                 red_prompt = build_red_prompt(
@@ -344,7 +336,7 @@ async def run_phase2(
                     category=category,
                     similar_cases=None,
                     round_num=rnd,
-                    prev_techniques=used_techniques or None,
+                    prev_techniques=prev_techniques_for_prompt,  # 정체감 감지 시 빈 리스트 전달
                     cross_category_intel=cross_category_intel or None,
                     successful_attack_refs=rag_refs or None,
                     failure_intel=category_failure_intel.get(category),
