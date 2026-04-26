@@ -227,20 +227,43 @@ def _short_summary(final_state: dict) -> dict:
     p3 = final_state.get("phase3_result", {}) or {}
     p4 = final_state.get("phase4_result", {}) or {}
 
+    phase1_total = int(p1.get("total_scanned") or 0)
+    phase1_vulnerable = len(p1.get("vulnerable_attacks", []) or [])
+    phase1_passed = max(phase1_total - phase1_vulnerable, 0)
+    phase2_results = p2.get("results", []) or []
+    phase2_vulnerable = len(
+        [r for r in phase2_results if isinstance(r, dict) and r.get("judgment") == "vulnerable"]
+    )
+    total_vulnerabilities = phase1_vulnerable + phase2_vulnerable
+    phase4_safe = int(p4.get("safe") or p4.get("mitigated") or 0)
+    phase4_unsafe = int(p4.get("unsafe") or p4.get("bypassed") or 0)
+    phase4_review_needed = int(p4.get("review_needed") or 0)
+    denominator = phase4_safe + phase4_unsafe + phase4_review_needed
+    safe_rate = (phase4_safe / denominator) if denominator > 0 else 0.0
+    phase4_history = final_state.get("phase4_history", []) or []
+    iterations_used = len(phase4_history)
+    if iterations_used == 0:
+        iterations_used = int(final_state.get("iteration") or 0)
+
     return {
         "session_id": final_state.get("session_id"),
         "iteration": final_state.get("iteration"),
-        "phase1_total_scanned": p1.get("total_scanned"),
-        "phase1_vulnerable": len(p1.get("vulnerable_attacks", []) or []),
-        "phase2_total_results": len(p2.get("results", []) or []),
-        "phase2_vulnerable": len(
-            [r for r in (p2.get("results", []) or []) if isinstance(r, dict) and r.get("judgment") == "vulnerable"]
-        ),
+        "attack_prompts": phase1_total,
+        "phase1_vulnerable": phase1_vulnerable,
+        "phase1_passed": phase1_passed,
+        "phase2_input_from_phase1_passed": phase1_passed,
+        "phase2_total_results": len(phase2_results),
+        "phase2_vulnerable": phase2_vulnerable,
+        "phase3_input_total": total_vulnerabilities,
+        "total_vulnerabilities": total_vulnerabilities,
         "phase3_defenses_generated": p3.get("defenses_generated"),
         "phase3_failed": p3.get("failed"),
         "phase4_total_tested": p4.get("total_tested"),
-        "phase4_mitigated": p4.get("mitigated"),
-        "phase4_bypassed": p4.get("bypassed"),
+        "phase4_safe": phase4_safe,
+        "phase4_unsafe": phase4_unsafe,
+        "phase4_review_needed": phase4_review_needed,
+        "safe_rate": round(safe_rate, 4),
+        "iterations_used": iterations_used,
         "phase4_passed_threshold": p4.get("passed_threshold"),
     }
 
@@ -283,6 +306,17 @@ def _response_body_for_review(raw: str) -> str:
     return s
 
 
+def _to_safe_unsafe(verdict: str) -> str:
+    v = (verdict or "").strip().lower()
+    if v in {"mitigated", "safe"}:
+        return "safe"
+    if v in {"bypassed", "unsafe"}:
+        return "unsafe"
+    if v == "review_needed":
+        return "Review Needed"
+    return verdict or "(none)"
+
+
 def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
     """요청 포맷: 공격성공 프롬프트/응답값/방어코드/방어 후 응답값을 한눈에 저장."""
     phase3 = final_state.get("phase3_result", {}) or {}
@@ -316,7 +350,13 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
         ]
     )
     lines.append(f"- session_id: {final_state.get('session_id')}")
+    lines.append(f"- phase1_total: {final_state.get('phase1_result', {}).get('total_scanned', 0)}")
+    lines.append(f"- phase1_vulnerable_count: {len((final_state.get('phase1_result', {}) or {}).get('vulnerable_attacks', []) or [])}")
     lines.append(f"- phase2_vulnerable_count: {p2_vuln_n}")
+    lines.append(
+        f"- phase3_input_total: "
+        f"{len((final_state.get('phase1_result', {}) or {}).get('vulnerable_attacks', []) or []) + p2_vuln_n}"
+    )
     lines.append(f"- phase3_defenses_generated: {phase3.get('defenses_generated', 0)}")
     lines.append(f"- phase3_failed: {phase3.get('failed', 0)}")
     for fd in phase3.get("failed_details") or []:
@@ -326,8 +366,19 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
                 f"category={fd.get('category') or '-'} error={fd.get('error')}"
             )
     lines.append(f"- phase4_total_tested: {phase4.get('total_tested', 0)}")
-    lines.append(f"- phase4_mitigated: {phase4.get('mitigated', 0)}")
-    lines.append(f"- phase4_bypassed: {phase4.get('bypassed', 0)}")
+    lines.append(f"- phase4_safe: {phase4.get('safe', phase4.get('mitigated', 0))}")
+    lines.append(f"- phase4_unsafe: {phase4.get('unsafe', phase4.get('bypassed', 0))}")
+    lines.append(f"- phase4_review_needed: {phase4.get('review_needed', 0)}")
+    safe_n = int(phase4.get("safe", phase4.get("mitigated", 0)) or 0)
+    unsafe_n = int(phase4.get("unsafe", phase4.get("bypassed", 0)) or 0)
+    review_n = int(phase4.get("review_needed", 0) or 0)
+    denom = safe_n + unsafe_n + review_n
+    safe_rate = (safe_n / denom) if denom > 0 else 0.0
+    lines.append(f"- safe_rate: {safe_rate:.2%}")
+    review_iterations_used = len(final_state.get("phase4_history", []) or [])
+    if review_iterations_used == 0:
+        review_iterations_used = int(final_state.get("iteration") or 0)
+    lines.append(f"- iterations_used: {review_iterations_used}")
     lines.append(f"- phase4_passed_threshold: {bool(phase4.get('passed_threshold', False))}")
     lines.append("")
 
@@ -356,24 +407,32 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
             else:
                 lines.append("(방어 산출물 없음)")
             lines.append("")
-            lines.append("### 3.5) 방어 응답(defended_response)")
+            lines.append("### 3) 방어 응답(defended_response)")
             defended_response = str(row.get("defended_response") or "").strip()
+            defended_body = _response_body_for_review(defended_response) if defended_response else ""
             if defended_response:
-                lines.append(_response_body_for_review(defended_response))
+                lines.append(defended_body)
             else:
                 lines.append("(방어 응답 없음)")
             lines.append("")
-            lines.append("### 4) 방어 후 응답 값")
             after_resp = phase4_row.get("response_after_defense")
             if after_resp in (None, ""):
-                lines.append("(방어 후 응답 없음)")
+                pass
             else:
-                lines.append(_response_body_for_review(str(after_resp)))
-            lines.append("")
-            lines.append("### 5) 재판정 결과")
-            lines.append(f"- verdict: {str(phase4_row.get('verdict') or '(none)')}")
+                after_body = _response_body_for_review(str(after_resp))
+                if not (defended_body and after_body == defended_body):
+                    lines.append("### 4) 방어 후 응답 값")
+                    lines.append(after_body)
+                    lines.append("")
+            lines.append("### 4) 재판정 결과")
+            lines.append(f"- verdict: {_to_safe_unsafe(str(phase4_row.get('verdict') or '(none)'))}")
             if phase4_row.get("error"):
                 lines.append(f"- error: {str(phase4_row.get('error'))}")
+            rationale = str(defense_payload.get("defense_rationale") or "").strip()
+            if rationale:
+                if len(rationale) > 300:
+                    rationale = f"{rationale[:300]} ...(truncated)"
+                lines.append(f"- rationale: {rationale}")
             lines.append("")
 
     out_path = out_dir / f"phase1to4_review_{ts}.md"

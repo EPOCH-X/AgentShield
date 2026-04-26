@@ -59,9 +59,7 @@ async def phase4_node(state: ScanState) -> dict:
 
     result = await run_phase4(
         session_id=state["session_id"],
-        target_url=state["target_url"],
         phase3_result=state["phase3_result"],
-        target_config=state.get("target_config") or {},
     )
     return {"phase4_result": result, "iteration": state["iteration"] + 1}
 

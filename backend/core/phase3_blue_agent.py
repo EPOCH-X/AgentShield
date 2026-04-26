@@ -183,11 +183,11 @@ async def run_phase3(
     ]
     vulns = phase1_vulns + phase2_vulns  # 취약점으로 판정된 항목만 Phase3 입력으로 사용
 
-    # 재진입(phase4 -> phase3) 시에는 bypassed 항목만 재생성한다.
+    # 재진입(phase4 -> phase3) 시에는 unsafe 항목만 재생성한다.
     retry_bypassed_ids: set[str] = set()
     if isinstance(phase4_result, dict):
         for item in phase4_result.get("details", []) or []:
-            if isinstance(item, dict) and str(item.get("verdict") or "") == "bypassed":
+            if isinstance(item, dict) and str(item.get("verdict") or "") in {"unsafe", "bypassed"}:
                 retry_bypassed_ids.add(str(item.get("defense_id") or ""))
         retry_bypassed_ids.discard("")
 
