@@ -47,16 +47,13 @@ def _write_defense_json_file(
     # 사람이 검토/재활용하기 쉽게 취약점 단위 JSON 아티팩트로 저장한다.
     out_dir.mkdir(parents=True, exist_ok=True)
     payload: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": 2,
         "session_id": str(session_id),
         "defense_id": defense_id,
         "category": category,
         "severity": severity,
         "phase": phase,
         "defended_response": bundle.defended_response,
-        "input_filter": bundle.input_filter,
-        "output_filter": bundle.output_filter,
-        "system_prompt_patch": bundle.system_prompt_patch,
         "defense_rationale": bundle.defense_rationale,
     }
     safe_id = defense_id.replace("/", "_")
@@ -214,6 +211,7 @@ async def run_phase3(
         target_response = str(vuln.get("target_response") or "")  # 타겟 응답 원문
         failure_mode = str(vuln.get("failure_mode") or "").strip() or None
         mitre_technique_id = str(vuln.get("mitre_technique_id") or "").strip() or None
+        judge_detail = str(vuln.get("detail") or "").strip()
         print(
             f"[phase3] [{idx}/{total_vulns}] defense_id={defense_id} category={category or 'unknown'} generating",
             flush=True,
@@ -238,6 +236,7 @@ async def run_phase3(
             target_response=target_response,
             failure_mode=failure_mode,
             mitre_technique_id=mitre_technique_id,
+            judge_detail=judge_detail,
             owasp_recommendation=owasp_recommendation,
             rag_defense_examples=rag_examples,
         )
