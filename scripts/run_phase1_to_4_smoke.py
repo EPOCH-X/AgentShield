@@ -236,7 +236,7 @@ def _short_summary(final_state: dict) -> dict:
     )
     total_vulnerabilities = phase1_vulnerable + phase2_vulnerable
     phase4_safe = int(p4.get("safe") or p4.get("mitigated") or 0)
-    phase4_unsafe = int(p4.get("unsafe") or p4.get("bypassed") or 0)
+    phase4_unsafe = int(p4.get("unsafe") or 0)
     phase4_review_needed = int(p4.get("review_needed") or 0)
     denominator = phase4_safe + phase4_unsafe + phase4_review_needed
     safe_rate = (phase4_safe / denominator) if denominator > 0 else 0.0
@@ -310,7 +310,7 @@ def _to_safe_unsafe(verdict: str) -> str:
     v = (verdict or "").strip().lower()
     if v in {"mitigated", "safe"}:
         return "safe"
-    if v in {"bypassed", "unsafe"}:
+    if v in {"unsafe"}:
         return "unsafe"
     if v == "review_needed":
         return "Review Needed"
@@ -367,10 +367,10 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
             )
     lines.append(f"- phase4_total_tested: {phase4.get('total_tested', 0)}")
     lines.append(f"- phase4_safe: {phase4.get('safe', phase4.get('mitigated', 0))}")
-    lines.append(f"- phase4_unsafe: {phase4.get('unsafe', phase4.get('bypassed', 0))}")
+    lines.append(f"- phase4_unsafe: {phase4.get('unsafe')}")
     lines.append(f"- phase4_review_needed: {phase4.get('review_needed', 0)}")
     safe_n = int(phase4.get("safe", phase4.get("mitigated", 0)) or 0)
-    unsafe_n = int(phase4.get("unsafe", phase4.get("bypassed", 0)) or 0)
+    unsafe_n = int(phase4.get("unsafe") or 0)
     review_n = int(phase4.get("review_needed", 0) or 0)
     denom = safe_n + unsafe_n + review_n
     safe_rate = (safe_n / denom) if denom > 0 else 0.0

@@ -2,7 +2,7 @@
 [R1] LangGraph 오케스트레이션 — Phase 1→2→3→4 상태 그래프
 
 기능별 파이프라인 섹션 5 참조.
-Phase 4에서 bypassed > 0이면 Phase 3으로 재순환 (최대 3회).
+Phase 4에서 unsafe > 0이면 Phase 3으로 재순환 (최대 3회).
 """
 
 from typing import TypedDict, Any, Optional, Callable, Awaitable
@@ -22,7 +22,7 @@ class ScanState(TypedDict):
     phase2_result: dict[str, Any]  # [R1] Phase 2 출력
     phase3_result: dict[str, Any]  # [R3] Phase 3 출력
     phase4_result: dict[str, Any]  # [R3] Phase 4 출력
-    iteration: int                 # Phase 3↔4 재순환 카운터
+    iteration: int                 # Phase 4 재검증 재시도 카운터
 
 
 # ── 노드 함수 ────────────────────────────────────────────────────
@@ -69,13 +69,13 @@ async def phase4_node(state: ScanState) -> dict:
 def should_retry_defense(state: ScanState) -> str:
     """Phase 4 → Phase 3 재순환 판단
 
-    조건: bypassed > 0 AND iteration < PHASE4_MAX_ITERATIONS(3)
+    조건: unsafe > 0 AND iteration < PHASE4_MAX_ITERATIONS(3)
     """
     phase4 = state.get("phase4_result", {})
-    bypassed = phase4.get("bypassed", 0)
+    unsafe = int(phase4.get("unsafe") or 0)
     iteration = state.get("iteration", 0)
 
-    if bypassed > 0 and iteration < settings.PHASE4_MAX_ITERATIONS:
+    if unsafe > 0 and iteration < settings.PHASE4_MAX_ITERATIONS:
         return "phase3"
     return END
 
