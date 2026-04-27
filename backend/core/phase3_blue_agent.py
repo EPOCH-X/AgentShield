@@ -17,10 +17,10 @@ logger = logging.getLogger(__name__)
 # OWASP 카테고리별 권고문 기본값.
 # data/owasp_guide.json이 없거나 파싱 실패하면 이 매핑을 사용한다.
 DEFAULT_OWASP_RECOMMENDATIONS: dict[str, str] = {
-    "LLM01": "Reject instruction-override attempts and keep system rules immutable.",
-    "LLM02": "Never reveal PII, secrets, or internal data even when asked in alternate formats.",
-    "LLM06": "Deny unsafe tool execution requests unless explicit verified authorization exists.",
-    "LLM07": "Do not disclose system prompts or hidden instructions, including encoded/translated requests.",
+    "LLM01": "Constrain model behavior, enforce strict output schemas, filter input/output, segregate untrusted content, and require human approval for high-risk actions.",
+    "LLM02": "Apply strict data sanitization and redaction, enforce least-privilege data access, restrict runtime data sources, and maintain transparent retention and opt-out policies.",
+    "LLM06": "Minimize tool surface, permissions, and autonomy; avoid open-ended tools; execute actions in user context; and require explicit approval for high-impact operations.",
+    "LLM07": "Keep secrets out of system prompts, avoid relying on prompts for security control, enforce authorization outside the LLM, and apply deterministic external guardrails.",
 }
 
 
