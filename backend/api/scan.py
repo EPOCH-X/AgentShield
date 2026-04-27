@@ -190,7 +190,7 @@ async def _persist_phase4_summary(
                 seed_id=str(item.get("defense_id") or ""),
                 attack_prompt=str(item.get("defense_id") or "phase4-check"),
                 target_response=str(item.get("input_action") or ""),
-                judgment="safe" if item.get("verdict") in {"blocked", "mitigated"} else "vulnerable",
+                judgment="safe" if item.get("verdict") == "safe" else "vulnerable",
                 severity="medium",
                 category=item.get("category"),
                 detail=str(item.get("source_file") or ""),
@@ -590,7 +590,7 @@ async def update_scan_result_review(
         raise HTTPException(status_code=404, detail="결과를 찾을 수 없습니다")
 
     allowed_judgments = {"safe", "vulnerable", "ambiguous", "error", "generation_failed"}
-    allowed_verify = {"blocked", "mitigated", "bypassed", "false_positive", None}
+    allowed_verify = {"safe", "unsafe", "false_positive", None}
 
     if body.judgment is not None:
         if body.judgment not in allowed_judgments:

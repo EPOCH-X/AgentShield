@@ -235,11 +235,14 @@ def _short_summary(final_state: dict) -> dict:
         [r for r in phase2_results if isinstance(r, dict) and r.get("judgment") == "vulnerable"]
     )
     total_vulnerabilities = phase1_vulnerable + phase2_vulnerable
-    phase4_safe = int(p4.get("safe") or p4.get("mitigated") or 0)
+    phase4_safe = int(p4.get("safe") or 0)
     phase4_unsafe = int(p4.get("unsafe") or 0)
-    phase4_review_needed = int(p4.get("review_needed") or 0)
-    denominator = phase4_safe + phase4_unsafe + phase4_review_needed
-    safe_rate = (phase4_safe / denominator) if denominator > 0 else 0.0
+
+    # 전체 라운드 기준: 초기 대상 대비 최종 잔여(미해결) 차감
+    initial_total = int(total_vulnerabilities or 0)
+    final_unresolved = phase4_unsafe
+    resolved = max(initial_total - final_unresolved, 0)
+    safe_rate = (resolved / initial_total) if initial_total > 0 else 0.0
     phase4_history = final_state.get("phase4_history", []) or []
     iterations_used = len(phase4_history)
     if iterations_used == 0:
@@ -261,8 +264,9 @@ def _short_summary(final_state: dict) -> dict:
         "phase4_total_tested": p4.get("total_tested"),
         "phase4_safe": phase4_safe,
         "phase4_unsafe": phase4_unsafe,
-        "phase4_review_needed": phase4_review_needed,
         "safe_rate": round(safe_rate, 4),
+        "resolved_count": resolved,
+        "initial_phase3_input_total": initial_total,
         "iterations_used": iterations_used,
         "phase4_passed_threshold": p4.get("passed_threshold"),
     }
@@ -307,14 +311,12 @@ def _response_body_for_review(raw: str) -> str:
 
 
 def _to_safe_unsafe(verdict: str) -> str:
-    v = (verdict or "").strip().lower()
-    if v in {"mitigated", "safe"}:
+    v = (verdict or "").strip()
+    if v == "safe":
         return "safe"
-    if v in {"unsafe"}:
+    if v == "unsafe":
         return "unsafe"
-    if v == "review_needed":
-        return "Review Needed"
-    return verdict or "(none)"
+    return "(none)"
 
 
 def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
@@ -365,16 +367,14 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
                 f"  - phase3_fail: defense_id={fd.get('defense_id')} "
                 f"category={fd.get('category') or '-'} error={fd.get('error')}"
             )
-    lines.append(f"- phase4_total_tested: {phase4.get('total_tested', 0)}")
-    lines.append(f"- phase4_safe: {phase4.get('safe', phase4.get('mitigated', 0))}")
+    lines.append(f"- phase4_safe: {phase4.get('safe')}")
     lines.append(f"- phase4_unsafe: {phase4.get('unsafe')}")
-    lines.append(f"- phase4_review_needed: {phase4.get('review_needed', 0)}")
-    safe_n = int(phase4.get("safe", phase4.get("mitigated", 0)) or 0)
-    unsafe_n = int(phase4.get("unsafe") or 0)
-    review_n = int(phase4.get("review_needed", 0) or 0)
-    denom = safe_n + unsafe_n + review_n
-    safe_rate = (safe_n / denom) if denom > 0 else 0.0
-    lines.append(f"- safe_rate: {safe_rate:.2%}")
+    initial_total = len((final_state.get('phase1_result', {}) or {}).get('vulnerable_attacks', []) or []) + p2_vuln_n
+    final_unresolved = int(phase4.get("unsafe") or 0)
+    resolved = max(initial_total - final_unresolved, 0)
+    safe_rate = (resolved / initial_total) if initial_total > 0 else 0.0
+
+    lines.append(f"- safe_rate: {safe_rate:.2%} ({resolved}/{initial_total} - {final_unresolved} unresolved)")
     review_iterations_used = len(final_state.get("phase4_history", []) or [])
     if review_iterations_used == 0:
         review_iterations_used = int(final_state.get("iteration") or 0)
