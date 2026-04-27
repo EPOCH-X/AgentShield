@@ -128,9 +128,9 @@ def _derive_defense_id(vuln: dict[str, Any], idx: int) -> str:
 
 async def run_phase3(
     session_id: str,
-    phase1_result=None,  # graph 결과(선택 입력)
-    phase2_result=None,  # graph 결과(필수 입력)
-    phase4_result=None,  # graph 호환용(현재 미사용)
+    phase1_result=None,  # phase1 결과(dict). 내부에서 judgment=="vulnerable"인 항목만 사용
+    phase2_result=None,  # phase2 결과(dict). 내부에서 judgment=="vulnerable"인 항목만 사용
+    phase4_result=None,  # phase4 재진입 시 사용(unsafe 항목만 재생성)
 ) -> dict[str, Any]:
     """
     1) phase1_result + phase2_result의 vulnerable 결과를 합쳐 사용
