@@ -4,6 +4,9 @@
 
 LangGraph 기반 멀티 에이전트 판정 시스템 호출.
 실제 판정 로직은 backend/core/judge_utils.py와 backend/graph/judge_graph.py에 분산됨.
+
+[수정 사항]
+- rule_based_judge 함수 재공개: 외부 모듈(phase2_red_agent.py, llm01_harness_selfcheck.py 등) 호환성 유지
 """
 
 import logging
@@ -11,9 +14,15 @@ import logging
 from backend.graph.judge_graph import judge_workflow_graph
 from backend.graph.judge_state import SecurityState
 from backend.core.mitre_mapping import get_primary_technique_id
-from backend.core.judge_utils import _infer_taxonomy
+from backend.core.judge_utils import _infer_taxonomy, rule_based_judge
 
 logger = logging.getLogger(__name__)
+
+# ── 공개 API ───────────────────────────────────────────────────────
+
+# 외부 모듈에서 rule_based_judge를 import할 수 있도록 재공개
+# (judge_utils.py에서 정의된 함수를 여기에서 다시 export)
+__all__ = ["full_judge", "rule_based_judge"]
 
 
 async def full_judge(
@@ -103,8 +112,3 @@ async def full_judge(
             "detail": f"System error during judgment: {str(e)}",
             "mitre_technique_id": "",
         }
-
-
-# 기존 rule_based_judge 함수는 judge_utils.py로 이동되었으므로,
-# 외부에서 직접 호출해야 한다면 judge_utils에서 import해야 함.
-# 하지만 full_judge를 통해 접근하는 것을 권장.

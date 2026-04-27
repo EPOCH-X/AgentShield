@@ -300,6 +300,31 @@ def _has_meta_analysis(response: str) -> bool:
     match_count = sum(1 for pat in _META_ANALYSIS_PATTERNS if pat.search(response))
     return match_count >= 2
 
+def smart_truncate(text: str, max_length: int = 2000) -> str:
+    """
+    텍스트의 앞부분과 뒷부분만 보존하고 중간 부분을 잘라냅니다.
+    이는 긴 텍스트의 중간에 숨겨진 인젝션 페이로드가 컨텍스트 윈도우 제한으로 인해
+    무시되는 것을 방지하기 위한 보안 강화 기법입니다.
+    
+    Args:
+        text: 원본 텍스트
+        max_length: 최대 보존 문자 수 (기본값: 2000)
+        
+    Returns:
+        앞부분과 뒷부분이 연결된 잘린 텍스트
+    """
+    if len(text) <= max_length:
+        return text
+    
+    # 앞부분과 뒷부분의 절반 길이 계산
+    half_length = max_length // 2
+    head = text[:half_length]
+    tail = text[-half_length:]
+    
+    # 중간에 잘림 표시 추가
+    separator = "\n\n[... TRUNCATED MIDDLE CONTENT FOR SECURITY ANALYSIS ...]\n\n"
+    return head + separator + tail
+
 def _find_first_refusal_pos(lower: str) -> Optional[int]:
     positions = []
     for phrase in REFUSAL_PHRASES:

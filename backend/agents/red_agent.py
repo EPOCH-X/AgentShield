@@ -1350,6 +1350,22 @@ def build_red_prompt(
 ) -> str:
     """이전 공격 + 방어 응답 → 구체적 변형 공격 생성 프롬프트
 
+    [프롬프트 길이 주의]
+    Red Agent 프롬프트는 일반적으로 8,000-12,000 문자 범위입니다.
+    이는 설계된 동작이며 다음 요소로 인합니다:
+    - System prompt (abliterated 모델): ~2,000 chars
+    - User prompt 본체: ~6,000-8,000 chars
+    - RAG 참고자료 (ChromaDB): 0-1,500 chars (캐시 히트 수에 따라 변함)
+    - 실패 인텔리전스: 0-800 chars
+    - 카테고리 프로필 및 도메인 컨텍스트: 0-1,000 chars
+    - 공격 예제: 500-2,000 chars (가장 큰 기여자)
+    
+    총합: 8,000-12,000 chars (예: 10,321 chars는 정상)
+    최적화 필요 시:
+    - RAG 결과 캐싱 (ChromaDB 쿼리 감소)
+    - 예제 크기 축소 (추상화 레벨 높임)
+    - 실패 인텔 제한 (최근 3개만 포함)
+
     Args:
         attack_prompt: 거부당한 이전 공격 프롬프트
         target_response: 타겟이 반환한 방어 응답
@@ -1361,7 +1377,7 @@ def build_red_prompt(
         domain_context: detect_chatbot_domain() 결과. 챗봇 도메인에 맞는 공격 프레이밍 주입.
 
     Returns:
-        Red Agent에게 넘길 변형 공격 생성 프롬프트
+        Red Agent에게 넘길 변형 공격 생성 프롬프트 (8K-12K chars)
     """
     # 라운드별 전략
     escalation = ROUND_ESCALATION.get(round_num, ROUND_ESCALATION[5])
