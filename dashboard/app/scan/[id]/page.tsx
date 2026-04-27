@@ -13,6 +13,13 @@ const PHASE_LABELS: Record<number, string> = {
   4: "Phase 4 — 검증",
 };
 
+const CATEGORY_MITRE: Record<string, { id: string; url: string }> = {
+  LLM01: { id: "T1190", url: "https://attack.mitre.org/techniques/T1190/" },
+  LLM02: { id: "T1530", url: "https://attack.mitre.org/techniques/T1530/" },
+  LLM06: { id: "T1098", url: "https://attack.mitre.org/techniques/T1098/" },
+  LLM07: { id: "T1592", url: "https://attack.mitre.org/techniques/T1592/" },
+};
+
 const SEVERITY_CONFIG: Record<string, { cls: string; label: string }> = {
   critical: { cls: "bg-error/10 text-error border-error/20", label: "긴급" },
   high: { cls: "bg-primary/10 text-primary border-primary/20", label: "높음" },
@@ -103,6 +110,9 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
         let r: ScanResult[];
         try {
           r = await getScanResults(sessionId);
+          if (r.length === 0) {
+            r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
+          }
         } catch {
           r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
         }
@@ -392,6 +402,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
                     <th className="px-6 py-4 border-b border-white/5">판정</th>
                     <th className="px-6 py-4 border-b border-white/5">검증 결과</th>
                     <th className="px-6 py-4 border-b border-white/5">공격 프롬프트</th>
+                    <th className="px-6 py-4 border-b border-white/5">MITRE T-ID</th>
                     <th className="px-6 py-4 border-b border-white/5 text-center">방어코드</th>
                   </tr>
                 </thead>
@@ -436,6 +447,28 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
                           <p className="text-xs text-on-surface-variant truncate font-mono">
                             {r.attack_prompt}
                           </p>
+                        </td>
+                        <td className="px-6 py-4">
+                          {(() => {
+                            const tid = r.mitre_technique_id;
+                            const fallback = CATEGORY_MITRE[r.category];
+                            const id = tid || fallback?.id;
+                            const url = tid
+                              ? `https://attack.mitre.org/techniques/${tid.replace(".", "/")}/`
+                              : fallback?.url;
+                            return id && url ? (
+                              <a
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="font-mono text-xs text-blue-600 hover:underline"
+                              >
+                                {id}
+                              </a>
+                            ) : (
+                              <span className="text-on-surface-variant/30">—</span>
+                            );
+                          })()}
                         </td>
                         <td className="px-6 py-4 text-center">
                           {r.defense_code ? (

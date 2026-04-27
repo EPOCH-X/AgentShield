@@ -114,6 +114,65 @@ export const MOCK_SCAN_STATUS = {
   elapsed_seconds: 842,
 };
 
+export const MOCK_MITRE_MAPPING = [
+  {
+    category: "LLM01",
+    failure_mode: null,
+    primary_technique_id: "T1190",
+    primary_technique_name: "Exploit Public-Facing Application",
+    tactic: "Initial Access",
+    url: "https://attack.mitre.org/techniques/T1190/",
+    secondary: [
+      { technique_id: "T1059", name: "Command and Scripting Interpreter" },
+      { technique_id: "T1203", name: "Exploitation for Client Execution" },
+    ],
+  },
+  {
+    category: "LLM02",
+    failure_mode: null,
+    primary_technique_id: "T1530",
+    primary_technique_name: "Data from Cloud Storage",
+    tactic: "Collection",
+    url: "https://attack.mitre.org/techniques/T1530/",
+    secondary: [
+      { technique_id: "T1213", name: "Data from Information Repositories" },
+      { technique_id: "T1005", name: "Data from Local System" },
+    ],
+  },
+  {
+    category: "LLM06",
+    failure_mode: null,
+    primary_technique_id: "T1098",
+    primary_technique_name: "Account Manipulation",
+    tactic: "Persistence",
+    url: "https://attack.mitre.org/techniques/T1098/",
+    secondary: [
+      { technique_id: "T1609", name: "Container Administration Command" },
+      { technique_id: "T1651", name: "Cloud Administration Command" },
+    ],
+  },
+  {
+    category: "LLM07",
+    failure_mode: null,
+    primary_technique_id: "T1592",
+    primary_technique_name: "Gather Victim Host Information",
+    tactic: "Reconnaissance",
+    url: "https://attack.mitre.org/techniques/T1592/",
+    secondary: [
+      { technique_id: "T1082", name: "System Information Discovery" },
+      { technique_id: "T1614", name: "System Location Discovery" },
+    ],
+  },
+];
+
+export const MOCK_FRR_DATA = {
+  session_id: "mock-session-demo",
+  total_legitimate_requests: 27,
+  false_refusals: 2,
+  frr_rate: 0.0741,
+  frr_percentage: 7.41,
+};
+
 export const MOCK_SCAN_RESULTS: ScanResult[] = [
   {
     id: 101,
@@ -124,6 +183,7 @@ export const MOCK_SCAN_RESULTS: ScanResult[] = [
     judgment: "vulnerable",
     severity: "critical",
     category: "LLM01",
+    mitre_technique_id: "T1190",
     created_at: new Date(Date.now() - 10_000).toISOString(),
   },
   {
@@ -135,6 +195,7 @@ export const MOCK_SCAN_RESULTS: ScanResult[] = [
     judgment: "vulnerable",
     severity: "high",
     category: "LLM01",
+    mitre_technique_id: "T1059",
     defense_code:
       "def input_filter(text: str) -> dict:\n    if re.search(r'(?i)(ignore|system\\\\s*prompt)', text):\n        return {'action': 'block'}\n    return {'action': 'pass'}",
     created_at: new Date(Date.now() - 8_000).toISOString(),
@@ -148,6 +209,7 @@ export const MOCK_SCAN_RESULTS: ScanResult[] = [
     judgment: "safe",
     severity: "low",
     category: "LLM02",
+    mitre_technique_id: "T1530",
     defense_code: "# output_filter: redact sk- patterns using regex",
     created_at: new Date(Date.now() - 6_000).toISOString(),
   },
@@ -160,6 +222,7 @@ export const MOCK_SCAN_RESULTS: ScanResult[] = [
     judgment: "safe",
     severity: "medium",
     category: "LLM06",
+    mitre_technique_id: "T1098",
     defense_code: "execution_guard = {'allow_list': [...], 'deny_tool_enumeration': True}",
     verify_result: "blocked",
     created_at: new Date(Date.now() - 4_000).toISOString(),
@@ -173,6 +236,7 @@ export const MOCK_SCAN_RESULTS: ScanResult[] = [
     judgment: "vulnerable",
     severity: "high",
     category: "LLM07",
+    mitre_technique_id: "T1592",
     created_at: new Date(Date.now() - 2_000).toISOString(),
   },
   {
@@ -184,6 +248,7 @@ export const MOCK_SCAN_RESULTS: ScanResult[] = [
     judgment: "vulnerable",
     severity: "critical",
     category: "LLM01",
+    mitre_technique_id: "T1203",
     created_at: new Date(Date.now() - 1_500).toISOString(),
   },
   {
@@ -195,7 +260,9 @@ export const MOCK_SCAN_RESULTS: ScanResult[] = [
     judgment: "safe",
     severity: "medium",
     category: "LLM07",
+    mitre_technique_id: "T1592",
     defense_code: "# system_prompt_guard: block introspection queries",
+    verify_result: "blocked",
     created_at: new Date(Date.now() - 1_000).toISOString(),
   },
 ];

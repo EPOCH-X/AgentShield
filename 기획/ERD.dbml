@@ -1,0 +1,148 @@
+// AgentShield ERD
+// dbdiagram.io 에 전체 내용 붙여넣기 하면 ERD 자동 생성
+// https://dbdiagram.io
+
+// ──────────────────────────────────────────
+// 인증
+// ──────────────────────────────────────────
+
+Table users {
+  id          serial       [pk, increment]
+  username    varchar(50)  [not null, unique, note: '사용자명']
+  email       varchar(100) [not null, unique]
+  hashed_password varchar(255) [not null]
+  role        varchar(20)  [not null, default: 'user', note: 'admin / auditor / user']
+  is_active   boolean      [not null, default: true]
+  created_at  timestamp    [default: `now()`]
+}
+
+// ──────────────────────────────────────────
+// 기능 A — AI Agent Shield
+// ──────────────────────────────────────────
+
+Table attack_patterns {
+  id            serial       [pk, increment]
+  category      varchar(10)  [not null, note: 'LLM01 / LLM02 / LLM06 / LLM07']
+  attack_prompt text         [not null]
+  severity      varchar(10)  [not null, note: 'critical / high / medium / low']
+  source        varchar(100) [note: '출처 데이터셋명']
+  created_at    timestamp    [default: `now()`]
+
+  indexes {
+    category
+    severity
+  }
+}
+
+Table test_sessions {
+  id               uuid         [pk, default: `gen_random_uuid()`]
+  user_id          integer      [ref: > users.id, note: '스캔 요청자']
+  project_name     varchar(100) [not null]
+  target_url       text         [not null]
+  target_api_key   text         [note: '암호화 저장']
+  status           varchar(20)  [not null, default: 'pending', note: 'pending / running / completed / failed']
+  phase            integer      [default: 1, note: '현재 진행 Phase (1~4)']
+  total_tests      integer      [default: 0]
+  completed_tests  integer      [default: 0]
+  vulnerable_count integer      [default: 0]
+  safe_count       integer      [default: 0]
+  elapsed_seconds  integer      [default: 0]
+  created_at       timestamp    [default: `now()`]
+  updated_at       timestamp    [default: `now()`]
+
+  indexes {
+    user_id
+    status
+    created_at
+  }
+}
+
+Table test_results {
+  id                  serial       [pk, increment]
+  session_id          uuid         [ref: > test_sessions.id, not null]
+  attack_pattern_id   integer      [ref: > attack_patterns.id, note: 'null이면 Red Agent 생성 공격']
+  phase               integer      [not null, note: '1~4']
+  attack_prompt       text         [not null]
+  target_response     text
+  judgment            varchar(20)  [note: 'vulnerable / safe / ambiguous']
+  severity            varchar(10)  [note: 'critical / high / medium / low']
+  category            varchar(10)  [note: 'LLM01 / LLM02 / LLM06 / LLM07']
+  defense_code        text         [note: 'Blue Agent 생성 방어 코드']
+  defended_response   text         [note: 'Phase 4 방어 적용 후 응답']
+  verify_result       varchar(20)  [note: 'blocked / bypassed / ambiguous']
+  mitre_technique_id  varchar(20)  [note: 'T1190 등 MITRE ATT&CK ID']
+  created_at          timestamp    [default: `now()`]
+
+  indexes {
+    session_id
+    category
+    severity
+    judgment
+  }
+}
+
+// ──────────────────────────────────────────
+// 기능 B — 직원 AI 사용 모니터링
+// ──────────────────────────────────────────
+
+Table employees {
+  id          uuid         [pk, default: `gen_random_uuid()`]
+  employee_id varchar(20)  [not null, unique, note: '사번 (E-1001 등)']
+  name        varchar(50)  [not null]
+  department  varchar(50)
+  role        varchar(30)  [note: 'developer / manager / analyst 등']
+  status      varchar(20)  [not null, default: 'active', note: 'active / leave']
+  created_at  timestamp    [default: `now()`]
+
+  indexes {
+    department
+    status
+  }
+}
+
+Table usage_logs {
+  id             serial      [pk, increment]
+  employee_id    uuid        [ref: > employees.id, not null]
+  prompt_text    text        [not null, note: '직원이 AI에 보낸 입력']
+  response_text  text        [note: 'AI 응답 (차단 시 null 가능)']
+  is_blocked     boolean     [not null, default: false]
+  violation_type varchar(30) [note: 'P1_leak / P2_misuse / P3_ratelimit / null']
+  policy_id      integer     [ref: > policy_rules.id, note: '트리거된 정책']
+  created_at     timestamp   [default: `now()`]
+
+  indexes {
+    employee_id
+    created_at
+    violation_type
+  }
+}
+
+Table violations {
+  id             serial      [pk, increment]
+  employee_id    uuid        [ref: > employees.id, not null]
+  usage_log_id   integer     [ref: > usage_logs.id, note: '연관 사용 로그']
+  violation_type varchar(30) [not null, note: 'P1_leak / P2_misuse / P3_ratelimit']
+  severity       varchar(10) [not null, note: 'critical / high / medium / low']
+  description    text
+  sanction       varchar(20) [note: 'blocked / warned / masked / logged']
+  resolved       boolean     [not null, default: false]
+  created_at     timestamp   [default: `now()`]
+
+  indexes {
+    employee_id
+    violation_type
+    severity
+    resolved
+  }
+}
+
+Table policy_rules {
+  id          serial       [pk, increment]
+  rule_name   varchar(100) [not null, unique]
+  rule_type   varchar(20)  [not null, note: 'regex / keyword / ratelimit']
+  pattern     text         [not null, note: '정규식, 키워드 목록, JSON(ratelimit)']
+  severity    varchar(10)  [not null]
+  action      varchar(10)  [not null, note: 'block / warn / log']
+  is_active   boolean      [not null, default: true]
+  created_at  timestamp    [default: `now()`]
+}

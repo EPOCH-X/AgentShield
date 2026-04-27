@@ -1,7 +1,12 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import DashboardLayout from "../../components/DashboardLayout";
 import Link from "next/link";
+import { FrrGauge } from "../../components/FrrGauge";
+import { MitreTable } from "../../components/MitreTable";
+import { apiFetch } from "../../lib/api";
+import { MOCK_FRR_DATA, MOCK_MITRE_MAPPING } from "../../lib/mockClientData";
 
 const OWASP = [
   {
@@ -103,7 +108,61 @@ const STACK = [
   { layer: "인증", tech: "JWT", role: "관리자 / 감사자 / 직원 역할 분리" },
 ];
 
+interface FrrData {
+  total_legitimate_requests: number;
+  false_refusals: number;
+  frr_percentage: number;
+}
+
+interface MitreRow {
+  category: string;
+  failure_mode: string | null;
+  primary_technique_id: string;
+  primary_technique_name: string;
+  tactic: string;
+  url: string;
+  secondary: { technique_id: string; name: string }[];
+}
+
 export default function OverviewPage() {
+  const [frrData, setFrrData] = useState<FrrData | null>(null);
+  const [mitreRows, setMitreRows] = useState<MitreRow[]>([]);
+
+  useEffect(() => {
+    // 최근 스캔 세션의 FRR 데이터 로드
+    try {
+      const stored = localStorage.getItem("recent_scans");
+      if (stored) {
+        const scans = JSON.parse(stored);
+        const latestSessionId = scans[0]?.session_id;
+        if (latestSessionId) {
+          apiFetch(`/api/v1/scan/${latestSessionId}/frr`)
+            .then((r) => r.json())
+            .then((d) => {
+              if (d && typeof d === "object" && "session_id" in d) {
+                setFrrData(d);
+              } else {
+                setFrrData(MOCK_FRR_DATA);
+              }
+            })
+            .catch(() => setFrrData(MOCK_FRR_DATA));
+        } else {
+          setFrrData(MOCK_FRR_DATA);
+        }
+      } else {
+        setFrrData(MOCK_FRR_DATA);
+      }
+    } catch {
+      setFrrData(MOCK_FRR_DATA);
+    }
+
+    // MITRE 매핑 로드 (공개 엔드포인트, 실패 시 목업 폴백)
+    fetch("/api/v1/scan/mitre-mapping")
+      .then((r) => r.json())
+      .then((d) => setMitreRows(d.mapping?.length ? d.mapping : MOCK_MITRE_MAPPING))
+      .catch(() => setMitreRows(MOCK_MITRE_MAPPING));
+  }, []);
+
   return (
     <DashboardLayout>
       <div className="p-10 max-w-[1400px] mx-auto w-full space-y-14">
@@ -292,6 +351,38 @@ export default function OverviewPage() {
             </table>
           </div>
         </div>
+
+        {/* ── FRR 게이지 ── */}
+        {frrData && (
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-widest mb-2">
+                <span className="material-symbols-outlined text-xs">speed</span>
+                FALSE REFUSAL RATE
+              </div>
+              <h2 className="text-2xl font-extrabold font-headline text-white">오탐률 (FRR)</h2>
+              <p className="text-sm text-on-surface-variant mt-1">정상 요청을 방어 시스템이 잘못 차단하는 비율</p>
+            </div>
+            <FrrGauge data={frrData} />
+          </div>
+        )}
+
+        {/* ── MITRE ATT&CK 매핑 ── */}
+        {mitreRows.length > 0 && (
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center gap-2 text-primary font-bold text-xs uppercase tracking-widest mb-2">
+                <span className="material-symbols-outlined text-xs">policy</span>
+                MITRE ATT&amp;CK
+              </div>
+              <h2 className="text-2xl font-extrabold font-headline text-white">MITRE ATT&amp;CK 매핑</h2>
+              <p className="text-sm text-on-surface-variant mt-1">OWASP LLM 카테고리별 MITRE ATT&amp;CK 기법 매핑</p>
+            </div>
+            <div className="glass-panel rounded-2xl p-6">
+              <MitreTable rows={mitreRows} />
+            </div>
+          </div>
+        )}
 
         {/* ── 기술 스택 ── */}
         <div className="space-y-6">
