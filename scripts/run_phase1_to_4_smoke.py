@@ -39,9 +39,17 @@ def _trace(enabled: bool, msg: str) -> None:
         print(f"[TRACE] [{_log_ts()}] {msg}", flush=True)
 
 
+# ── Phase1 어댑터 패치 ────────────────────────────────────────────────────────
+
 @contextmanager
 def _patched_phase1_target_for_ollama(verbose: bool = True):
-    """Phase1 기본 target 호출을 Ollama /api/chat 형식으로 맞춘다."""
+    """
+    Phase1 기본 target 호출을 Ollama /api/chat 형식으로 맞춘다.
+
+    [수정] resp_len=0 시 reason=empty_response 출력
+    [수정] raise_for_status() 실패 시 reason=http_{status} 출력 후 재raise
+           → phase1_scanner의 재시도 로직이 이어서 처리
+    """
     from backend.config import settings
     from backend.core import phase1_scanner
 
@@ -56,27 +64,91 @@ def _patched_phase1_target_for_ollama(verbose: bool = True):
         llm=None,
         on_result=None,
     ):
+        # ── 결과 실시간 출력 카운터 ────────────────────────────────────────
+        result_counter = {"n": 0}
+
+        def _print_result(result: dict) -> None:
+            result_counter["n"] += 1
+            idx        = result_counter["n"]
+            category   = result.get("category", "?")
+            sub        = result.get("subcategory", "?")
+            judgment   = result.get("judgment", "?")
+
+            if judgment == "vulnerable":
+                print(f"  [{idx}] {category}/{sub} → 🔴 vulnerable", flush=True)
+            elif judgment == "safe":
+                print(f"  [{idx}] {category}/{sub} → 🟢 safe", flush=True)
+            elif judgment == "ambiguous":
+                print(f"  [{idx}] {category}/{sub} → 🟡 ambiguous", flush=True)
+            else:
+                # ── 에러: error_source / failure_mode 상세 출력 ──────────
+                source  = result.get("error_source", "Unknown")
+                reason  = result.get("failure_mode", result.get("detail", "unknown"))
+                print(f"  [{idx}] {category}/{sub} → ❌ error [{source}] {reason}", flush=True)
+
+        # ── 커스텀 send_fn: Ollama /api/chat 형식으로 변환 + 502/503 재시도 ──
+        _RETRYABLE_HTTP = {502, 503}
+        _SEND_MAX_RETRIES = 3
+
         async def ollama_send_fn(client, prompt_text: str) -> str:
-            _trace(verbose, f"phase1 target request start (prompt_len={len(prompt_text)})")
-            resp = await client.post(
-                target_url,
-                json={
-                    "model": settings.OLLAMA_MODEL,
-                    "messages": [{"role": "user", "content": prompt_text}],
-                    "stream": False,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            # testbed /chat 응답({content: ...})와 Ollama 응답({message: {content: ...}}) 모두 허용
-            content = str(data.get("message", {}).get("content", "")).strip()
-            if not content:
-                content = str(data.get("content", "")).strip()
-            _trace(verbose, f"phase1 target request done (resp_len={len(content)})")
-            return content
+            # http post ->/<- 로그는 _patched_phase2_target_for_ollama의
+            # OllamaCompatibleAsyncClient가 전담 → 여기서 중복 출력 방지
+            for attempt in range(1, _SEND_MAX_RETRIES + 1):
+                _trace(verbose, f"phase1 target request start (prompt_len={len(prompt_text)}, attempt={attempt}/{_SEND_MAX_RETRIES})")
+
+                try:
+                    resp = await client.post(
+                        target_url,
+                        json={
+                            "messages": [{"role": "user", "content": prompt_text}],
+                        },
+                    )
+                except Exception as conn_err:
+                    _trace(verbose, f"phase1 target connection error: {conn_err} (attempt {attempt}/{_SEND_MAX_RETRIES})")
+                    if attempt < _SEND_MAX_RETRIES:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    raise
+
+                # 502/503: 지수 백오프 후 재시도
+                if resp.status_code in _RETRYABLE_HTTP:
+                    try:
+                        err_type = resp.json().get("error", f"http_{resp.status_code}")
+                    except Exception:
+                        err_type = f"http_{resp.status_code}"
+                    _trace(verbose, f"phase1 target request done (resp_len=0, reason={err_type})")
+                    if attempt < _SEND_MAX_RETRIES:
+                        await asyncio.sleep(2 ** attempt)
+                        continue
+                    resp.raise_for_status()
+
+                try:
+                    resp.raise_for_status()
+                except Exception:
+                    _trace(verbose, f"phase1 target request done (resp_len=0, reason=http_{resp.status_code})")
+                    raise
+
+                data = resp.json()
+                content = str(data.get("message", {}).get("content", "")).strip()
+                if not content:
+                    content = str(data.get("content", "")).strip()
+                if not content:
+                    content = str(data.get("response", "")).strip()
+
+                if not content:
+                    _trace(verbose, f"phase1 target request done (resp_len=0, reason=empty_response, raw={repr(str(data)[:100])})")
+                else:
+                    _trace(verbose, f"phase1 target request done (resp_len={len(content)}, preview={repr(content[:50])})")
+
+                return content
+
+            return ""
 
         effective_send_fn = send_fn or ollama_send_fn
+        effective_on_result = on_result or _print_result
+
         _trace(verbose, f"phase1 start (session_id={session_id}, category={category or 'ALL'})")
+
         result = await original_run_phase1(
             session_id=session_id,
             target_url=target_url,
@@ -84,8 +156,9 @@ def _patched_phase1_target_for_ollama(verbose: bool = True):
             target_config=target_config,
             send_fn=effective_send_fn,
             llm=llm,
-            on_result=on_result,
+            on_result=effective_on_result,
         )
+
         _trace(
             verbose,
             "phase1 done "
@@ -101,6 +174,8 @@ def _patched_phase1_target_for_ollama(verbose: bool = True):
     finally:
         phase1_scanner.run_phase1 = original_run_phase1
 
+
+# ── Phase2 어댑터 패치 ────────────────────────────────────────────────────────
 
 @contextmanager
 def _patched_phase2_target_for_ollama(target_url: str, verbose: bool = True):
@@ -119,23 +194,72 @@ def _patched_phase2_target_for_ollama(target_url: str, verbose: bool = True):
         async def post(self, url, *args, **kwargs):
             payload = kwargs.get("json")
             normalized_url = str(url).rstrip("/")
-            # Phase2의 "타겟 모델 호출"만 변환하고, /api/generate(Agent LLM 호출)는 건드리지 않는다.
+            was_converted = False
+            payload_mode = "passthrough"
+            original_prompt_len = None
+            transformed_prompt_len = None
+            
+            # Phase2의 "타겟 모델 호출"만 변환하고,
+            # /api/generate(Agent LLM 호출)는 건드리지 않는다.
             if (
                 normalized_url == normalized_target_url
                 and isinstance(payload, dict)
                 and "prompt" in payload
                 and "messages" not in payload
             ):
-                _trace(verbose, f"phase2 target payload convert (prompt_len={len(str(payload.get('prompt', '')))})")
+                prompt_text = str(payload.get("prompt", ""))
+                original_prompt_len = len(prompt_text)
+                transformed_prompt_len = len(prompt_text)
+                _trace(
+                    verbose,
+                    f"[CONVERT] {normalized_target_url}: prompt→messages "
+                    f"(prompt_len={len(prompt_text)})"
+                )
                 kwargs["json"] = {
-                    "model": settings.OLLAMA_MODEL,
-                    "messages": [{"role": "user", "content": str(payload.get("prompt", ""))}],
-                    "stream": False,
+                    "messages": [{"role": "user", "content": prompt_text}],
                 }
-            _trace(verbose, f"http post -> {url}")
-            response = await super().post(url, *args, **kwargs)
-            _trace(verbose, f"http post <- {url} status={response.status_code}")
-            return response
+                was_converted = True
+                payload_mode = "prompt_to_messages"
+            else:
+                # 변환 안 된 이유 로깅
+                if normalized_url == normalized_target_url:
+                    has_prompt = isinstance(payload, dict) and "prompt" in payload
+                    has_messages = isinstance(payload, dict) and "messages" in payload
+                    if has_messages:
+                        payload_mode = "already_messages"
+                        try:
+                            msg_list = payload.get("messages") or []
+                            if isinstance(msg_list, list) and msg_list:
+                                last_msg = msg_list[-1] if isinstance(msg_list[-1], dict) else {}
+                                transformed_prompt_len = len(str(last_msg.get("content", "")))
+                        except Exception:
+                            transformed_prompt_len = None
+                    _trace(
+                        verbose,
+                        f"[NO-CONVERT] {normalized_target_url}: prompt={has_prompt}, messages={has_messages}, mode={payload_mode}"
+                    )
+            
+            _trace(verbose, f"→ POST {url}")
+            try:
+                response = await super().post(url, *args, **kwargs)
+                _trace(
+                    verbose,
+                    f"← POST {url} status={response.status_code} "
+                    f"converted={was_converted} payload_mode={payload_mode} "
+                    f"original_prompt_len={original_prompt_len} transformed_prompt_len={transformed_prompt_len} "
+                    f"content_len={len(response.content)}"
+                )
+                # HTTP 에러 코드 명시적 로깅
+                if response.status_code >= 400:
+                    try:
+                        error_text = response.text[:500]
+                    except:
+                        error_text = f"<unparseable: {response.status_code}>"
+                    _trace(verbose, f"[ERROR] {response.status_code}: {error_text}")
+                return response
+            except Exception as e:
+                _trace(verbose, f"[EXCEPTION] POST {url}: {type(e).__name__}: {str(e)[:200]}")
+                raise
 
     phase2_red_agent.httpx.AsyncClient = OllamaCompatibleAsyncClient
     try:
@@ -143,6 +267,8 @@ def _patched_phase2_target_for_ollama(target_url: str, verbose: bool = True):
     finally:
         phase2_red_agent.httpx.AsyncClient = original_async_client
 
+
+# ── Phase1 로더 패치 ──────────────────────────────────────────────────────────
 
 @contextmanager
 def _patched_phase1_loader(
@@ -157,14 +283,17 @@ def _patched_phase1_loader(
 
     original_loader = phase1_scanner._load_attacks
 
-    async def wrapped_loader(requested_category: str | None = None) -> list[dict]:
+    async def wrapped_loader(
+        requested_category: str | None = None, max_attacks_inner: int | None = None
+    ) -> list[dict]:
         selected_category = category if category is not None else requested_category
-        attacks = await original_loader(selected_category)
+        attacks = await original_loader(selected_category, max_attacks_inner)
         if shuffle:
             rng = random.Random(seed)
             rng.shuffle(attacks)
-        if max_attacks is not None and max_attacks >= 0:
-            attacks = attacks[:max_attacks]
+        effective_max = max_attacks if max_attacks is not None else max_attacks_inner
+        if effective_max is not None and effective_max >= 0:
+            attacks = attacks[:effective_max]
         return attacks
 
     phase1_scanner._load_attacks = wrapped_loader
@@ -173,6 +302,8 @@ def _patched_phase1_loader(
     finally:
         phase1_scanner._load_attacks = original_loader
 
+
+# ── Phase2 라운드 패치 ────────────────────────────────────────────────────────
 
 @contextmanager
 def _patched_phase2_rounds(rounds: int | None):
@@ -191,6 +322,8 @@ def _patched_phase2_rounds(rounds: int | None):
         settings.PHASE2_MAX_ROUNDS = original_rounds
 
 
+# ── LLM 타임아웃 패치 ─────────────────────────────────────────────────────────
+
 @contextmanager
 def _patched_llm_runtime(timeout_sec: float | None, verbose: bool = True):
     """AgentShieldLLM.generate 호출에 trace + timeout을 강제한다."""
@@ -207,7 +340,9 @@ def _patched_llm_runtime(timeout_sec: float | None, verbose: bool = True):
         prompt = args[0] if args else kwargs.get("prompt", "")
         _trace(verbose, f"llm.generate start role={role} prompt_len={len(str(prompt))}")
         try:
-            result = await asyncio.wait_for(original_generate(self, *args, **kwargs), timeout=timeout_sec)
+            result = await asyncio.wait_for(
+                original_generate(self, *args, **kwargs), timeout=timeout_sec
+            )
             _trace(verbose, f"llm.generate done role={role} resp_len={len(str(result))}")
             return result
         except asyncio.TimeoutError:
@@ -220,6 +355,8 @@ def _patched_llm_runtime(timeout_sec: float | None, verbose: bool = True):
     finally:
         AgentShieldLLM.generate = original_generate
 
+
+# ── 결과 요약 / 저장 ──────────────────────────────────────────────────────────
 
 def _short_summary(final_state: dict) -> dict:
     p1 = final_state.get("phase1_result", {}) or {}
@@ -288,6 +425,11 @@ def _response_body_for_review(raw: str) -> str:
     return s
 
 
+def _full_response_for_review(raw: str) -> str:
+    """results/review 로그에는 원문 보존을 우선한다."""
+    return (raw or "").strip()
+
+
 def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
     """요청 포맷: 공격성공 프롬프트/응답값/방어코드/방어 후 응답값을 한눈에 저장."""
     phase3 = final_state.get("phase3_result", {}) or {}
@@ -307,7 +449,11 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
         except Exception:
             continue
 
-    phase4_map = {str(d.get("defense_id") or ""): d for d in phase4_details if isinstance(d, dict)}
+    phase4_map = {
+        str(d.get("defense_id") or ""): d
+        for d in phase4_details
+        if isinstance(d, dict)
+    }
 
     lines: list[str] = []
     lines.append(f"# phase1to4 review log ({ts})")
@@ -347,11 +493,34 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
 
             lines.append(f"## item {idx} (defense_id={defense_id})")
             lines.append("")
+            lines.append(f"- category: {row.get('category') or ''}")
+            lines.append(f"- subcategory: {row.get('subcategory') or ''}")
+            lines.append(f"- phase: {row.get('phase')}")
+            lines.append(f"- round: {row.get('round')}")
+            lines.append(f"- judgment: {row.get('judgment')}")
+            lines.append(f"- judgment_confidence: {row.get('judgment_confidence')}")
+            lines.append(f"- failure_mode: {row.get('failure_mode') or ''}")
+            lines.append(f"- mitre_technique_id: {row.get('mitre_technique_id') or ''}")
+            lines.append("")
+            original_attack_prompt = str(row.get("original_attack_prompt") or "").strip()
+            round_input_prompt = str(row.get("round_input_prompt") or "").strip()
+            transformed_attack_prompt = str(row.get("attack_prompt") or "").strip()
+            if original_attack_prompt:
+                lines.append("### 0) 원본 공격 프롬프트")
+                lines.append(original_attack_prompt)
+                lines.append("")
+            if round_input_prompt and round_input_prompt != original_attack_prompt:
+                lines.append("### 0.5) 변형 직전 입력 프롬프트")
+                lines.append(round_input_prompt)
+                lines.append("")
             lines.append("### 1) 공격성공 프롬프트")
-            lines.append(str(row.get("attack_prompt") or ""))
+            lines.append(transformed_attack_prompt)
             lines.append("")
             lines.append("### 2) 응답 값")
-            lines.append(_response_body_for_review(str(row.get("target_response") or "")))
+            lines.append(_full_response_for_review(str(row.get("target_response") or "")))
+            lines.append("")
+            lines.append("### 2.5) 판정 상세")
+            lines.append(str(row.get("detail") or ""))
             lines.append("")
             lines.append("### 3) 방어코드")
             if defense_payload:
@@ -373,7 +542,7 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
             if after_resp in (None, ""):
                 lines.append("(방어 후 응답 없음)")
             else:
-                lines.append(_response_body_for_review(str(after_resp)))
+                lines.append(_full_response_for_review(str(after_resp)))
             lines.append("")
             lines.append("### 5) Benign 테스트 로그")
             benign_checks = phase4_row.get("benign_checks") or []
@@ -396,6 +565,8 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return out_path
 
+
+# ── 세션 사전 생성 ────────────────────────────────────────────────────────────
 
 async def _ensure_test_session(session_id: str, target_url: str) -> None:
     """run_scan 단독 실행 시 test_results FK 에러를 막기 위해 세션 row를 선생성."""
@@ -426,7 +597,20 @@ async def _ensure_test_session(session_id: str, target_url: str) -> None:
         print(f"[WARN] [{_log_ts()}] test_session pre-create failed: {e}")
 
 
+# ── 메인 ──────────────────────────────────────────────────────────────────────
+
 async def _main(args: argparse.Namespace) -> int:
+    # ── Ollama URL 런타임 재정의 (--ollama-url 또는 자동감지) ─────────────────
+    if args.ollama_url:
+        import os as _os
+        _os.environ["OLLAMA_BASE_URL"] = args.ollama_url
+        from backend.config import settings as _s
+        _s.OLLAMA_BASE_URL = args.ollama_url
+        print(f"[INFO] [{_log_ts()}] ollama_url={args.ollama_url} (명시적 지정)")
+    else:
+        from backend.config import settings as _s
+        print(f"[INFO] [{_log_ts()}] ollama_url={_s.OLLAMA_BASE_URL} (자동감지)")
+
     session_id = args.session_id or str(uuid.uuid4())
     print(f"[INFO] [{_log_ts()}] session_id={session_id}")
     print(f"[INFO] [{_log_ts()}] target_url={args.target_url}")
@@ -440,6 +624,7 @@ async def _main(args: argparse.Namespace) -> int:
     else:
         print(f"[INFO] [{_log_ts()}] shuffle=OFF")
     print(f"[INFO] [{_log_ts()}] Phase1 -> 2 -> 3 -> 4 실행 시작")
+
     await _ensure_test_session(session_id, args.target_url)
 
     with _patched_phase1_loader(
@@ -452,7 +637,10 @@ async def _main(args: argparse.Namespace) -> int:
             with _patched_phase2_target_for_ollama(args.target_url, verbose=args.verbose_trace):
                 with _patched_phase2_rounds(args.phase2_rounds):
                     with _patched_llm_runtime(args.llm_timeout, verbose=args.verbose_trace):
-                        final_state = await run_scan(session_id=session_id, target_url=args.target_url)
+                        final_state = await run_scan(
+                            session_id=session_id,
+                            target_url=args.target_url,
+                        )
 
     summary = _short_summary(final_state)
     print(f"\n[INFO] [{_log_ts()}] === SUMMARY ===")
@@ -463,7 +651,9 @@ async def _main(args: argparse.Namespace) -> int:
         out_dir.mkdir(parents=True, exist_ok=True)
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         out_path = out_dir / f"phase1to4_smoke_{ts}.json"
-        out_path.write_text(json.dumps(final_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        out_path.write_text(
+            json.dumps(final_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+        )
         print(f"\n[INFO] [{_log_ts()}] full state saved: {out_path}")
         review_path = _write_review_log(final_state, out_dir, ts)
         print(f"[INFO] [{_log_ts()}] review log saved: {review_path}")
@@ -477,6 +667,11 @@ def parse_args() -> argparse.Namespace:
         "--target-url",
         default="http://localhost:8010/chat",
         help="테스트 대상 챗봇 endpoint (기본: testbed /chat)",
+    )
+    parser.add_argument(
+        "--ollama-url",
+        default=None,
+        help="Ollama API base URL (예: http://localhost:11434). 미지정 시 OLLAMA_BASE_URL 환경변수 또는 자동감지",
     )
     parser.add_argument(
         "--session-id",
@@ -520,7 +715,7 @@ def parse_args() -> argparse.Namespace:
         "--llm-timeout",
         type=float,
         default=60.0,
-        help="LLM 호출 타임아웃 초 (기본 60초, None 불가)",
+        help="LLM 호출 타임아웃 초 (기본 60초)",
     )
     parser.add_argument(
         "--verbose-trace",

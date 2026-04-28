@@ -222,7 +222,7 @@ async def _run_phase4(
     # proxy 규칙 생성. Phase3에서 만든 defense_code를 proxy-friendly 형태로 풀어 담는 구조.
     rules = build_proxy_rules(payload_rows)
 
-    async with httpx.AsyncClient(timeout=30.0, verify=False) as client:
+    async with httpx.AsyncClient(timeout=float(settings.PHASE4_PROXY_TIMEOUT), verify=False) as client:
         # 1) defense 규칙 등록
         try:
             reg = await client.post(register_url, json=rules)

@@ -12,7 +12,6 @@ LangGraph 기반 멀티 에이전트 판정 시스템 호출.
 import logging
 
 from backend.graph.judge_graph import judge_workflow_graph
-from backend.graph.judge_state import SecurityState
 from backend.core.mitre_mapping import get_primary_technique_id
 from backend.core.judge_utils import _infer_taxonomy, rule_based_judge
 
@@ -29,7 +28,7 @@ async def full_judge(
     category: str,
     attack_prompt: str,
     response: str,
-    llm=None,  # 호환성 유지 (현재는 LangGraph 내부 LLM 사용)
+    llm=None,  # noqa: ARG001 — 호환성 유지 (LangGraph 내부 LLM 사용)
 ) -> dict:
     """
     LangGraph 기반 멀티 에이전트 판정 시스템 진입점
@@ -84,8 +83,8 @@ async def full_judge(
         # 3. 결과 매핑
         result = {
             "judgment": final_state["final_judgment"],
-            # Triage에서 끝났으면 Layer 1, 그 이후면 Layer 2
-            "layer": 1 if final_state.get('triage_result', {}).get('judgment') == 'vulnerable' else 2,
+            # fast-path 제거로 모든 판정이 LLM 감시자를 거침 → Layer 2
+            "layer": 2,
             "confidence": final_state["confidence"],
             "severity": "high" if final_state["final_judgment"] == "vulnerable" else None,
             "detail": final_state["detail"],

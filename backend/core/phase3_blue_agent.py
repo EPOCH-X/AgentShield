@@ -270,10 +270,18 @@ async def run_phase3(
                 {
                     "defense_id": defense_id,
                     "category": category,
+                    "subcategory": vuln.get("subcategory"),
+                    "phase": vuln.get("phase"),
+                    "round": vuln.get("round"),
+                    "original_attack_prompt": str(vuln.get("original_attack_prompt") or ""),
+                    "round_input_prompt": str(vuln.get("round_input_prompt") or ""),
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
                     "defended_response": bundle.defended_response,
                     "severity": vuln.get("severity"),
+                    "judgment": vuln.get("judgment"),
+                    "judgment_confidence": vuln.get("judgment_confidence"),
+                    "detail": vuln.get("detail"),
                     "failure_mode": failure_mode,
                     "mitre_technique_id": mitre_technique_id,
                 }

@@ -396,7 +396,6 @@ def _is_abliterated_model(model_name: str) -> bool:
     lower = model_name.lower()
     return any(kw in lower for kw in (
         "abliterate", "uncensor", "dolphin", "hermes",
-        "ara-abliterated", "gemma4-ara",
     ))
 
 
@@ -1547,7 +1546,7 @@ class AdaptiveRedAgent:
     """상태를 유지하며 이전 공격 결과를 학습해 다음 라운드 전략을 동적으로 조정한다.
 
     사용 예:
-        agent = AdaptiveRedAgent("gemma4-ara-abliterated")
+        agent = AdaptiveRedAgent(os.getenv("OLLAMA_RED_MODEL", os.getenv("OLLAMA_MODEL", "qwen3.5:4b")))
         for i in range(5):
             prompt = agent.generate_optimized_prompt("LLM01", i + 1, prev_response)
             response = call_llm(prompt)

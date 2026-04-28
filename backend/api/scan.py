@@ -97,10 +97,16 @@ def _phase1_row_key_from_model(row: TestResult) -> tuple[Any, ...]:
 
 
 def _build_phase1_row(*, session_id: Any, result: dict[str, Any]) -> TestResult:
+    raw_attack_pattern_id = result.get("attack_pattern_id")
+    try:
+        attack_pattern_id = int(raw_attack_pattern_id) if raw_attack_pattern_id is not None else None
+    except (TypeError, ValueError):
+        attack_pattern_id = None
+
     return TestResult(
         session_id=session_id,
         phase=1,
-        attack_pattern_id=result.get("attack_pattern_id"),
+        attack_pattern_id=attack_pattern_id,
         seed_id=result.get("seed_id"),
         attack_prompt=result.get("attack_prompt"),
         target_response=result.get("target_response"),
