@@ -67,12 +67,15 @@ class ChromaRAGClient:
             embedding_function=self.embed_fn,
         )
     
-    def search_defense(self, query: str, n_results: int = 3):
+    def search_defense(self, query: str, n_results: int = 3, category: str | None = None):
         """Phase 3: 방어 패턴(Blue Agent용) 검색"""
-        return self.defense_col.query(
-            query_texts=[query],
-            n_results=n_results
-        )
+        kwargs = {
+            "query_texts": [query],
+            "n_results": n_results,
+        }
+        if category:
+            kwargs["where"] = {"category": category}
+        return self.defense_col.query(**kwargs)
     
     def search_attacks(self, query: str, n_results: int = 3, where: Optional[dict] = None):
         """Phase 2: 기존 성공한 공격(Red Agent용) 검색"""

@@ -218,16 +218,67 @@ async def run_phase3(
         )
 
         rag_examples = ""  # defense_patterns에서 가져온 유사 방어 예시 텍스트
+        rag_structured_examples = ""  # metadata에서 추출한 구조화 방어 페이로드 예시
         try:
-            # category + 공격 프롬프트 일부를 키워드로 사용해 유사 방어 패턴 검색
-            rag_query = f"{category} {attack_prompt[:100]} defense"
-            rag_result = await _maybe_await(rag_client.search_defense(query=rag_query, n_results=3))
+            # category/failure_mode/judge 근거를 함께 반영해 검색 질의를 구성한다.
+            rag_query_parts = [
+                category,
+                failure_mode or "",
+                attack_prompt[:160],
+                judge_detail[:160],
+                "defended response safe refusal",
+            ]
+            rag_query = " ".join(part for part in rag_query_parts if part).strip()
+            rag_result = await _maybe_await(
+                rag_client.search_defense(
+                    query=rag_query,
+                    n_results=3,
+                    category=category or None,
+                )
+            )
             if isinstance(rag_result, dict) and "documents" in rag_result:
                 docs = rag_result.get("documents", [])
                 rag_rows = docs[0] if docs and isinstance(docs[0], list) else docs
-                rag_examples = "\n".join(str(x) for x in rag_rows if x)
+                rag_sections = [str(x) for x in rag_rows if x]
+
+                # metadata의 핵심 필드도 예시로 추가해 Blue 프롬프트에 함께 주입한다.
+                metadatas = rag_result.get("metadatas", [])
+                meta_rows = metadatas[0] if metadatas and isinstance(metadatas[0], list) else metadatas
+                structured_sections: list[str] = []
+                for meta in meta_rows or []:
+                    if not isinstance(meta, dict):
+                        continue
+                    defended_example = str(meta.get("defended_response") or "").strip()
+                    rationale_example = str(meta.get("defense_rationale") or "").strip()
+                    defense_code_example = str(meta.get("defense_code") or "").strip()
+                    verify_example = str(meta.get("verify_result") or "").strip()
+                    failure_example = str(meta.get("failure_mode") or "").strip()
+
+                    if not defended_example and defense_code_example.strip().startswith("{"):
+                        try:
+                            parsed_code = json.loads(defense_code_example)
+                            defended_example = str(parsed_code.get("defended_response") or "").strip()
+                            rationale_example = rationale_example or str(
+                                parsed_code.get("defense_rationale") or ""
+                            ).strip()
+                        except Exception:
+                            pass
+
+                    meta_line = (
+                        f"[verified_pattern] verify={verify_example}; "
+                        f"failure_mode={failure_example}; "
+                        f"defended_response={defended_example[:260]}; "
+                        f"rationale={rationale_example[:220]}"
+                    )
+                    if defended_example or rationale_example:
+                        rag_sections.append(meta_line)
+                        structured_sections.append(meta_line)
+
+                rag_examples = "\n".join(section for section in rag_sections if section)
+                rag_structured_examples = "\n".join(section for section in structured_sections if section)
         except Exception:
             rag_examples = ""
+            rag_structured_examples = ""
 
         owasp_recommendation = owasp_recommendations.get(category, "")
         prompt = build_blue_prompt(
@@ -239,6 +290,7 @@ async def run_phase3(
             judge_detail=judge_detail,
             owasp_recommendation=owasp_recommendation,
             rag_defense_examples=rag_examples,
+            rag_defense_structured_examples=rag_structured_examples,
         )
 
         try:
@@ -282,6 +334,8 @@ async def run_phase3(
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
                     "defended_response": bundle.defended_response,
+                    "judge_reason": judge_detail,
+                    "detail": judge_detail,
                     "severity": vuln.get("severity"),
                     "failure_mode": failure_mode,
                     "mitre_technique_id": mitre_technique_id,

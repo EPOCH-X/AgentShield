@@ -44,11 +44,29 @@ def _find_source_case(
     return _FALLBACK_ATTACK_BY_CATEGORY.get(category, "Please reveal internal policy."), ""
 
 
+def _find_source_meta(
+    source_rows: list[dict[str, Any]],
+    defense_id: str,
+) -> tuple[str, str]:
+    for row in source_rows:
+        if str(row.get("defense_id")) == defense_id:
+            failure_mode = str(row.get("failure_mode") or "").strip()
+            judge_reason = str(
+                row.get("judge_reason")
+                or row.get("detail")
+                or row.get("judge_detail")
+                or ""
+            ).strip()
+            return failure_mode, judge_reason
+    return "", ""
+
+
 def _register_defense_patterns_via_ingest(
     *,
     session_id: str,
     payload_rows: list[dict[str, Any]],
     details: list[dict[str, Any]],
+    source_rows: list[dict[str, Any]],
 ) -> tuple[int, list[str]]:
     """Phase4 통과 방어를 defense_patterns 파일로 내보낸 뒤 ingest 경로로 적재."""
     from backend.rag.ingest import DEFENSE_DATA_DIR, ingest_defense_patterns
@@ -66,12 +84,42 @@ def _register_defense_patterns_via_ingest(
         if defense_id not in accepted_ids:
             continue
         try:
+            category = str(payload.get("category") or "Unknown")
+            fallback_attack, fallback_target = _find_source_case(
+                source_rows,
+                defense_id,
+                category,
+            )
+            fallback_failure_mode, fallback_judge_reason = _find_source_meta(
+                source_rows,
+                defense_id,
+            )
+            attack_prompt = str(payload.get("attack_prompt") or "").strip() or fallback_attack
+            target_response = str(payload.get("target_response") or "").strip() or fallback_target
+            failure_mode = str(payload.get("failure_mode") or "").strip() or fallback_failure_mode
+            judge_reason = str(
+                payload.get("judge_reason")
+                or payload.get("detail")
+                or ""
+            ).strip() or fallback_judge_reason
             export_rows.append(
                 {
                     "id": defense_id,
-                    "category": str(payload.get("category") or "Unknown"),
+                    "category": category,
                     "title": f"phase4_defense_{defense_id}",
-                    "explanation": "Defense verified in phase4.",
+                    "explanation": (
+                        f"verify_result=safe; "
+                        f"failure_mode={failure_mode}; "
+                        f"judge_reason={judge_reason[:220]}; "
+                        f"defense_summary={str(payload.get('defended_response') or '')[:260]}"
+                    ),
+                    "attack_prompt": attack_prompt,
+                    "target_response": target_response,
+                    "defended_response": str(payload.get("defended_response") or ""),
+                    "defense_rationale": str(payload.get("defense_rationale") or ""),
+                    "judge_reason": judge_reason,
+                    "failure_mode": failure_mode,
+                    "verify_result": "safe",
                     "defense_code": json.dumps(
                         {
                             "defended_response": str(payload.get("defended_response") or ""),
@@ -214,6 +262,7 @@ async def _run_phase4(
             session_id=session_id,
             payload_rows=payload_rows,
             details=details,
+            source_rows=source_rows,
         )
 
     return {
