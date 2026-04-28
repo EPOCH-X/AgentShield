@@ -17,6 +17,8 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from backend.config import settings
+
 root = str(Path(__file__).resolve().parents[2])
 load_dotenv()
 
@@ -56,6 +58,7 @@ class AgentShieldLLM:
                 "top_k": 64,
                 "num_ctx": 8192,
                 "adapter_path": None,
+                "think": False,
             },
             "red": {
                 "local_model": self.local_base_models["red"],
@@ -65,7 +68,7 @@ class AgentShieldLLM:
                 "top_k": 64,
                 "num_ctx": 8192,
                 "adapter_path": os.path.join(root, "adapters", "lora-red"),
-                "think": False,  # disable thinking — red agent needs direct prompt output
+                "think": False,
             },
             "blue": {
                 "local_model": self.local_base_models["blue"],
@@ -75,6 +78,7 @@ class AgentShieldLLM:
                 "top_k": 64,
                 "num_ctx": 8192,
                 "adapter_path": os.path.join(root, "adapters", "lora-blue"),
+                "think": False,
             },
             "judge": {
                 "local_model": self.local_base_models["judge"],
@@ -84,14 +88,16 @@ class AgentShieldLLM:
                 "top_k": 1,
                 "num_ctx": 16384,
                 "adapter_path": os.path.join(root, "adapters", "lora-judge"),
+                "think": False,
             },
         }
 
+        _default_model = self.ollama_base_models["base"] or os.getenv("OLLAMA_MODEL", "qwen3.5:4b")
         self.ollama_target_models = {
-            "red": os.getenv("OLLAMA_RED_TARGET_MODEL", "agentshield-red"),
-            "judge": os.getenv("OLLAMA_JUDGE_TARGET_MODEL", "agentshield-judge"),
-            "blue": os.getenv("OLLAMA_BLUE_TARGET_MODEL", "agentshield-blue"),
-            "base": os.getenv("OLLAMA_BASE_TARGET_MODEL", self.role_configs["base"]["ollama_model"]),
+            "red":   os.getenv("OLLAMA_RED_TARGET_MODEL",   _default_model),
+            "judge": os.getenv("OLLAMA_JUDGE_TARGET_MODEL", _default_model),
+            "blue":  os.getenv("OLLAMA_BLUE_TARGET_MODEL",  _default_model),
+            "base":  os.getenv("OLLAMA_BASE_TARGET_MODEL",  _default_model),
         }
 
         if not self.use_local_peft:
@@ -164,6 +170,105 @@ class AgentShieldLLM:
             return response.split("</think>")[-1].strip()
         return response.strip()
 
+    @staticmethod
+    def _extract_chat_content(resp_json: Dict[str, Any]) -> str:
+        message = resp_json.get("message")
+        if isinstance(message, dict):
+            content = str(message.get("content") or "").strip()
+            if content:
+                return content
+            thinking = str(message.get("thinking") or "").strip()
+            if thinking:
+                return thinking
+        response = str(resp_json.get("response") or "").strip()
+        thinking = str(resp_json.get("thinking") or "").strip()
+        return response or thinking
+
+    async def _call_ollama_with_retries(
+        self,
+        role: str,
+        prompt: str,
+        max_tokens: int,
+        response_model: Optional[Type[BaseModel]],
+    ) -> str:
+        role_config = self.role_configs.get(role, self.role_configs["base"])
+        options = {
+            "num_predict": max_tokens,
+            "temperature": role_config["temperature"],
+            "top_p": role_config.get("top_p", 0.95),
+            "top_k": role_config.get("top_k", 64),
+            "num_ctx": role_config["num_ctx"],
+        }
+        think_val = role_config.get("think")
+        retries = max(1, int(settings.LLM_REQUEST_RETRIES))
+        backoff_base = max(1.0, float(settings.LLM_RETRY_BACKOFF_BASE))
+        timeout = httpx.Timeout(float(settings.LLM_REQUEST_TIMEOUT))
+        use_chat_api = settings.OLLAMA_GENERATION_API.lower() == "chat"
+
+        last_error = ""
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            for attempt in range(1, retries + 1):
+                api_path = "/api/chat" if use_chat_api else "/api/generate"
+                url = f"{self.ollama_base_url.rstrip('/')}{api_path}"
+                if use_chat_api:
+                    payload: Dict[str, Any] = {
+                        "model": self.active_ollama_model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "stream": False,
+                        "options": options,
+                    }
+                else:
+                    payload = {
+                        "model": self.active_ollama_model,
+                        "prompt": prompt,
+                        "stream": False,
+                        "options": options,
+                    }
+                if think_val is not None:
+                    payload["think"] = think_val
+                if response_model:
+                    payload["format"] = response_model.model_json_schema()
+
+                try:
+                    response = await client.post(url, json=payload)
+                    if response.status_code == 404:
+                        fallback_model = role_config["ollama_model"]
+                        print(f"[Ollama API] '{self.active_ollama_model}' 모델이 설치되지 않았습니다. 해당 역할의 기본 모델({fallback_model})로 폴백합니다.")
+                        self.active_ollama_model = fallback_model
+                        payload["model"] = fallback_model
+                        response = await client.post(url, json=payload)
+
+                    response.raise_for_status()
+                    resp_json = response.json()
+                    raw_text = (
+                        self._extract_chat_content(resp_json)
+                        if use_chat_api
+                        else str(resp_json.get("response", "") or "").strip()
+                    )
+                    if not raw_text and not use_chat_api and resp_json.get("thinking"):
+                        raw_text = str(resp_json["thinking"])
+                    cleaned_text = self.parse_thinking_output(raw_text)
+                    if cleaned_text:
+                        return cleaned_text
+                    last_error = "empty_response"
+                except httpx.ConnectError:
+                    raise
+                except Exception as exc:
+                    last_error = str(exc)
+                    if (
+                        settings.LLM_CHAT_FALLBACK_ON_EOF
+                        and not use_chat_api
+                        and ("EOF" in last_error or "500" in last_error)
+                    ):
+                        use_chat_api = True
+                    if attempt >= retries:
+                        break
+
+                if attempt < retries:
+                    await asyncio.sleep(backoff_base ** attempt)
+
+        raise RuntimeError(last_error or "Ollama returned empty content")
+
     async def generate(
         self,
         prompt: str,
@@ -183,46 +288,20 @@ class AgentShieldLLM:
         }
 
         if not self.use_local_peft:
-            url = f"{self.ollama_base_url}/api/generate"
-            payload = {
-                "model": self.active_ollama_model,
-                "prompt": prompt,
-                "stream": False,
-                "options": options,
-            }
-            # Pass think parameter for thinking-capable models (Ollama 0.6+)
-            think_val = role_config.get("think")
-            if think_val is not None:
-                payload["think"] = think_val
-            if response_model:
-                payload["format"] = response_model.model_json_schema()
-
             try:
-                async with httpx.AsyncClient(timeout=None) as client:
-                    response = await client.post(url, json=payload)
-                    if response.status_code == 404:
-                        fallback_model = role_config["ollama_model"]
-                        print(f"[Ollama API] '{self.active_ollama_model}' 모델이 설치되지 않았습니다. 해당 역할의 기본 모델({fallback_model})로 폴백합니다.")
-                        self.active_ollama_model = fallback_model
-                        payload["model"] = fallback_model
-                        response = await client.post(url, json=payload)
-
-                    response.raise_for_status()
-                    resp_json = response.json()
-                    raw_text = resp_json.get("response", "")
-                    # Ollama 0.6+ separates thinking from response for thinking models.
-                    # If response is empty but thinking is present, use thinking content
-                    # so the generation is not silently dropped.
-                    if not raw_text.strip() and resp_json.get("thinking"):
-                        raw_text = resp_json["thinking"]
-                    cleaned_text = self.parse_thinking_output(raw_text)
-                    if response_model:
-                        try:
-                            return response_model.model_validate_json(cleaned_text)
-                        except Exception as exc:
-                            print(f"[{role}] Pydantic 에러: {exc}\n원본: {cleaned_text}")
-                            return None
-                    return cleaned_text
+                cleaned_text = await self._call_ollama_with_retries(
+                    role=role,
+                    prompt=prompt,
+                    max_tokens=max_tokens,
+                    response_model=response_model,
+                )
+                if response_model:
+                    try:
+                        return response_model.model_validate_json(cleaned_text)
+                    except Exception as exc:
+                        print(f"[{role}] Pydantic 에러: {exc}\n원본: {cleaned_text}")
+                        return None
+                return cleaned_text
             except httpx.ConnectError:
                 return "[Error] Ollama 서버에 연결할 수 없습니다. Ollama가 실행 중인지 확인하세요."
             except Exception as exc:

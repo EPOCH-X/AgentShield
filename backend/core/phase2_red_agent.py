@@ -30,6 +30,13 @@ from backend.models.test_result import TestResult
 logger = logging.getLogger(__name__)
 
 
+def _normalize_attack_pattern_id(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 # ── 내부 헬퍼 ────────────────────────────────────────────────────
 
 def _check_fp_flag(target_response: str) -> Optional[str]:
@@ -147,11 +154,12 @@ def _load_dynamic_attack_refs(category: str, subcategory: str, attack_prompt: st
 
 async def _persist_phase2_result(session_id: str, result_entry: dict[str, Any]) -> Optional[int]:
     try:
+        attack_pattern_id = _normalize_attack_pattern_id(result_entry.get("attack_pattern_id"))
         async with async_session() as db:
             db_row = TestResult(
                 session_id=uuid.UUID(session_id) if isinstance(session_id, str) else session_id,
                 phase=2,
-                attack_pattern_id=result_entry.get("attack_pattern_id"),
+                attack_pattern_id=attack_pattern_id,
                 seed_id=result_entry.get("seed_id"),
                 round=result_entry.get("round"),
                 attack_prompt=result_entry.get("attack_prompt"),
@@ -201,7 +209,7 @@ async def _run_frr_batch(
     await init_frr_session(session_id)
     llm = AgentShieldLLM()
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=float(settings.FRR_TARGET_TIMEOUT)) as client:
         for req in LEGITIMATE_REQUESTS:
             text = req["text"]
             domain = req.get("domain", "general")
@@ -269,7 +277,7 @@ async def run_phase2(
 
     # ── 도메인 프로브 — 타겟 챗봇 업종 자동 감지 ──
     domain_context: Optional[dict] = None
-    async with httpx.AsyncClient(timeout=15.0) as probe_client:
+    async with httpx.AsyncClient(timeout=float(settings.PHASE2_PROBE_TIMEOUT)) as probe_client:
         try:
             probe_resp = await send_messages_to_target(
                 probe_client,
@@ -350,6 +358,14 @@ async def run_phase2(
                 # 4. Red Agent LLM 변형 생성
                 new_attack_raw: str = await llm.generate(red_prompt, role="red")
                 new_attack = normalize_attack_prompt_output(new_attack_raw)
+                logger.info(
+                    "[phase2] prompt mutation category=%s round=%s original_len=%s transformed_len=%s raw_len=%s",
+                    category,
+                    rnd,
+                    len(current_prompt or ""),
+                    len(new_attack or ""),
+                    len(new_attack_raw or ""),
+                )
 
                 # ── 빈값·오류 응답 명시적 차단 (validate_attack_prompt_output 이전) ──
                 # generate()가 빈 문자열이나 "[Error]..." 오류 문자열을 반환했을 때
@@ -363,6 +379,8 @@ async def run_phase2(
                         "category": category,
                         "subcategory": subcat,
                         "attack_pattern_id": attack.get("attack_pattern_id"),
+                        "original_attack_prompt": attack.get("attack_prompt", ""),
+                        "round_input_prompt": current_prompt,
                         "seed_id": attack.get("seed_id", ""),
                         "attack_prompt": new_attack,
                         "target_response": f"[blocked: {_reason}]",
@@ -388,6 +406,8 @@ async def run_phase2(
                         "category": category,
                         "subcategory": subcat,
                         "attack_pattern_id": attack.get("attack_pattern_id"),
+                        "original_attack_prompt": attack.get("attack_prompt", ""),
+                        "round_input_prompt": current_prompt,
                         "seed_id": attack.get("seed_id", ""),
                         "attack_prompt": new_attack,
                         "target_response": "[blocked: invalid red-agent output]",
@@ -425,6 +445,8 @@ async def run_phase2(
                         "category": category,
                         "subcategory": subcat,
                         "attack_pattern_id": attack.get("attack_pattern_id"),
+                        "original_attack_prompt": attack.get("attack_prompt", ""),
+                        "round_input_prompt": current_prompt,
                         "seed_id": attack.get("seed_id", ""),
                         "attack_prompt": new_attack,
                         "target_response": "[ERROR]",
@@ -449,6 +471,8 @@ async def run_phase2(
                     "category": category,
                     "subcategory": subcat,
                     "attack_pattern_id": attack.get("attack_pattern_id"),
+                    "original_attack_prompt": attack.get("attack_prompt", ""),
+                    "round_input_prompt": current_prompt,
                     "seed_id": attack.get("seed_id", ""),
                     "attack_prompt": new_attack,
                     "target_response": target_response,
@@ -460,6 +484,10 @@ async def run_phase2(
                     "detail": verdict.get("detail", ""),
                     "round": rnd,
                     "session_id": session_id,
+                    "original_prompt_len": len(str(attack.get("attack_prompt", "") or "")),
+                    "round_input_prompt_len": len(str(current_prompt or "")),
+                    "transformed_prompt_len": len(str(new_attack or "")),
+                    "target_response_len": len(str(target_response or "")),
                     "target_failure_mode": target_failure_mode,
                     "failure_mode": verdict.get("failure_mode") or target_failure_mode,
                     "root_cause_label": verdict.get("root_cause_label"),

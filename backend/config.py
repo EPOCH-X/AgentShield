@@ -10,6 +10,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _resolve_ollama_base_url() -> str:
+    """환경변수 > Docker 자동감지 > 로컬 기본값 순으로 결정.
+    /.dockerenv 파일은 Docker 컨테이너 내부에만 존재한다."""
+    explicit = os.getenv("OLLAMA_BASE_URL")
+    if explicit:
+        return explicit
+    if os.path.exists("/.dockerenv"):
+        return "http://host.docker.internal:11434"
+    return "http://localhost:11434"
+
+
 class AppSettings:
     # PostgreSQL
     DATABASE_URL: str = os.getenv(
@@ -23,7 +34,7 @@ class AppSettings:
     JWT_EXPIRE_MINUTES: int = 60 * 24
 
     # Ollama
-    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
+    OLLAMA_BASE_URL: str = _resolve_ollama_base_url()
     OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gemma4:e2b")
     OLLAMA_RED_MODEL: str = os.getenv("OLLAMA_RED_MODEL", "gemma4-ara-abliterated")
     OLLAMA_JUDGE_MODEL: str = os.getenv("OLLAMA_JUDGE_MODEL", "agent-judge")
@@ -45,6 +56,10 @@ class AppSettings:
         "OLLAMA_BLUE_TARGET_MODEL",
         "agentshield-blue",
     )
+    OLLAMA_GENERATION_API: str = os.getenv("OLLAMA_GENERATION_API", "generate")
+    LLM_REQUEST_RETRIES: int = int(os.getenv("LLM_REQUEST_RETRIES", 4))
+    LLM_RETRY_BACKOFF_BASE: float = float(os.getenv("LLM_RETRY_BACKOFF_BASE", 2.0))
+    LLM_CHAT_FALLBACK_ON_EOF: bool = os.getenv("LLM_CHAT_FALLBACK_ON_EOF", "true").lower() == "true"
 
     # ChromaDB
     CHROMADB_PERSIST_PATH: str = os.getenv("CHROMADB_PERSIST_PATH", "./chromadb_data")
@@ -57,6 +72,7 @@ class AppSettings:
     DEFENSE_PROXY_URL: str = os.getenv(
         "DEFENSE_PROXY_URL", "http://localhost:8001"
     )
+    DEFENSE_PROXY_TARGET_TIMEOUT: int = int(os.getenv("DEFENSE_PROXY_TARGET_TIMEOUT", 180))
 
     # Monitoring Proxy
     MONITORING_PROXY_URL: str = os.getenv(
@@ -80,6 +96,8 @@ class AppSettings:
     # Phase 2
     PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 5))
     PHASE2_TIMEOUT: int = int(os.getenv("PHASE2_TIMEOUT", 300))
+    PHASE2_PROBE_TIMEOUT: int = int(os.getenv("PHASE2_PROBE_TIMEOUT", 60))
+    FRR_TARGET_TIMEOUT: int = int(os.getenv("FRR_TARGET_TIMEOUT", 180))
 
     # LLM requests
     LLM_REQUEST_TIMEOUT: int = int(os.getenv("LLM_REQUEST_TIMEOUT", 300))
@@ -90,6 +108,7 @@ class AppSettings:
     PHASE4_MAX_ITERATIONS: int = 3
     PHASE4_BLOCK_RATE_THRESHOLD: float = 0.80
     PHASE4_FP_RATE_THRESHOLD: float = 0.05
+    PHASE4_PROXY_TIMEOUT: int = int(os.getenv("PHASE4_PROXY_TIMEOUT", 180))
 
     # LoRA Adapters
     LORA_RED_PATH: str = os.getenv("LORA_RED_PATH", "./adapters/lora-red")
