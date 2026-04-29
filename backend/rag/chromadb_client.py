@@ -31,17 +31,26 @@ class ChromaRAGClient:
 
         from backend.rag.embedder import MiniLMEmbeddingFunction
 
-        import os
-        persist_dir = os.path.abspath(settings.CHROMADB_PERSIST_PATH)
-        os.makedirs(persist_dir, exist_ok=True)
-
-        # 로컬 PersistentClient (Docker 불필요)
-        self.client = chromadb.PersistentClient(path=persist_dir)
-
         self.embed_fn = MiniLMEmbeddingFunction()
+        self.mode = settings.CHROMADB_MODE
+
+        if self.mode == "http":
+            self.client = chromadb.HttpClient(
+                host=settings.CHROMADB_HOST,
+                port=settings.CHROMADB_PORT,
+            )
+        elif self.mode == "persistent":
+            import os
+
+            persist_dir = os.path.abspath(settings.CHROMADB_PERSIST_PATH)
+            os.makedirs(persist_dir, exist_ok=True)
+            self.client = chromadb.PersistentClient(path=persist_dir)
+        else:
+            raise ValueError("CHROMADB_MODE must be 'persistent' or 'http'")
 
         # 컬렉션 초기화 — 기존 컬렉션이 default embedding으로 생성된 경우
-        # embedding_function 충돌 방지: 기존 컬렉션 삭제 후 재생성
+        # embedding_function 충돌 방지: 기존 컬렉션 삭제 후 재생성.
+        # 공유 HTTP Chroma에서는 임의 삭제가 위험하므로 로컬 persistent 모드에서만 삭제한다.
         for col_name in ("defense_patterns", "attack_results"):
             try:
                 self.client.get_or_create_collection(
@@ -50,6 +59,8 @@ class ChromaRAGClient:
                     metadata={"hnsw:space": "cosine"},
                 )
             except ValueError:
+                if self.mode == "http":
+                    raise
                 # Embedding function conflict — 기존 컬렉션이 다른 embedding으로 생성됨
                 self.client.delete_collection(col_name)
                 self.client.get_or_create_collection(
@@ -67,11 +78,20 @@ class ChromaRAGClient:
             embedding_function=self.embed_fn,
         )
     
-    def search_defense(self, query: str, n_results: int = 3):
+    def search_defense(
+        self,
+        query: str,
+        n_results: int = 3,
+        category: Optional[str] = None,
+        where: Optional[dict] = None,
+    ):
         """Phase 3: 방어 패턴(Blue Agent용) 검색"""
+        if category and where is None:
+            where = {"category": category}
         return self.defense_col.query(
             query_texts=[query],
-            n_results=n_results
+            n_results=n_results,
+            where=where,
         )
     
     def search_attacks(self, query: str, n_results: int = 3, where: Optional[dict] = None):
@@ -152,15 +172,21 @@ def get_rag_client() -> ChromaRAGClient:
 def get_rag_status() -> dict:
     """RAG 연결 상태를 반환한다."""
     try:
-        get_rag_client()
+        client = get_rag_client()
         return {
             "available": True,
+            "mode": client.mode,
+            "host": settings.CHROMADB_HOST if client.mode == "http" else None,
+            "port": settings.CHROMADB_PORT if client.mode == "http" else None,
             "persist_path": settings.CHROMADB_PERSIST_PATH,
             "error": None,
         }
     except RuntimeError as exc:
         return {
             "available": False,
+            "mode": settings.CHROMADB_MODE,
+            "host": settings.CHROMADB_HOST if settings.CHROMADB_MODE == "http" else None,
+            "port": settings.CHROMADB_PORT if settings.CHROMADB_MODE == "http" else None,
             "persist_path": settings.CHROMADB_PERSIST_PATH,
             "error": str(exc),
         }
@@ -210,11 +236,23 @@ def _flatten_get_results(results: dict) -> list[dict]:
     return flat
 
 
-def search_defense(query: str, n_results: int = 3) -> list[dict]:
+def search_defense(
+    query: str,
+    n_results: int = 3,
+    category: Optional[str] = None,
+    where: Optional[dict] = None,
+) -> list[dict]:
     """방어 패턴 검색 래퍼."""
     try:
         client = get_rag_client()
-        return _flatten_query_results(client.search_defense(query=query, n_results=n_results))
+        return _flatten_query_results(
+            client.search_defense(
+                query=query,
+                n_results=n_results,
+                category=category,
+                where=where,
+            )
+        )
     except Exception as exc:
         print(f"ChromaDB defense search unavailable: {exc}")
         return []

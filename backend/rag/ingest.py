@@ -76,14 +76,55 @@ def ingest_defense_patterns():
         id_counts[base_id] = seen + 1
         # Chroma upsert는 한 배치 내 중복 ID를 허용하지 않으므로 suffix를 붙여 유니크 보장.
         chroma_id = base_id if seen == 0 else f"{base_id}__dup{seen}"
+        category = str(item.get("category", "Unknown"))
+        title = str(item.get("title", "No Title"))
+        source = str(item.get("source", "custom"))
+        attack_prompt = str(item.get("attack_prompt") or "")
+        target_response = str(item.get("target_response") or "")
+        defended_response = str(item.get("defended_response") or "")
+        defense_rationale = str(item.get("defense_rationale") or "")
+        judge_reason = str(item.get("judge_reason") or "")
+        failure_mode = str(item.get("failure_mode") or "")
+        verify_result = str(item.get("verify_result") or "")
+
+        # defense_code 내부 JSON에도 핵심 필드가 있을 수 있어 보강한다.
+        defense_code = item.get("defense_code", "")
+        if isinstance(defense_code, str) and defense_code.strip().startswith("{"):
+            try:
+                parsed_code = json.loads(defense_code)
+                if not defended_response:
+                    defended_response = str(parsed_code.get("defended_response") or "")
+                if not defense_rationale:
+                    defense_rationale = str(parsed_code.get("defense_rationale") or "")
+            except Exception:
+                pass
+
+        document = (
+            f"[{category}] "
+            f"title={title}; "
+            f"failure_mode={failure_mode}; "
+            f"verify_result={verify_result}; "
+            f"attack={attack_prompt[:220]}; "
+            f"target={target_response[:220]}; "
+            f"defended_response={defended_response[:260]}; "
+            f"rationale={defense_rationale[:220]}; "
+            f"judge_reason={judge_reason[:180]}"
+        )
         ids.append(chroma_id)
-        docs.append(f"[{item.get('category', 'UNK')}] {item.get('title', 'No Title')}: {item.get('explanation', '')}")
+        docs.append(document)
         metas.append({
             "source_id": base_id,
-            "category": item.get("category", "Unknown"),
-            "title": item.get("title", "No Title"),
-            "defense_code": item.get("defense_code", ""),
-            "source": item.get("source", "custom")
+            "category": category,
+            "title": title,
+            "source": source,
+            "verify_result": verify_result,
+            "failure_mode": failure_mode,
+            "attack_prompt": attack_prompt,
+            "target_response": target_response,
+            "defended_response": defended_response,
+            "defense_rationale": defense_rationale,
+            "judge_reason": judge_reason,
+            "defense_code": defense_code,
         })
 
     try:

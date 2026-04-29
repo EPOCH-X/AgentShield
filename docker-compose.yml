@@ -43,13 +43,35 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+    env_file:
+      - .env
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      CHROMADB_MODE: http
       CHROMADB_HOST: chromadb
       CHROMADB_PORT: 8000
+      PHASE1_ALLOW_FILE_FALLBACK: "true"
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      OLLAMA_RED_MODEL: ${OLLAMA_RED_MODEL}
+      OLLAMA_JUDGE_MODEL: ${OLLAMA_JUDGE_MODEL}
+      OLLAMA_GUARD_MODEL: ${OLLAMA_GUARD_MODEL}
+      OLLAMA_BLUE_MODEL: ${OLLAMA_BLUE_MODEL}
+      OLLAMA_BASE_TARGET_MODEL: ${OLLAMA_BASE_TARGET_MODEL}
+      OLLAMA_RED_TARGET_MODEL: ${OLLAMA_RED_TARGET_MODEL}
+      OLLAMA_JUDGE_TARGET_MODEL: ${OLLAMA_JUDGE_TARGET_MODEL}
+      OLLAMA_BLUE_TARGET_MODEL: ${OLLAMA_BLUE_TARGET_MODEL}
+      OLLAMA_GENERATION_API: ${OLLAMA_GENERATION_API:-generate}
+      LLM_REQUEST_TIMEOUT: ${LLM_REQUEST_TIMEOUT:-300}
+      LLM_REQUEST_RETRIES: ${LLM_REQUEST_RETRIES:-4}
+      LLM_RETRY_BACKOFF_BASE: ${LLM_RETRY_BACKOFF_BASE:-2.0}
+      LLM_CHAT_FALLBACK_ON_EOF: ${LLM_CHAT_FALLBACK_ON_EOF:-true}
+      PHASE1_TIMEOUT: ${PHASE1_TIMEOUT:-120}
+      PHASE2_TIMEOUT: ${PHASE2_TIMEOUT:-300}
+      PHASE2_PROBE_TIMEOUT: ${PHASE2_PROBE_TIMEOUT:-60}
+      FRR_TARGET_TIMEOUT: ${FRR_TARGET_TIMEOUT:-180}
     depends_on:
       db:
         condition: service_healthy
@@ -60,14 +82,6 @@ services:
       - ./adapters:/app/adapters
       - ./data:/app/data
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-
-  defense-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    command: uvicorn defense_proxy.proxy_server:app --host 0.0.0.0 --port 8001 --reload
 
   monitoring-proxy:
     build:

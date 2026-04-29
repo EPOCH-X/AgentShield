@@ -503,6 +503,15 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                 base_profile["session_top_techniques"] = [t for t, _ in best]
                 base_profile["session_success_rates"] = dict(best)
 
+            # [주의] 다음 red_prompt는 일반적으로 8,000-12,000 문자입니다.
+            # 이는 다음 요소로 인한 설계된 동작입니다:
+            # - System prompt (abliterated 모델): ~2,000 chars
+            # - RAG 참고자료 (ChromaDB): up to 1,500 chars
+            # - 실패 인텔리전스: up to 800 chars
+            # - 공격 예제 및 카테고리 프로필: 1,000-2,000 chars
+            # 총: 8K-12K chars (예: 10,321 chars는 정상)
+            # 로그에서 "prompt_len=10321" 같은 값을 보더라도 경고하지 않아도 됩니다.
+            # 최적화 필요 시 build_red_prompt() 함수의 docstring을 참고하세요.
             red_prompt = build_red_prompt(
                 attack_prompt=current_prompt,
                 target_response=current_response,

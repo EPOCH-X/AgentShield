@@ -98,7 +98,7 @@ async def execute_tool(name: str, arguments: dict) -> dict:
 
 async def _forward_to_gateway(name: str, arguments: dict) -> dict:
     url = f"{config.TOOL_GATEWAY_URL}/tools/{name.replace('.', '/')}"
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=config.TOOL_GATEWAY_TIMEOUT) as client:
         resp = await client.post(url, json={"arguments": arguments})
         resp.raise_for_status()
         return resp.json()
