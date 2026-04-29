@@ -28,6 +28,8 @@ interface LogEntry {
   alert?: boolean;
 }
 
+type ScanStatus = Awaited<ReturnType<typeof getScanStatus>>;
+
 export default function ScanDetailPage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const sessionId = params.id;
@@ -79,7 +81,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      let s: typeof MOCK_SCAN_STATUS;
+      let s: ScanStatus;
       try {
         s = await getScanStatus(sessionId);
       } catch {
