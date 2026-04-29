@@ -122,8 +122,11 @@ async def benchmark_judge(dataset_path: Path, output_path: Path):
             "detail_en": raw_detail,
             "detail_ko": translate_text(raw_detail),
             "agent_opinions_ko": agent_opinions_ko,
-            "original_attack": attack,
-            "target_response": response
+            "original_attack_en": attack,
+            "original_attack_ko": translate_text(attack) if attack else "",
+            
+            "target_response_en": response,
+            "target_response_ko": translate_text(response) if response else ""
         }
         results_log.append(log_entry)
 
