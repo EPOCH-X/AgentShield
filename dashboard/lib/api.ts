@@ -148,7 +148,6 @@ export interface ScanResult {
   category: string;
   defense_code?: string;
   verify_result?: string;
-  mitre_technique_id?: string;
   created_at: string;
 }
 

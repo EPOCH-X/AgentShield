@@ -7,6 +7,7 @@ Phase 3에서 LLM에 넣을 프롬프트를 만들고, 돌아온 문자열에서
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 from dataclasses import dataclass
@@ -122,8 +123,10 @@ def build_blue_prompt(
     *,
     failure_mode: str | None = None,
     mitre_technique_id: str | None = None,
+    judge_detail: str = "",
     owasp_recommendation: str = "",
     rag_defense_examples: str = "",
+    rag_defense_structured_examples: str = "",
 ) -> str:
     """
     취약점 1건 + (선택) OWASP 한 줄 + (선택) RAG에서 가져온 방어 사례 텍스트 → LLM용 프롬프트.
@@ -136,6 +139,16 @@ def build_blue_prompt(
     rag_block = (
         f"[Similar defense patterns from knowledge base]\n{rag_defense_examples.strip()}\n\n"
         if rag_defense_examples.strip()
+        else ""
+    )
+    structured_rag_block = (
+        f"[Verified structured defense examples]\n{rag_defense_structured_examples.strip()}\n\n"
+        if rag_defense_structured_examples.strip()
+        else ""
+    )
+    judge_block = (
+        f"[Judge finding detail]\n{judge_detail.strip()}\n\n"
+        if judge_detail.strip()
         else ""
     )
     mitre_block = ""
@@ -173,7 +186,7 @@ category: {category}
 [Model response that exhibited the issue]
 {target_response}
 
-{owasp_block}{rag_block}{mitre_block}
+{judge_block}{owasp_block}{rag_block}{structured_rag_block}{mitre_block}
 {category_policy_block}
 
 [Defense authoring rules]
@@ -207,6 +220,99 @@ class BlueDefenseBundle:
         )
 
 
+def _default_blue_bundle(reason: str = "") -> BlueDefenseBundle:
+    return BlueDefenseBundle(
+        defended_response="",
+        input_filter="",
+        output_filter="",
+        system_prompt_patch="",
+        defense_rationale=f"Blue parser fallback used. {reason}".strip(),
+    )
+
+
+def _extract_json_object(text: str) -> str:
+    start = text.find("{")
+    if start == -1:
+        return text
+
+    depth = 0
+    in_string = False
+    escape = False
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1]
+
+    return text[start:]
+
+
+def _sanitize_jsonish_text(text: str) -> str:
+    text = text.replace("\ufeff", "").replace("\r\n", "\n").replace("\r", "\n")
+    text = (
+        text.replace("“", '"')
+        .replace("”", '"')
+        .replace("‘", "'")
+        .replace("’", "'")
+    )
+
+    out: list[str] = []
+    in_string = False
+    escape = False
+    for ch in text:
+        if in_string:
+            if escape:
+                out.append(ch)
+                escape = False
+                continue
+            if ch == "\\":
+                out.append(ch)
+                escape = True
+                continue
+            if ch == '"':
+                out.append(ch)
+                in_string = False
+                continue
+            if ch == "\n":
+                out.append("\\n")
+                continue
+            if ch == "\t":
+                out.append("\\t")
+                continue
+        else:
+            if ch == '"':
+                in_string = True
+        out.append(ch)
+
+    sanitized = "".join(out)
+    sanitized = re.sub(r",(\s*[}\]])", r"\1", sanitized)
+    return sanitized
+
+
+def _coerce_bundle(data: dict[str, Any], *, fallback_reason: str = "") -> BlueDefenseBundle:
+    return BlueDefenseBundle(
+        defended_response=str(data.get("defended_response", "")),
+        input_filter=str(data.get("input_filter", "")),
+        output_filter=str(data.get("output_filter", "")),
+        system_prompt_patch=str(data.get("system_prompt_patch", "")),
+        defense_rationale=str(data.get("defense_rationale", fallback_reason)),
+    )
+
+
 def parse_blue_response(raw: str) -> BlueDefenseBundle:
     """
     LLM 전체 응답에서 JSON 한 덩어리를 찾아 BlueDefenseBundle로 만든다.
@@ -217,62 +323,61 @@ def parse_blue_response(raw: str) -> BlueDefenseBundle:
     if fence:
         text = fence.group(1).strip()
     else:
-        # 첫 {{ ... }} 브레이스 범위 시도
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            text = text[start : end + 1]
+        text = _extract_json_object(text).strip()
+
+    sanitized = _sanitize_jsonish_text(text)
+
+    for candidate in (text, sanitized):
+        try:
+            data = json.loads(candidate)
+            if isinstance(data, dict):
+                return _coerce_bundle(data)
+        except json.JSONDecodeError:
+            pass
 
     try:
-        data: dict[str, Any] = json.loads(text)
-        return BlueDefenseBundle(
-            defended_response=str(data.get("defended_response", "")),
-            input_filter=str(data.get("input_filter", "")),
-            output_filter=str(data.get("output_filter", "")),
-            system_prompt_patch=str(data.get("system_prompt_patch", "")),
-            defense_rationale=str(data.get("defense_rationale", "")),
-        )
-    except json.JSONDecodeError:
-        # LLM이 JSON-ish를 내지만 \s 같은 잘못된 escape로 strict JSON 파싱이 실패할 수 있다.
-        # 핵심 필드를 정규식으로 추출해 폴백한다.
-        def _extract_field_value(key: str, src: str) -> str | None:
-            # JSON string body: (?:\\.|[^"\\])*
-            m = re.search(
-                rf'"{re.escape(key)}"\s*:\s*"((?:\\.|[^"\\])*)"',
-                src,
-                re.DOTALL,
+        literal = ast.literal_eval(sanitized)
+        if isinstance(literal, dict):
+            normalized = {str(k): ("" if v is None else str(v)) for k, v in literal.items()}
+            return _coerce_bundle(
+                normalized,
+                fallback_reason="Recovered via ast.literal_eval",
             )
-            if not m:
-                return None
-            value = m.group(1)
-            try:
-                # JSON 문자열 unescape 시도
-                return json.loads(f'"{value}"')
-            except Exception:
-                # 최소한의 폴백 치환
-                return (
-                    value.replace('\\"', '"')
-                    .replace("\\n", "\n")
-                    .replace("\\t", "\t")
-                )
+    except Exception:
+        pass
 
-        defended_response = _extract_field_value("defended_response", text)
-        input_filter = _extract_field_value("input_filter", text)
-        output_filter = _extract_field_value("output_filter", text)
-        system_prompt_patch = _extract_field_value("system_prompt_patch", text)
-        defense_rationale = _extract_field_value("defense_rationale", text)
-
-        if (
-            defended_response is None
-            or input_filter is None
-            or output_filter is None
-            or system_prompt_patch is None
-        ):
-            raise
-
-        return BlueDefenseBundle(
-            defended_response=defended_response,
-            input_filter=input_filter,
-            output_filter=output_filter,
-            system_prompt_patch=system_prompt_patch,
-            defense_rationale=defense_rationale or "",
+    # LLM이 JSON-ish를 내지만 strict JSON 파싱이 실패할 때 핵심 필드를 정규식으로 추출한다.
+    def _extract_field_value(key: str, src: str) -> str | None:
+        m = re.search(
+            rf'"{re.escape(key)}"\s*:\s*"((?:\\.|[^"\\])*)"',
+            src,
+            re.DOTALL,
         )
+        if not m:
+            return None
+        value = m.group(1)
+        try:
+            return json.loads(f'"{value}"')
+        except Exception:
+            return (
+                value.replace('\\"', '"')
+                .replace("\\n", "\n")
+                .replace("\\t", "\t")
+            )
+
+    defended_response = _extract_field_value("defended_response", sanitized)
+    input_filter = _extract_field_value("input_filter", sanitized)
+    output_filter = _extract_field_value("output_filter", sanitized)
+    system_prompt_patch = _extract_field_value("system_prompt_patch", sanitized)
+    defense_rationale = _extract_field_value("defense_rationale", sanitized)
+
+    if any(value is not None for value in (defended_response, input_filter, output_filter, system_prompt_patch)):
+        return BlueDefenseBundle(
+            defended_response=defended_response or "",
+            input_filter=input_filter or "",
+            output_filter=output_filter or "",
+            system_prompt_patch=system_prompt_patch or "",
+            defense_rationale=defense_rationale or "Recovered via regex field extraction",
+        )
+
+    return _default_blue_bundle("Unable to parse Blue agent output")

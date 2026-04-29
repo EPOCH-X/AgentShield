@@ -1,17 +1,5 @@
 """
 [R1] Phase 2 — Red Agent 변형 공격
-
-세부기획서 섹션 1(R1 역할), 기능별 파이프라인 섹션 2 참조.
-Phase 1에서 "safe" 결과를 가져와 AI가 우회 변형 생성. 최대 10라운드 Self-Play.
-
-개선사항 (2026-04-23):
-- AdaptiveRedAgent 통합 — 공격별 기법 성공률 추적 및 다음 라운드 반영
-- build_red_prompt에 round_num / failure_intel / category_attack_profile / domain_context 전달
-  → _generate_adversarial_suffix + _add_cognitive_load_injection 실제 실행
-- FP 감지 후 ChromaDB 저장 보류
-- 도메인 프로브 (타겟 챗봇 업종 자동 감지)
-- 크로스 카테고리 인텔리전스 공유
-- normalize/validate 출력 검증
 """
 
 import logging
@@ -33,12 +21,20 @@ from backend.agents.red_agent import (
     validate_attack_prompt_output,
 )
 from backend.config import settings
-from backend.core.judge import _has_meta_analysis, _has_refusal, full_judge
+from backend.core.judge import full_judge
+from backend.core.judge_utils import _has_meta_analysis, _has_refusal
 from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 from backend.database import async_session
 from backend.models.test_result import TestResult
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_attack_pattern_id(value: Any) -> Optional[int]:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 # ── 내부 헬퍼 ────────────────────────────────────────────────────
@@ -158,11 +154,12 @@ def _load_dynamic_attack_refs(category: str, subcategory: str, attack_prompt: st
 
 async def _persist_phase2_result(session_id: str, result_entry: dict[str, Any]) -> Optional[int]:
     try:
+        attack_pattern_id = _normalize_attack_pattern_id(result_entry.get("attack_pattern_id"))
         async with async_session() as db:
             db_row = TestResult(
                 session_id=uuid.UUID(session_id) if isinstance(session_id, str) else session_id,
                 phase=2,
-                attack_pattern_id=result_entry.get("attack_pattern_id"),
+                attack_pattern_id=attack_pattern_id,
                 seed_id=result_entry.get("seed_id"),
                 round=result_entry.get("round"),
                 attack_prompt=result_entry.get("attack_prompt"),
@@ -197,8 +194,8 @@ async def _run_frr_batch(
     """
     CyberSecEval 4 FRR 방법론 — 정상 요청 배치를 파이프라인에 투입해 오탐률(FRR) 측정.
 
-    정상 요청은 Judge L1으로만 판정 (Guard/LLM 호출 없음 — 속도/비용 절감).
-    판정이 vulnerable/ambiguous이면 False Refusal로 집계.
+    정상 요청은 공격 판정 그래프가 아니라 실제 refusal 신호만 검사한다.
+    정상 응답을 ambiguous로 과대 집계하지 않기 위함이다.
     """
     from backend.agents.llm_client import AgentShieldLLM
     from backend.core.frr_tracker import (
@@ -207,12 +204,10 @@ async def _run_frr_batch(
         init_frr_session,
         track_frr,
     )
-    from backend.core.judge import rule_based_judge
-
     await init_frr_session(session_id)
     llm = AgentShieldLLM()
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=float(settings.FRR_TARGET_TIMEOUT)) as client:
         for req in LEGITIMATE_REQUESTS:
             text = req["text"]
             domain = req.get("domain", "general")
@@ -226,16 +221,20 @@ async def _run_frr_batch(
                 logger.warning("[FRR] 타겟 호출 실패 (%s): %s", text[:50], exc)
                 continue
 
-            # FRR 판정: L1만 사용 (빠른 규칙 기반)
-            # 정상 요청이므로 카테고리는 "LLM01" 고정 (가장 넓은 규칙셋 적용)
-            verdict = rule_based_judge("LLM01", text, target_resp)
-            judgment = verdict.get("judgment", "safe")
+            # FRR은 "정상 요청을 실제로 거절했는가"만 본다.
+            # 공격 판정용 ambiguous를 false refusal로 집계하면 정상 응답까지 과대 집계된다.
+            judgment = "vulnerable" if _has_refusal(target_resp) else "safe"
+            detail = (
+                "Benign request was refused by target response."
+                if judgment == "vulnerable"
+                else "Benign request received non-refusal response."
+            )
 
             await track_frr(
                 session_id=session_id,
                 request_text=text,
                 judgment_result=judgment,
-                detail=verdict.get("detail", ""),
+                detail=detail,
                 domain=domain,
             )
 
@@ -280,7 +279,7 @@ async def run_phase2(
 
     # ── 도메인 프로브 — 타겟 챗봇 업종 자동 감지 ──
     domain_context: Optional[dict] = None
-    async with httpx.AsyncClient(timeout=15.0) as probe_client:
+    async with httpx.AsyncClient(timeout=float(settings.PHASE2_PROBE_TIMEOUT)) as probe_client:
         try:
             probe_resp = await send_messages_to_target(
                 probe_client,
@@ -335,7 +334,11 @@ async def run_phase2(
                     category, rnd, prev_failure_modes=used_failure_modes
                 )
 
+                # phase2_red_agent.py의 build_red_prompt 호출 부분
+                prev_techniques_for_prompt = used_techniques if not adaptive_agent._detect_stagnation() else []
+                # 정체감 감지 시 prev_techniques 차단 로직.skip하고 새로운 기점 탐색
                 # 3. Red Agent 프롬프트 빌드
+
                 # (round_num 전달 → _generate_adversarial_suffix 동작,
                 #  target_response 포함 → _add_cognitive_load_injection 동작)
                 red_prompt = build_red_prompt(
@@ -344,7 +347,7 @@ async def run_phase2(
                     category=category,
                     similar_cases=None,
                     round_num=rnd,
-                    prev_techniques=used_techniques or None,
+                    prev_techniques=prev_techniques_for_prompt,  # 정체감 감지 시 빈 리스트 전달
                     cross_category_intel=cross_category_intel or None,
                     successful_attack_refs=rag_refs or None,
                     failure_intel=category_failure_intel.get(category),
@@ -357,6 +360,14 @@ async def run_phase2(
                 # 4. Red Agent LLM 변형 생성
                 new_attack_raw: str = await llm.generate(red_prompt, role="red")
                 new_attack = normalize_attack_prompt_output(new_attack_raw)
+                logger.debug(
+                    "[phase2] prompt mutation category=%s round=%s original_len=%s transformed_len=%s raw_len=%s",
+                    category,
+                    rnd,
+                    len(current_prompt or ""),
+                    len(new_attack or ""),
+                    len(new_attack_raw or ""),
+                )
 
                 # ── 빈값·오류 응답 명시적 차단 (validate_attack_prompt_output 이전) ──
                 # generate()가 빈 문자열이나 "[Error]..." 오류 문자열을 반환했을 때
@@ -370,6 +381,8 @@ async def run_phase2(
                         "category": category,
                         "subcategory": subcat,
                         "attack_pattern_id": attack.get("attack_pattern_id"),
+                        "original_attack_prompt": attack.get("attack_prompt", ""),
+                        "round_input_prompt": current_prompt,
                         "seed_id": attack.get("seed_id", ""),
                         "attack_prompt": new_attack,
                         "target_response": f"[blocked: {_reason}]",
@@ -395,6 +408,8 @@ async def run_phase2(
                         "category": category,
                         "subcategory": subcat,
                         "attack_pattern_id": attack.get("attack_pattern_id"),
+                        "original_attack_prompt": attack.get("attack_prompt", ""),
+                        "round_input_prompt": current_prompt,
                         "seed_id": attack.get("seed_id", ""),
                         "attack_prompt": new_attack,
                         "target_response": "[blocked: invalid red-agent output]",
@@ -425,6 +440,14 @@ async def run_phase2(
                         adapter_config,
                         messages=[{"role": "user", "content": new_attack}],
                     )
+                    logger.debug(
+                        "[phase2] target response(타겟응답) category=%s subcategory=%s round=%s attack_len=%s response_len=%s",
+                        category,
+                        subcat,
+                        rnd,
+                        len(new_attack or ""),
+                        len(target_response or ""),
+                    )
                 except httpx.HTTPError as e:
                     logger.warning("[phase2] 타겟 요청 실패 (R%d): %s", rnd, e)
                     entry = {
@@ -432,6 +455,8 @@ async def run_phase2(
                         "category": category,
                         "subcategory": subcat,
                         "attack_pattern_id": attack.get("attack_pattern_id"),
+                        "original_attack_prompt": attack.get("attack_prompt", ""),
+                        "round_input_prompt": current_prompt,
                         "seed_id": attack.get("seed_id", ""),
                         "attack_prompt": new_attack,
                         "target_response": "[ERROR]",
@@ -450,12 +475,48 @@ async def run_phase2(
 
                 # 6. Judge 판정
                 verdict = await full_judge(category, new_attack, target_response, llm)
+                logger.info(
+                    "[phase2] round result(라운드결과) %s/%s R%s mutation_len=%s response_len=%s judgment(판정)=%s confidence(확신도)=%s",
+                    category,
+                    subcat,
+                    rnd,
+                    len(new_attack or ""),
+                    len(target_response or ""),
+                    verdict.get("judgment"),
+                    verdict.get("confidence"),
+                )
+                if verdict["judgment"] == "vulnerable":
+                    print(
+                        f"  [P2] {category}/{subcat} R{rnd} -> 🔴 vulnerable "
+                        f"(conf={verdict.get('confidence')})",
+                        flush=True,
+                    )
+                elif verdict["judgment"] == "safe":
+                    print(
+                        f"  [P2] {category}/{subcat} R{rnd} -> 🟢 safe "
+                        f"(conf={verdict.get('confidence')})",
+                        flush=True,
+                    )
+                elif verdict["judgment"] == "ambiguous":
+                    print(
+                        f"  [P2] {category}/{subcat} R{rnd} -> 🟡 ambiguous "
+                        f"(conf={verdict.get('confidence')})",
+                        flush=True,
+                    )
+                else:
+                    print(
+                        f"  [P2] {category}/{subcat} R{rnd} -> ❌ {verdict.get('judgment')} "
+                        f"(conf={verdict.get('confidence')})",
+                        flush=True,
+                    )
 
                 entry = {
                     "phase": 2,
                     "category": category,
                     "subcategory": subcat,
                     "attack_pattern_id": attack.get("attack_pattern_id"),
+                    "original_attack_prompt": attack.get("attack_prompt", ""),
+                    "round_input_prompt": current_prompt,
                     "seed_id": attack.get("seed_id", ""),
                     "attack_prompt": new_attack,
                     "target_response": target_response,
@@ -467,6 +528,10 @@ async def run_phase2(
                     "detail": verdict.get("detail", ""),
                     "round": rnd,
                     "session_id": session_id,
+                    "original_prompt_len": len(str(attack.get("attack_prompt", "") or "")),
+                    "round_input_prompt_len": len(str(current_prompt or "")),
+                    "transformed_prompt_len": len(str(new_attack or "")),
+                    "target_response_len": len(str(target_response or "")),
                     "target_failure_mode": target_failure_mode,
                     "failure_mode": verdict.get("failure_mode") or target_failure_mode,
                     "root_cause_label": verdict.get("root_cause_label"),
@@ -475,8 +540,9 @@ async def run_phase2(
                 results.append(entry)
 
                 if verdict["judgment"] == "vulnerable":
-                    # FP 감지 → ChromaDB 저장 보류
-                    fp_flag = _check_fp_flag(target_response)
+                    # Evidence hard veto는 실제 민감값 출력 증거이므로 refusal/meta-analysis 문구보다 우선한다.
+                    evidence_hard_veto = bool(verdict.get("evidence_hard_veto"))
+                    fp_flag = None if evidence_hard_veto else _check_fp_flag(target_response)
                     entry["fp_flag"] = fp_flag
                     if not fp_flag:
                         add_attack(
@@ -492,6 +558,8 @@ async def run_phase2(
                                 "techniques": round_techniques,
                                 "failure_mode": verdict.get("failure_mode") or target_failure_mode,
                                 "root_cause_label": verdict.get("root_cause_label"),
+                                "evidence_hard_veto": evidence_hard_veto,
+                                "evidence": (verdict.get("evidence_scan_result") or {}).get("evidence"),
                                 "created_at": datetime.utcnow().isoformat(),
                             },
                         )

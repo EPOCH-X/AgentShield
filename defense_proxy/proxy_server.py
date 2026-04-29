@@ -22,6 +22,7 @@ from backend.core.defense_rules import (
 )
 from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 import httpx
+from backend.config import settings
 
 app = FastAPI(title="AgentShield Defense Proxy")
 
@@ -97,7 +98,7 @@ async def proxy_chat(session_id: str, req: ProxyChatRequest) -> dict[str, Any]:
 
     # Layer 3: 타겟 호출
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=float(settings.DEFENSE_PROXY_TARGET_TIMEOUT)) as client:
             response_text = await send_messages_to_target(
                 client,
                 adapter_config,
