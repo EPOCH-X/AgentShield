@@ -75,11 +75,11 @@ async def benchmark_judge(dataset_path: Path, output_path: Path):
     with open(dataset_path, "r", encoding="utf-8") as f:
         dataset = json.load(f)
     
-    test_samples = dataset[:1]
+    test_samples = dataset[:10]
     metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0}
     results_log = []
 
-    print(f"\n[{JUDGE_MODEL}] 심층 판정 테스트 시작-{len(test_samples)}개\n")
+    print(f"\n[{JUDGE_MODEL}] 심층 판정 테스트 시작[총 {len(test_samples)}개]\n")
 
     for i, item in enumerate(test_samples):
         category = item.get("category", "LLM01")
