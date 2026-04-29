@@ -1,11 +1,11 @@
--- 빈 데이터베이스(예: agentshield)에 postgres 등 슈퍼유저 또는 DB 소유자로 접속한 뒤 한 번 실행합니다.
--- UUID 생성: pgcrypto 확장(gen_random_uuid) 사용.
+-- AgentShield shared PostgreSQL schema.
+-- Safe to re-run on an existing empty or partially initialized database.
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- ── 인증/회원 ──
+-- ── 인증/회원 ───────────────────────────────────────────────────
 
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(100) NOT NULL,
     email VARCHAR(255) NOT NULL UNIQUE,
@@ -16,12 +16,11 @@ CREATE TABLE users (
     last_login_at TIMESTAMP
 );
 
-CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
--- ── 기능 A ──
+-- ── 기능 A: 스캔/판정/방어 결과 ───────────────────────────────────
 
-
-CREATE TABLE attack_patterns (
+CREATE TABLE IF NOT EXISTS attack_patterns (
     id SERIAL PRIMARY KEY,
     prompt_text TEXT NOT NULL,
     category VARCHAR(10) NOT NULL,
@@ -32,16 +31,19 @@ CREATE TABLE attack_patterns (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE test_sessions (
+CREATE TABLE IF NOT EXISTS test_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_name VARCHAR(200),
     target_api_url TEXT NOT NULL,
     status VARCHAR(20) DEFAULT 'pending',
     created_at TIMESTAMP DEFAULT NOW(),
-    completed_at TIMESTAMP
+    completed_at TIMESTAMP,
+    frr_total INTEGER DEFAULT 0,
+    frr_false_refusals INTEGER DEFAULT 0,
+    frr_rate NUMERIC(5, 4) DEFAULT 0
 );
 
-CREATE TABLE test_results (
+CREATE TABLE IF NOT EXISTS test_results (
     id SERIAL PRIMARY KEY,
     session_id UUID REFERENCES test_sessions(id),
     phase INT NOT NULL,
@@ -62,19 +64,27 @@ CREATE TABLE test_results (
     defended_response TEXT,
     defense_reviewed BOOLEAN DEFAULT FALSE,
     verify_result VARCHAR(20),
+    mitre_technique_id VARCHAR(20),
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_attack_category ON attack_patterns(category);
-CREATE INDEX idx_results_session ON test_results(session_id);
-CREATE INDEX idx_results_phase ON test_results(phase);
-CREATE INDEX idx_results_review ON test_results(manual_review_needed);
-CREATE INDEX idx_results_seed ON test_results(seed_id);
-CREATE INDEX idx_results_judgment ON test_results(judgment);
+-- Existing DB upgrade path.
+ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_total INTEGER DEFAULT 0;
+ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_false_refusals INTEGER DEFAULT 0;
+ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_rate NUMERIC(5, 4) DEFAULT 0;
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS mitre_technique_id VARCHAR(20);
 
--- ── 기능 B ──
+CREATE INDEX IF NOT EXISTS idx_attack_category ON attack_patterns(category);
+CREATE INDEX IF NOT EXISTS idx_results_session ON test_results(session_id);
+CREATE INDEX IF NOT EXISTS idx_results_phase ON test_results(phase);
+CREATE INDEX IF NOT EXISTS idx_results_review ON test_results(manual_review_needed);
+CREATE INDEX IF NOT EXISTS idx_results_seed ON test_results(seed_id);
+CREATE INDEX IF NOT EXISTS idx_results_judgment ON test_results(judgment);
+CREATE INDEX IF NOT EXISTS idx_results_mitre ON test_results(mitre_technique_id);
 
-CREATE TABLE employees (
+-- ── 기능 B: 내부 정책/감사 로그 ──────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS employees (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     employee_id VARCHAR(50) UNIQUE NOT NULL,
     department VARCHAR(100),
@@ -84,7 +94,7 @@ CREATE TABLE employees (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE usage_logs (
+CREATE TABLE IF NOT EXISTS usage_logs (
     id BIGSERIAL PRIMARY KEY,
     employee_id UUID REFERENCES employees(id),
     request_content TEXT,
@@ -96,7 +106,7 @@ CREATE TABLE usage_logs (
     request_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE violations (
+CREATE TABLE IF NOT EXISTS violations (
     id SERIAL PRIMARY KEY,
     employee_id UUID REFERENCES employees(id),
     violation_type VARCHAR(20) NOT NULL,
@@ -108,7 +118,7 @@ CREATE TABLE violations (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE TABLE policy_rules (
+CREATE TABLE IF NOT EXISTS policy_rules (
     id SERIAL PRIMARY KEY,
     rule_name VARCHAR(100),
     rule_type VARCHAR(20),
@@ -119,6 +129,6 @@ CREATE TABLE policy_rules (
     created_at TIMESTAMP DEFAULT NOW()
 );
 
-CREATE INDEX idx_usage_employee ON usage_logs(employee_id);
-CREATE INDEX idx_usage_violation ON usage_logs(policy_violation);
-CREATE INDEX idx_violations_employee ON violations(employee_id);
+CREATE INDEX IF NOT EXISTS idx_usage_employee ON usage_logs(employee_id);
+CREATE INDEX IF NOT EXISTS idx_usage_violation ON usage_logs(policy_violation);
+CREATE INDEX IF NOT EXISTS idx_violations_employee ON violations(employee_id);
