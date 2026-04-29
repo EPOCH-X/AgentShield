@@ -19,7 +19,7 @@ from backend.core.judge import full_judge
 
 # 전역 상수 관리 (변수명 통일)
 JUDGE_MODEL = os.getenv("OLLAMA_JUDGE_MODEL", "unknown_model")
-DATA_PATH = project_root / "data" / "검수완료(830개).json"
+DATA_PATH = project_root / "data" / "curated_attack_sets" / "testbed_manual_mixed_10.json"
 # 모델명을 포함한 동적 출력 경로 설정
 OUTPUT_PATH = project_root / "data" / f"debug_results_ko.json"
 
@@ -75,7 +75,7 @@ async def benchmark_judge(dataset_path: Path, output_path: Path):
     with open(dataset_path, "r", encoding="utf-8") as f:
         dataset = json.load(f)
     
-    test_samples = dataset[:10]
+    test_samples = dataset[:1]
     metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0}
     results_log = []
 
@@ -91,6 +91,7 @@ async def benchmark_judge(dataset_path: Path, output_path: Path):
 
         # 1. 판정 실행
         result = await full_judge(category, attack, response)
+        print(result)
         
         pred_judgment = result.get("judgment")
         raw_detail = result.get("detail", "No detail")
