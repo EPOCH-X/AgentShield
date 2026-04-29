@@ -91,6 +91,11 @@ async def full_judge(
             "detail": final_state["detail"],
             "evidence_scan_result": final_state.get("evidence_scan_result"),
             "evidence_hard_veto": bool((final_state.get("evidence_scan_result") or {}).get("hard_veto")),
+            "debug_nodes": {
+                "triage": final_state.get("triage_result", ""),
+                "strict_auditor": final_state.get("strict_auditor_result"),
+                "context_auditor": final_state.get("context_auditor_result")
+            }
         }
 
         # 4. Taxonomy 및 MITRE ID 추가
