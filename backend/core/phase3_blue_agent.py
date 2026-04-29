@@ -43,6 +43,7 @@ def _write_defense_json_file(
     severity: Optional[str],
     phase: Optional[int],
     bundle: BlueDefenseBundle,
+    metadata: Optional[dict[str, Any]] = None,
 ) -> Path:
     # 사람이 검토/재활용하기 쉽게 취약점 단위 JSON 아티팩트로 저장한다.
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -56,6 +57,8 @@ def _write_defense_json_file(
         "defended_response": bundle.defended_response,
         "defense_rationale": bundle.defense_rationale,
     }
+    if metadata:
+        payload.update({key: value for key, value in metadata.items() if value not in (None, "")})
     safe_id = defense_id.replace("/", "_")
     path = out_dir / f"defense_{safe_id}.json"
     path.write_text(
@@ -305,6 +308,14 @@ async def run_phase3(
                 severity=vuln.get("severity"),
                 phase=vuln.get("phase"),
                 bundle=bundle,
+                metadata={
+                    "subcategory": vuln.get("subcategory"),
+                    "attack_prompt": attack_prompt,
+                    "target_response": target_response,
+                    "judge_reason": judge_detail,
+                    "failure_mode": failure_mode,
+                    "mitre_technique_id": mitre_technique_id,
+                },
             )
             json_files.append(str(written.relative_to(project_root)))
 
@@ -331,12 +342,19 @@ async def run_phase3(
                 {
                     "defense_id": defense_id,
                     "category": category,
+                    "subcategory": vuln.get("subcategory"),
+                    "phase": vuln.get("phase"),
+                    "round": vuln.get("round"),
+                    "original_attack_prompt": str(vuln.get("original_attack_prompt") or ""),
+                    "round_input_prompt": str(vuln.get("round_input_prompt") or ""),
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
                     "defended_response": bundle.defended_response,
                     "judge_reason": judge_detail,
                     "detail": judge_detail,
                     "severity": vuln.get("severity"),
+                    "judgment": vuln.get("judgment"),
+                    "judgment_confidence": vuln.get("judgment_confidence"),
                     "failure_mode": failure_mode,
                     "mitre_technique_id": mitre_technique_id,
                 }

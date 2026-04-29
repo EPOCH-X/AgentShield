@@ -9,7 +9,12 @@ from typing import TypedDict, Any, Optional, Callable, Awaitable
 
 from langgraph.graph import StateGraph, END
 
+import logging
+
 from backend.config import settings
+from backend.core.target_adapter import TargetAdapterConfig, probe_target_contract
+
+logger = logging.getLogger(__name__)
 
 
 # ── 상태 스키마 ──────────────────────────────────────────────────
@@ -126,12 +131,29 @@ async def run_scan(
     phase1_result_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
 ) -> ScanState:
     """전체 스캔 실행 진입점"""
+    effective_target_config = target_config or {}
+    adapter_config = TargetAdapterConfig.from_input(
+        target_url=target_url,
+        api_key=effective_target_config.get("api_key"),
+        provider=effective_target_config.get("provider"),
+        model=effective_target_config.get("model"),
+    )
+    try:
+        probe_result = await probe_target_contract(adapter_config)
+        logger.info(
+            "[target probe] ok provider=%s content_len=%s",
+            probe_result.get("provider"),
+            probe_result.get("content_len"),
+        )
+    except Exception as exc:
+        logger.warning("[target probe] skipped after failure: %s", exc.__class__.__name__)
+
     app = build_security_graph(phase1_result_callback=phase1_result_callback)
 
     initial_state: ScanState = {
         "session_id": session_id,
         "target_url": target_url,
-        "target_config": target_config or {},
+        "target_config": effective_target_config,
         "phase1_result": {},
         "phase2_result": {},
         "phase3_result": {},

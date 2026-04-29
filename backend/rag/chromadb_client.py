@@ -67,15 +67,21 @@ class ChromaRAGClient:
             embedding_function=self.embed_fn,
         )
     
-    def search_defense(self, query: str, n_results: int = 3, category: str | None = None):
+    def search_defense(
+        self,
+        query: str,
+        n_results: int = 3,
+        category: Optional[str] = None,
+        where: Optional[dict] = None,
+    ):
         """Phase 3: 방어 패턴(Blue Agent용) 검색"""
-        kwargs = {
-            "query_texts": [query],
-            "n_results": n_results,
-        }
-        if category:
-            kwargs["where"] = {"category": category}
-        return self.defense_col.query(**kwargs)
+        if category and where is None:
+            where = {"category": category}
+        return self.defense_col.query(
+            query_texts=[query],
+            n_results=n_results,
+            where=where,
+        )
     
     def search_attacks(self, query: str, n_results: int = 3, where: Optional[dict] = None):
         """Phase 2: 기존 성공한 공격(Red Agent용) 검색"""
@@ -213,11 +219,23 @@ def _flatten_get_results(results: dict) -> list[dict]:
     return flat
 
 
-def search_defense(query: str, n_results: int = 3) -> list[dict]:
+def search_defense(
+    query: str,
+    n_results: int = 3,
+    category: Optional[str] = None,
+    where: Optional[dict] = None,
+) -> list[dict]:
     """방어 패턴 검색 래퍼."""
     try:
         client = get_rag_client()
-        return _flatten_query_results(client.search_defense(query=query, n_results=n_results))
+        return _flatten_query_results(
+            client.search_defense(
+                query=query,
+                n_results=n_results,
+                category=category,
+                where=where,
+            )
+        )
     except Exception as exc:
         print(f"ChromaDB defense search unavailable: {exc}")
         return []

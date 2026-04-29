@@ -97,10 +97,16 @@ def _phase1_row_key_from_model(row: TestResult) -> tuple[Any, ...]:
 
 
 def _build_phase1_row(*, session_id: Any, result: dict[str, Any]) -> TestResult:
+    raw_attack_pattern_id = result.get("attack_pattern_id")
+    try:
+        attack_pattern_id = int(raw_attack_pattern_id) if raw_attack_pattern_id is not None else None
+    except (TypeError, ValueError):
+        attack_pattern_id = None
+
     return TestResult(
         session_id=session_id,
         phase=1,
-        attack_pattern_id=result.get("attack_pattern_id"),
+        attack_pattern_id=attack_pattern_id,
         seed_id=result.get("seed_id"),
         attack_prompt=result.get("attack_prompt"),
         target_response=result.get("target_response"),
@@ -188,8 +194,8 @@ async def _persist_phase4_summary(
                 session_id=session_id,
                 phase=4,
                 seed_id=str(item.get("defense_id") or ""),
-                attack_prompt=str(item.get("defense_id") or "phase4-check"),
-                target_response=str(item.get("input_action") or ""),
+                attack_prompt=str(item.get("attack_prompt") or item.get("defense_id") or "phase4-check"),
+                target_response=str(item.get("response_after_defense") or ""),
                 judgment="safe" if item.get("verdict") == "safe" else "vulnerable",
                 severity="medium",
                 category=item.get("category"),
@@ -590,7 +596,7 @@ async def update_scan_result_review(
         raise HTTPException(status_code=404, detail="결과를 찾을 수 없습니다")
 
     allowed_judgments = {"safe", "vulnerable", "ambiguous", "error", "generation_failed"}
-    allowed_verify = {"safe", "unsafe", "false_positive", None}
+    allowed_verify = {"safe", "unsafe", "blocked", "mitigated", "bypassed", "false_positive", None}
 
     if body.judgment is not None:
         if body.judgment not in allowed_judgments:
