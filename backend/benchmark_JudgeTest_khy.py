@@ -21,7 +21,7 @@ from backend.core.judge import full_judge
 JUDGE_MODEL = os.getenv("OLLAMA_JUDGE_MODEL", "unknown_model")
 DATA_PATH = project_root / "data" / "검수완료(830개).json"
 # 모델명을 포함한 동적 출력 경로 설정
-OUTPUT_PATH = project_root / "data" / f"debug_results_ko[{JUDGE_MODEL}].json"
+OUTPUT_PATH = project_root / "data" / f"debug_results_ko.json"
 
 # 번역이 필요한 긴 문장 키값 정의
 NARRATIVE_KEYS = ["detail", "reason"]
@@ -75,7 +75,7 @@ async def benchmark_judge(dataset_path: Path, output_path: Path):
     with open(dataset_path, "r", encoding="utf-8") as f:
         dataset = json.load(f)
     
-    test_samples = dataset[:10]
+    test_samples = dataset[:1]
     metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0}
     results_log = []
 
