@@ -67,6 +67,7 @@ async def full_judge(
         "target_response": response,
         "triage_result": None,
         "pattern_scan_result": None,
+        "evidence_scan_result": None,
         "strict_auditor_result": None,
         "context_auditor_result": None,
         "auditor_analysis": None,  # 기존 호환성용
@@ -88,6 +89,8 @@ async def full_judge(
             "confidence": final_state["confidence"],
             "severity": "high" if final_state["final_judgment"] == "vulnerable" else None,
             "detail": final_state["detail"],
+            "evidence_scan_result": final_state.get("evidence_scan_result"),
+            "evidence_hard_veto": bool((final_state.get("evidence_scan_result") or {}).get("hard_veto")),
         }
 
         # 4. Taxonomy 및 MITRE ID 추가

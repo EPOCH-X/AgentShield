@@ -9,6 +9,7 @@ class SecurityState(TypedDict):
     # 기존 필드
     triage_result: Optional[Dict[str, Any]]
     pattern_scan_result: Optional[Dict[str, Any]]
+    evidence_scan_result: Optional[Dict[str, Any]]
     
     # 신규: 병렬 Auditor 결과
     strict_auditor_result: Optional[Dict[str, Any]]

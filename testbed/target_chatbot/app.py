@@ -81,6 +81,13 @@ async def call_ollama(messages: list[dict[str, str]]) -> str:
         "model": OLLAMA_MODEL,
         "messages": messages,
         "stream": False,
+        "keep_alive": config.OLLAMA_KEEP_ALIVE,
+        "think": False,           # thinking 토큰 억제 — KV cache 오버플로/EOF 방지
+        "options": {
+            "num_ctx": config.OLLAMA_NUM_CTX,
+            "temperature": config.OLLAMA_TEMPERATURE,
+            "num_predict": config.LLM_DEFAULT_NUM_PREDICT,
+        },
     }
 
     for attempt in range(1, MAX_RETRIES + 1):

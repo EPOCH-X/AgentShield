@@ -2,14 +2,19 @@
 [R1] LangGraph 오케스트레이션 — Phase 1→2→3→4 상태 그래프
 
 기능별 파이프라인 섹션 5 참조.
-Phase 4에서 bypassed > 0이면 Phase 3으로 재순환 (최대 3회).
+Phase 4에서 unsafe > 0이면 Phase 3으로 재순환 (최대 3회).
 """
 
 from typing import TypedDict, Any, Optional, Callable, Awaitable
 
 from langgraph.graph import StateGraph, END
 
+import logging
+
 from backend.config import settings
+from backend.core.target_adapter import TargetAdapterConfig, probe_target_contract
+
+logger = logging.getLogger(__name__)
 
 
 # ── 상태 스키마 ──────────────────────────────────────────────────
@@ -22,7 +27,7 @@ class ScanState(TypedDict):
     phase2_result: dict[str, Any]  # [R1] Phase 2 출력
     phase3_result: dict[str, Any]  # [R3] Phase 3 출력
     phase4_result: dict[str, Any]  # [R3] Phase 4 출력
-    iteration: int                 # Phase 3↔4 재순환 카운터
+    iteration: int                 # Phase 4 재검증 재시도 카운터
 
 
 # ── 노드 함수 ────────────────────────────────────────────────────
@@ -59,9 +64,7 @@ async def phase4_node(state: ScanState) -> dict:
 
     result = await run_phase4(
         session_id=state["session_id"],
-        target_url=state["target_url"],
         phase3_result=state["phase3_result"],
-        target_config=state.get("target_config") or {},
     )
     return {"phase4_result": result, "iteration": state["iteration"] + 1}
 
@@ -71,13 +74,13 @@ async def phase4_node(state: ScanState) -> dict:
 def should_retry_defense(state: ScanState) -> str:
     """Phase 4 → Phase 3 재순환 판단
 
-    조건: bypassed > 0 AND iteration < PHASE4_MAX_ITERATIONS(3)
+    조건: unsafe > 0 AND iteration < PHASE4_MAX_ITERATIONS(3)
     """
     phase4 = state.get("phase4_result", {})
-    bypassed = phase4.get("bypassed", 0)
+    unsafe = int(phase4.get("unsafe") or 0)
     iteration = state.get("iteration", 0)
 
-    if bypassed > 0 and iteration < settings.PHASE4_MAX_ITERATIONS:
+    if unsafe > 0 and iteration < settings.PHASE4_MAX_ITERATIONS:
         return "phase3"
     return END
 
@@ -128,12 +131,29 @@ async def run_scan(
     phase1_result_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
 ) -> ScanState:
     """전체 스캔 실행 진입점"""
+    effective_target_config = target_config or {}
+    adapter_config = TargetAdapterConfig.from_input(
+        target_url=target_url,
+        api_key=effective_target_config.get("api_key"),
+        provider=effective_target_config.get("provider"),
+        model=effective_target_config.get("model"),
+    )
+    try:
+        probe_result = await probe_target_contract(adapter_config)
+        logger.info(
+            "[target probe] ok provider=%s content_len=%s",
+            probe_result.get("provider"),
+            probe_result.get("content_len"),
+        )
+    except Exception as exc:
+        logger.warning("[target probe] skipped after failure: %s", exc.__class__.__name__)
+
     app = build_security_graph(phase1_result_callback=phase1_result_callback)
 
     initial_state: ScanState = {
         "session_id": session_id,
         "target_url": target_url,
-        "target_config": target_config or {},
+        "target_config": effective_target_config,
         "phase1_result": {},
         "phase2_result": {},
         "phase3_result": {},

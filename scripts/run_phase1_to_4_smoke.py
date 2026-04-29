@@ -16,6 +16,7 @@ import argparse
 import asyncio
 from datetime import datetime
 import json
+import logging
 import random
 import sys
 import uuid
@@ -37,6 +38,30 @@ def _log_ts() -> str:
 def _trace(enabled: bool, msg: str) -> None:
     if enabled:
         print(f"[TRACE] [{_log_ts()}] {msg}", flush=True)
+
+
+def _make_phase1_result_printer():
+    result_counter = {"n": 0}
+
+    def _print_result(result: dict) -> None:
+        result_counter["n"] += 1
+        idx = result_counter["n"]
+        category = result.get("category", "?")
+        subcategory = result.get("subcategory", "?")
+        judgment = result.get("judgment", "?")
+
+        if judgment == "vulnerable":
+            print(f"  [{idx}] {category}/{subcategory} -> 🔴 vulnerable", flush=True)
+        elif judgment == "safe":
+            print(f"  [{idx}] {category}/{subcategory} -> 🟢 safe", flush=True)
+        elif judgment == "ambiguous":
+            print(f"  [{idx}] {category}/{subcategory} -> 🟡 ambiguous", flush=True)
+        else:
+            source = result.get("error_source", "Unknown")
+            reason = result.get("failure_mode", result.get("detail", "unknown"))
+            print(f"  [{idx}] {category}/{subcategory} -> ❌ error [{source}] {reason}", flush=True)
+
+    return _print_result
 
 
 # ── Phase1 어댑터 패치 ────────────────────────────────────────────────────────
@@ -294,6 +319,10 @@ def _patched_phase1_loader(
         effective_max = max_attacks if max_attacks is not None else max_attacks_inner
         if effective_max is not None and effective_max >= 0:
             attacks = attacks[:effective_max]
+        print(
+            f"[INFO] [{_log_ts()}] phase1 attack file/db load done: {len(attacks)} items",
+            flush=True,
+        )
         return attacks
 
     phase1_scanner._load_attacks = wrapped_loader
@@ -376,11 +405,9 @@ def _short_summary(final_state: dict) -> dict:
         "phase3_defenses_generated": p3.get("defenses_generated"),
         "phase3_failed": p3.get("failed"),
         "phase4_total_tested": p4.get("total_tested"),
-        "phase4_benign_total": p4.get("benign_total"),
-        "phase4_benign_passed": p4.get("benign_passed"),
-        "phase4_blocked": p4.get("blocked"),
-        "phase4_mitigated": p4.get("mitigated"),
-        "phase4_bypassed": p4.get("bypassed"),
+        "phase4_safe": p4.get("safe"),
+        "phase4_unsafe": p4.get("unsafe"),
+        "phase4_mode": p4.get("mode"),
         "phase4_passed_threshold": p4.get("passed_threshold"),
     }
 
@@ -388,10 +415,10 @@ def _short_summary(final_state: dict) -> dict:
 def _defense_code_preview(payload: dict) -> str:
     return json.dumps(
         {
-            "input_filter": payload.get("input_filter", ""),
-            "output_filter": payload.get("output_filter", ""),
-            "system_prompt_patch": payload.get("system_prompt_patch", ""),
+            "defended_response": payload.get("defended_response", ""),
             "defense_rationale": payload.get("defense_rationale", ""),
+            "verify_result": payload.get("verify_result", ""),
+            "failure_mode": payload.get("failure_mode", ""),
         },
         ensure_ascii=False,
         indent=2,
@@ -477,9 +504,13 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
                 f"category={fd.get('category') or '-'} error={fd.get('error')}"
             )
     lines.append(f"- phase4_total_tested: {phase4.get('total_tested', 0)}")
-    lines.append(f"- phase4_benign_total: {phase4.get('benign_total', 0)}")
-    lines.append(f"- phase4_false_positives: {phase4.get('false_positives', 0)}")
-    lines.append(f"- phase4_benign_passed: {phase4.get('benign_passed', 0)}")
+    lines.append(f"- phase4_mode: {phase4.get('mode', '')}")
+    lines.append(f"- phase4_safe: {phase4.get('safe', 0)}")
+    lines.append(f"- phase4_unsafe: {phase4.get('unsafe', 0)}")
+    if "benign_total" in phase4:
+        lines.append(f"- phase4_benign_total: {phase4.get('benign_total', 0)}")
+        lines.append(f"- phase4_false_positives: {phase4.get('false_positives', 0)}")
+        lines.append(f"- phase4_benign_passed: {phase4.get('benign_passed', 0)}")
     lines.append("")
 
     if not source_rows:
@@ -600,6 +631,15 @@ async def _ensure_test_session(session_id: str, target_url: str) -> None:
 # ── 메인 ──────────────────────────────────────────────────────────────────────
 
 async def _main(args: argparse.Namespace) -> int:
+    if args.verbose_trace:
+        logging.basicConfig(
+            level=logging.INFO,
+            format="[%(levelname)s] [%(asctime)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S",
+        )
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("sentence_transformers").setLevel(logging.WARNING)
+
     # ── Ollama URL 런타임 재정의 (--ollama-url 또는 자동감지) ─────────────────
     if args.ollama_url:
         import os as _os
@@ -614,6 +654,8 @@ async def _main(args: argparse.Namespace) -> int:
     session_id = args.session_id or str(uuid.uuid4())
     print(f"[INFO] [{_log_ts()}] session_id={session_id}")
     print(f"[INFO] [{_log_ts()}] target_url={args.target_url}")
+    print(f"[INFO] [{_log_ts()}] target_provider={args.target_provider or 'AUTO/ENV'}")
+    print(f"[INFO] [{_log_ts()}] target_model={args.target_model or 'ENV/DEFAULT'}")
     print(f"[INFO] [{_log_ts()}] category={args.category or 'ALL'}")
     print(f"[INFO] [{_log_ts()}] max_attacks={args.max_attacks if args.max_attacks is not None else 'ALL'}")
     print(f"[INFO] [{_log_ts()}] phase2_rounds={args.phase2_rounds if args.phase2_rounds is not None else 'DEFAULT'}")
@@ -626,6 +668,7 @@ async def _main(args: argparse.Namespace) -> int:
     print(f"[INFO] [{_log_ts()}] Phase1 -> 2 -> 3 -> 4 실행 시작")
 
     await _ensure_test_session(session_id, args.target_url)
+    phase1_result_printer = _make_phase1_result_printer()
 
     with _patched_phase1_loader(
         category=args.category,
@@ -633,14 +676,18 @@ async def _main(args: argparse.Namespace) -> int:
         shuffle=args.shuffle,
         seed=args.seed,
     ):
-        with _patched_phase1_target_for_ollama(verbose=args.verbose_trace):
-            with _patched_phase2_target_for_ollama(args.target_url, verbose=args.verbose_trace):
-                with _patched_phase2_rounds(args.phase2_rounds):
-                    with _patched_llm_runtime(args.llm_timeout, verbose=args.verbose_trace):
-                        final_state = await run_scan(
-                            session_id=session_id,
-                            target_url=args.target_url,
-                        )
+        with _patched_phase2_rounds(args.phase2_rounds):
+            with _patched_llm_runtime(args.llm_timeout, verbose=args.verbose_trace):
+                final_state = await run_scan(
+                    session_id=session_id,
+                    target_url=args.target_url,
+                    target_config={
+                        "provider": args.target_provider,
+                        "model": args.target_model,
+                        "api_key": args.target_api_key,
+                    },
+                    phase1_result_callback=phase1_result_printer,
+                )
 
     summary = _short_summary(final_state)
     print(f"\n[INFO] [{_log_ts()}] === SUMMARY ===")
@@ -667,6 +714,24 @@ def parse_args() -> argparse.Namespace:
         "--target-url",
         default="http://localhost:8010/chat",
         help="테스트 대상 챗봇 endpoint (기본: testbed /chat)",
+    )
+    parser.add_argument(
+        "--target-provider",
+        default=None,
+        help=(
+            "타겟 요청 형식. "
+            "auto|docker_chatbot|generic|ollama_chat|ollama_generate|openai_chat"
+        ),
+    )
+    parser.add_argument(
+        "--target-model",
+        default=None,
+        help="타겟 provider가 model 필드를 요구할 때 사용할 모델명",
+    )
+    parser.add_argument(
+        "--target-api-key",
+        default=None,
+        help="OpenAI 호환 타겟 등 Authorization Bearer 키가 필요한 경우 사용",
     )
     parser.add_argument(
         "--ollama-url",

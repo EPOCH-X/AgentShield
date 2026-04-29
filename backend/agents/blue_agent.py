@@ -123,8 +123,10 @@ def build_blue_prompt(
     *,
     failure_mode: str | None = None,
     mitre_technique_id: str | None = None,
+    judge_detail: str = "",
     owasp_recommendation: str = "",
     rag_defense_examples: str = "",
+    rag_defense_structured_examples: str = "",
 ) -> str:
     """
     취약점 1건 + (선택) OWASP 한 줄 + (선택) RAG에서 가져온 방어 사례 텍스트 → LLM용 프롬프트.
@@ -137,6 +139,16 @@ def build_blue_prompt(
     rag_block = (
         f"[Similar defense patterns from knowledge base]\n{rag_defense_examples.strip()}\n\n"
         if rag_defense_examples.strip()
+        else ""
+    )
+    structured_rag_block = (
+        f"[Verified structured defense examples]\n{rag_defense_structured_examples.strip()}\n\n"
+        if rag_defense_structured_examples.strip()
+        else ""
+    )
+    judge_block = (
+        f"[Judge finding detail]\n{judge_detail.strip()}\n\n"
+        if judge_detail.strip()
         else ""
     )
     mitre_block = ""
@@ -174,7 +186,7 @@ category: {category}
 [Model response that exhibited the issue]
 {target_response}
 
-{owasp_block}{rag_block}{mitre_block}
+{judge_block}{owasp_block}{rag_block}{structured_rag_block}{mitre_block}
 {category_policy_block}
 
 [Defense authoring rules]

@@ -71,8 +71,6 @@ services:
       PHASE2_TIMEOUT: ${PHASE2_TIMEOUT:-300}
       PHASE2_PROBE_TIMEOUT: ${PHASE2_PROBE_TIMEOUT:-60}
       FRR_TARGET_TIMEOUT: ${FRR_TARGET_TIMEOUT:-180}
-      PHASE4_PROXY_TIMEOUT: ${PHASE4_PROXY_TIMEOUT:-180}
-      DEFENSE_PROXY_TARGET_TIMEOUT: ${DEFENSE_PROXY_TARGET_TIMEOUT:-180}
     depends_on:
       db:
         condition: service_healthy
@@ -83,14 +81,6 @@ services:
       - ./adapters:/app/adapters
       - ./data:/app/data
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-
-  defense-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-    command: uvicorn defense_proxy.proxy_server:app --host 0.0.0.0 --port 8001 --reload
 
   monitoring-proxy:
     build:

@@ -56,7 +56,7 @@ class AgentShieldLLM:
                 "temperature": 0.1,
                 "top_p": 0.95,
                 "top_k": 64,
-                "num_ctx": 8192,
+                "num_ctx": settings.OLLAMA_BASE_NUM_CTX,
                 "adapter_path": None,
                 "think": False,
             },
@@ -66,7 +66,7 @@ class AgentShieldLLM:
                 "temperature": 1.0,
                 "top_p": 0.95,
                 "top_k": 64,
-                "num_ctx": 8192,
+                "num_ctx": settings.OLLAMA_RED_NUM_CTX,
                 "adapter_path": os.path.join(root, "adapters", "lora-red"),
                 "think": False,
             },
@@ -76,7 +76,7 @@ class AgentShieldLLM:
                 "temperature": 0.1,
                 "top_p": 0.95,
                 "top_k": 64,
-                "num_ctx": 8192,
+                "num_ctx": settings.OLLAMA_BLUE_NUM_CTX,
                 "adapter_path": os.path.join(root, "adapters", "lora-blue"),
                 "think": False,
             },
@@ -86,7 +86,7 @@ class AgentShieldLLM:
                 "temperature": 0.0,
                 "top_p": 1,
                 "top_k": 1,
-                "num_ctx": 16384,
+                "num_ctx": settings.OLLAMA_JUDGE_NUM_CTX,
                 "adapter_path": os.path.join(root, "adapters", "lora-judge"),
                 "think": False,
             },
@@ -226,6 +226,8 @@ class AgentShieldLLM:
                     }
                 if think_val is not None:
                     payload["think"] = think_val
+                if settings.OLLAMA_KEEP_ALIVE:
+                    payload["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
                 if response_model:
                     payload["format"] = response_model.model_json_schema()
 

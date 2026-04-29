@@ -77,9 +77,9 @@ async def run_phase1(
     """
     adapter_config = TargetAdapterConfig.from_input(
         target_url=target_url,
-        api_key=None,
-        provider=None,
-        model=None,
+        api_key=(target_config or {}).get("api_key"),
+        provider=(target_config or {}).get("provider"),
+        model=(target_config or {}).get("model"),
     )
 
     # ★ 반드시 모듈 속성(_self._load_attacks)으로 호출해야
@@ -199,7 +199,17 @@ async def _load_attack_patterns_from_file(
     from pathlib import Path
 
     base = Path(__file__).resolve().parents[2] / "data"
-    candidates = sorted(base.glob("attack_patterns/**/*.json"))
+    configured_path = Path(settings.ATTACK_PATTERN_PATH) if settings.ATTACK_PATTERN_PATH else None
+    if configured_path and not configured_path.is_absolute():
+        configured_path = Path(__file__).resolve().parents[2] / configured_path
+
+    curated_testbed = base / "curated_attack_sets" / "testbed_manual_mixed_10.json"
+    if configured_path:
+        candidates = [configured_path] if configured_path.exists() else []
+    elif curated_testbed.exists():
+        candidates = [curated_testbed]
+    else:
+        candidates = sorted(base.glob("attack_patterns/**/*.json"))
     if not candidates:
         single = base / "attack_patterns.json"
         candidates = [single] if single.exists() else []
@@ -221,7 +231,13 @@ async def _load_attack_patterns_from_file(
                     "id": item.get("id", item.get("vector_id", item.get("attack_pattern_id", ""))),
                     "category": item.get("category", ""),
                     "subcategory": item.get("subcategory", ""),
-                    "attack_prompt": item.get("attack_prompt", item.get("prompt_text", "")),
+                    "attack_prompt": (
+                        item.get("attack_prompt")
+                        or item.get("prompt_text")
+                        or item.get("mutated_prompt")
+                        or item.get("original_prompt")
+                        or ""
+                    ),
                     "target_response": item.get("target_response", ""),
                     "seed_id": item.get("seed_id", str(item.get("id", ""))),
                     "severity": item.get("severity", ""),

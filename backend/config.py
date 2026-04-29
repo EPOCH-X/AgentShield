@@ -22,6 +22,14 @@ def _resolve_ollama_base_url() -> str:
 
 
 class AppSettings:
+    # Runtime
+    APP_ENV: str = os.getenv("APP_ENV", "testbed").strip().lower()
+    TARGET_PROVIDER: str = os.getenv("TARGET_PROVIDER", "auto").strip().lower()
+    TARGET_MODEL: str = os.getenv("TARGET_MODEL", "").strip()
+    TARGET_API_KEY: str = os.getenv("TARGET_API_KEY", "").strip()
+    TARGET_ALLOW_LOCAL_URLS: bool = os.getenv("TARGET_ALLOW_LOCAL_URLS", "false").lower() == "true"
+    TARGET_CONTRACT_TIMEOUT: int = int(os.getenv("TARGET_CONTRACT_TIMEOUT", 30))
+
     # PostgreSQL
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL",
@@ -57,6 +65,12 @@ class AppSettings:
         "agentshield-blue",
     )
     OLLAMA_GENERATION_API: str = os.getenv("OLLAMA_GENERATION_API", "generate")
+    OLLAMA_KEEP_ALIVE: str = os.getenv("OLLAMA_KEEP_ALIVE", "30s")
+    OLLAMA_BASE_NUM_CTX: int = int(os.getenv("OLLAMA_BASE_NUM_CTX", 4096))
+    OLLAMA_RED_NUM_CTX: int = int(os.getenv("OLLAMA_RED_NUM_CTX", 4096))
+    OLLAMA_BLUE_NUM_CTX: int = int(os.getenv("OLLAMA_BLUE_NUM_CTX", 4096))
+    OLLAMA_JUDGE_NUM_CTX: int = int(os.getenv("OLLAMA_JUDGE_NUM_CTX", 4096))
+    OLLAMA_GUARD_NUM_CTX: int = int(os.getenv("OLLAMA_GUARD_NUM_CTX", 4096))
     LLM_REQUEST_RETRIES: int = int(os.getenv("LLM_REQUEST_RETRIES", 4))
     LLM_RETRY_BACKOFF_BASE: float = float(os.getenv("LLM_RETRY_BACKOFF_BASE", 2.0))
     LLM_CHAT_FALLBACK_ON_EOF: bool = os.getenv("LLM_CHAT_FALLBACK_ON_EOF", "true").lower() == "true"
@@ -67,12 +81,6 @@ class AppSettings:
     CHROMADB_PORT: int = int(os.getenv("CHROMADB_PORT", 8003))
     RED_RAG_REFERENCE_LIMIT: int = int(os.getenv("RED_RAG_REFERENCE_LIMIT", 8))
     RED_RAG_RECENT_REFERENCE_LIMIT: int = int(os.getenv("RED_RAG_RECENT_REFERENCE_LIMIT", 4))
-
-    # Defense Proxy
-    DEFENSE_PROXY_URL: str = os.getenv(
-        "DEFENSE_PROXY_URL", "http://localhost:8001"
-    )
-    DEFENSE_PROXY_TARGET_TIMEOUT: int = int(os.getenv("DEFENSE_PROXY_TARGET_TIMEOUT", 180))
 
     # Monitoring Proxy
     MONITORING_PROXY_URL: str = os.getenv(
@@ -89,6 +97,7 @@ class AppSettings:
     PHASE1_CONCURRENCY: int = 5
     PHASE1_TIMEOUT: int = int(os.getenv("PHASE1_TIMEOUT", 120))
     PHASE1_ALLOW_FILE_FALLBACK: bool = os.getenv("PHASE1_ALLOW_FILE_FALLBACK", "false").lower() == "true"
+    ATTACK_PATTERN_PATH: str = os.getenv("ATTACK_PATTERN_PATH", "").strip()
 
     # Dev seed
     DEV_SEED_INCLUDE_ATTACK_PATTERNS: bool = os.getenv("DEV_SEED_INCLUDE_ATTACK_PATTERNS", "false").lower() == "true"
@@ -106,9 +115,6 @@ class AppSettings:
 
     # Phase 4
     PHASE4_MAX_ITERATIONS: int = 3
-    PHASE4_BLOCK_RATE_THRESHOLD: float = 0.80
-    PHASE4_FP_RATE_THRESHOLD: float = 0.05
-    PHASE4_PROXY_TIMEOUT: int = int(os.getenv("PHASE4_PROXY_TIMEOUT", 180))
 
     # LoRA Adapters
     LORA_RED_PATH: str = os.getenv("LORA_RED_PATH", "./adapters/lora-red")

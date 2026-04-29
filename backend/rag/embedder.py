@@ -18,5 +18,5 @@ class MiniLMEmbeddingFunction(EmbeddingFunction):
         self.model = SentenceTransformer("all-MiniLM-L6-v2", device="cpu")
 
     def __call__(self, input: Documents) -> Embeddings:
-        embeddings = self.model.encode(input).tolist()
+        embeddings = self.model.encode(input, show_progress_bar=False).tolist()
         return embeddings
