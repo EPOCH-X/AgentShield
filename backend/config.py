@@ -76,6 +76,7 @@ class AppSettings:
     LLM_CHAT_FALLBACK_ON_EOF: bool = os.getenv("LLM_CHAT_FALLBACK_ON_EOF", "true").lower() == "true"
 
     # ChromaDB
+    CHROMADB_MODE: str = os.getenv("CHROMADB_MODE", "persistent").strip().lower()
     CHROMADB_PERSIST_PATH: str = os.getenv("CHROMADB_PERSIST_PATH", "./chromadb_data")
     CHROMADB_HOST: str = os.getenv("CHROMADB_HOST", "localhost")
     CHROMADB_PORT: int = int(os.getenv("CHROMADB_PORT", 8003))

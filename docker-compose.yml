@@ -50,6 +50,7 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      CHROMADB_MODE: http
       CHROMADB_HOST: chromadb
       CHROMADB_PORT: 8000
       PHASE1_ALLOW_FILE_FALLBACK: "true"
