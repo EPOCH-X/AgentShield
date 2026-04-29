@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildMockResponse } from "../../../../lib/devBackendMock";
 
-const BACKEND = process.env.BACKEND_URL ?? "http://127.0.0.1:8000";
+const DEFAULT_BACKEND = "http://127.0.0.1:8000";
+
+function backendOrigin(): string {
+  const raw = process.env.AGENTSHIELD_API_URL || process.env.BACKEND_URL || DEFAULT_BACKEND;
+  return raw.replace(/\/$/, "");
+}
 
 async function handler(req: NextRequest, { params }: { params: { path: string[] } }) {
   const segments = params.path ?? [];
@@ -11,7 +16,7 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
 
   // 백엔드로 프록시 시도
   try {
-    const backendUrl = `${BACKEND}/v1/${segments.join("/")}${search.toString() ? "?" + search.toString() : ""}`;
+    const backendUrl = `${backendOrigin()}/api/v1/${segments.join("/")}${search.toString() ? "?" + search.toString() : ""}`;
     const headers: Record<string, string> = {};
     req.headers.forEach((v, k) => {
       if (!["host", "connection"].includes(k)) headers[k] = v;
