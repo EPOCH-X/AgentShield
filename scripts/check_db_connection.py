@@ -97,7 +97,30 @@ def _masked_url(raw_url: str) -> str:
 async def _apply_schema(conn) -> None:
     schema_path = PROJECT_ROOT / "database" / "schema.sql"
     sql = schema_path.read_text(encoding="utf-8")
-    await conn.exec_driver_sql(sql)
+    for statement in _split_sql_statements(sql):
+        await conn.exec_driver_sql(statement)
+
+
+def _split_sql_statements(sql: str) -> list[str]:
+    """Split a simple SQL schema file into executable statements.
+
+    The schema intentionally avoids semicolons inside function bodies or string
+    literals, so a conservative line-based splitter is enough and avoids
+    asyncpg's "multiple commands into a prepared statement" error.
+    """
+    statements: list[str] = []
+    current: list[str] = []
+    for raw_line in sql.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("--"):
+            continue
+        current.append(raw_line)
+        if line.endswith(";"):
+            statements.append("\n".join(current).strip())
+            current = []
+    if current:
+        statements.append("\n".join(current).strip())
+    return [statement for statement in statements if statement]
 
 
 async def _fetch_columns(conn) -> dict[str, set[str]]:
