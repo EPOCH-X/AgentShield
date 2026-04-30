@@ -27,17 +27,19 @@ OUTPUT_PATH = project_root / "data" / f"benchmark_result_{TIMESTAMP}.json"
 # 번역 설정
 NARRATIVE_KEYS = ["detail", "reason"]
 MAX_TRANSLATE_CHARS = 2000
-GLOBAL_TRANSLATOR = GoogleTranslator(source='en', target='ko')
 SEMAPHORE = asyncio.Semaphore(3)
 
 async def translate_text(text: str, max_retries: int = 2) -> str:
-    """긴 텍스트 분할 및 비동기 번역 (재시도 로직 포함)"""
+    """긴 텍스트 분할 및 비동기 번역 (독립 객체 생성으로 스레드 세이프 보장)"""
     if not text or not isinstance(text, str) or text.strip() in ["No detail", ""]:
         return text
     
     async with SEMAPHORE:
         for attempt in range(max_retries):
             try:
+                # 호출 시마다 독립된 번역기 객체를 생성하여 Race Condition 방지
+                translator = GoogleTranslator(source='en', target='ko')
+
                 if len(text) > MAX_TRANSLATE_CHARS:
                     sentences = re.split(r'(?<=[.!?])\s+|\n', text)
                     chunks, current_chunk = [], ""
@@ -46,37 +48,37 @@ async def translate_text(text: str, max_retries: int = 2) -> str:
                             current_chunk += (" " + sentence if current_chunk else sentence)
                         else:
                             if current_chunk:
-                                chunks.append(await asyncio.to_thread(GLOBAL_TRANSLATOR.translate, current_chunk))
+                                chunks.append(await asyncio.to_thread(translator.translate, current_chunk))
                             current_chunk = sentence
                     if current_chunk:
-                        chunks.append(await asyncio.to_thread(GLOBAL_TRANSLATOR.translate, current_chunk))
+                        chunks.append(await asyncio.to_thread(translator.translate, current_chunk))
                     return " ".join(chunks)
                 
-                return await asyncio.to_thread(GLOBAL_TRANSLATOR.translate, text)
+                # 단일 문자열 번역
+                return await asyncio.to_thread(translator.translate, text)
                 
             except Exception as e:
                 if attempt < max_retries - 1:
                     await asyncio.sleep(1.5)
                 else:
-                    print(f"번역 최종 실패 (API 제한 의심): {e}")
+                    print(f"번역 최종 실패: {e}")
                     return text
 
 async def translate_dict_fields(data_dict: dict) -> dict:
-    """딕셔너리 내 특정 필드만 추출하여 번역"""
+    """딕셔너리 내 특정 필드만 추출하여 번역 (키-태스크 명시적 매핑)"""
     if not isinstance(data_dict, dict):
         return data_dict
     
     translated_data = data_dict.copy()
-    translate_tasks = {}
-
-    for key, value in data_dict.items():
-        if key in NARRATIVE_KEYS and isinstance(value, str) and value.strip():
-            translate_tasks[key] = translate_text(value)
     
-    if translate_tasks:
-        keys = list(translate_tasks.keys())
-        results = await asyncio.gather(*translate_tasks.values())
-        for key, result_text in zip(keys, results):
+    # [최적화] 키 배열과 태스크 배열의 인덱스를 명확히 동기화
+    target_keys = [k for k, v in data_dict.items() if k in NARRATIVE_KEYS and isinstance(v, str) and v.strip()]
+    
+    if target_keys:
+        tasks = [translate_text(data_dict[k]) for k in target_keys]
+        results = await asyncio.gather(*tasks)
+        
+        for key, result_text in zip(target_keys, results):
             translated_data[f"{key}_ko"] = result_text
             
     return translated_data
@@ -124,14 +126,15 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
             else:
                 metrics["TN" if is_correct else "FP"] += 1
 
-            # 비동기 병렬 번역 준비 (명시적 딕셔너리 매핑 사용)
+            # 비동기 병렬 번역 준비
             node_names = [name for name, data in debug_nodes.items() if data]
             node_tasks = [translate_dict_fields(debug_nodes[name]) for name in node_names]
             
+            # [안전장치 유지] 인덱스 고정을 통한 명확한 매핑
             field_tasks = [
-                translate_text(attack_prompt),      # index 0
-                translate_text(target_response),    # index 1
-                translate_text(consensus_detail)    # index 2
+                translate_text(attack_prompt),      # index 0: attack
+                translate_text(target_response),    # index 1: response
+                translate_text(consensus_detail)    # index 2: detail
             ]
             
             all_node_translated = await asyncio.gather(*node_tasks) if node_tasks else []
@@ -139,6 +142,7 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
             
             translated_nodes = dict(zip(node_names, all_node_translated))
             
+            # 인덱스를 통해 1:1 매핑 (데이터 꼬임 원천 차단)
             attack_ko = all_field_translated[0]
             response_ko = all_field_translated[1]
             detail_ko = all_field_translated[2]
@@ -207,7 +211,6 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
         
     try:
-        # 각 클래스별로 75개씩, 총 150개 추출
         asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=75))
     except KeyboardInterrupt:
         pass
