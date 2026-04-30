@@ -34,7 +34,7 @@ from peft import (
     get_peft_model,
     prepare_model_for_kbit_training
 )
-from trl import SFTTrainer
+from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 
 from backend.config import settings
@@ -70,7 +70,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     print("="*50 + "\n")
 
     # 모델 id 설정
-    model_id = "google/gemma-4-E2B"
+    model_id = "Qwen/Qwen3.5-0.8B"
 
     # 기반 모델 로드 — CUDA는 QLoRA 4-bit, MPS/CPU는 float16 전체 로드
     if use_quantization:
@@ -105,7 +105,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         r=16, 
         lora_alpha=32, 
         lora_dropout=0.1,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
         task_type="CAUSAL_LM",
         bias="none"
     )
@@ -118,61 +118,40 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     # 데이터셋 로드
     dataset = load_dataset("json", data_files=train_file)
 
-    def formatting_prompts_func(example):
-        output_texts = []
-        for i in range(len(example['instruction'])):
-            # Gemma 전용 프롬프트 템플릿 적용 (2026년 기준 표준 가안)
-            text = f"<start_of_turn>user\n{example['instruction'][i]}\n{example['input'][i]}<end_of_turn>\n"
-            text += f"<start_of_turn>model\n{example['output'][i]}<end_of_turn>"
-            output_texts.append(text)
-        return output_texts
-
     # 학습 설정 — 디바이스별 분기
-    if device_type == "cuda":
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=4,
-            gradient_accumulation_steps=4,
-            num_train_epochs=3,
-            learning_rate=2e-4,
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.03,
-            fp16=True,
-            optim="paged_adamw_32bit",
-            save_strategy="epoch",
-            logging_steps=10,
-            max_grad_norm=0.3,
-            gradient_checkpointing=True
-        )
-    else:
-        # MPS / CPU — fp16 OFF, 표준 optimizer, 배치 축소
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=2,
-            gradient_accumulation_steps=8,
-            num_train_epochs=3,
-            learning_rate=2e-4,
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.03,
-            fp16=False,
-            optim="adamw_torch",
-            save_strategy="epoch",
-            logging_steps=10,
-            max_grad_norm=0.3,
-            gradient_checkpointing=True,
-            use_mps_device=(device_type == "mps")
-        )
+    is_cuda = (device_type == "cuda")
+    is_cpu = (device_type == "cpu")
+
+    batch_size = 4 if is_cuda else 2
+    grad_accum = 4 if is_cuda else 8
+    use_fp16 = True if is_cuda else False
+    optimizer = "paged_adamw_32bit" if is_cuda else "adamw_torch"
+
+    sft_config = SFTConfig(
+        output_dir=output_dir,
+        per_device_train_batch_size=batch_size,
+        gradient_accumulation_steps=grad_accum,
+        num_train_epochs=3,
+        learning_rate=2e-4,
+        lr_scheduler_type="cosine",
+        warmup_steps=20,
+        fp16=use_fp16,
+        use_cpu=is_cpu,
+        optim=optimizer,
+        save_strategy="epoch",
+        logging_steps=1,
+        max_grad_norm=0.3,
+        gradient_checkpointing=True,
+        max_length=2048,
+        packing=False
+    )
 
     # SFTTrainer로 학습
     trainer = SFTTrainer(
         model=model, 
-        args=training_args,
+        args=sft_config,
         train_dataset=dataset["train"],
-        dataset_text_field="text",   # JSONL 파일 내에서 학습할 텍스트가 있는 키 값 지정 필수
-        formatting_func=formatting_prompts_func,
-        tokenizer=tokenizer,
-        max_seq_length=2048,
-        packing=False
+        processing_class=tokenizer
     )
     trainer.train()
 
