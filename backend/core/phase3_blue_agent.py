@@ -221,7 +221,6 @@ async def run_phase3(
         )
 
         rag_examples = ""  # defense_patterns에서 가져온 유사 방어 예시 텍스트
-        rag_structured_examples = ""  # metadata에서 추출한 구조화 방어 페이로드 예시
         try:
             # category/failure_mode/judge 근거를 함께 반영해 검색 질의를 구성한다.
             rag_query_parts = [
@@ -247,7 +246,6 @@ async def run_phase3(
                 # metadata의 핵심 필드도 예시로 추가해 Blue 프롬프트에 함께 주입한다.
                 metadatas = rag_result.get("metadatas", [])
                 meta_rows = metadatas[0] if metadatas and isinstance(metadatas[0], list) else metadatas
-                structured_sections: list[str] = []
                 for meta in meta_rows or []:
                     if not isinstance(meta, dict):
                         continue
@@ -275,13 +273,10 @@ async def run_phase3(
                     )
                     if defended_example or rationale_example:
                         rag_sections.append(meta_line)
-                        structured_sections.append(meta_line)
 
                 rag_examples = "\n".join(section for section in rag_sections if section)
-                rag_structured_examples = "\n".join(section for section in structured_sections if section)
         except Exception:
             rag_examples = ""
-            rag_structured_examples = ""
 
         owasp_recommendation = owasp_recommendations.get(category, "")
         prompt = build_blue_prompt(
@@ -293,7 +288,6 @@ async def run_phase3(
             judge_detail=judge_detail,
             owasp_recommendation=owasp_recommendation,
             rag_defense_examples=rag_examples,
-            rag_defense_structured_examples=rag_structured_examples,
         )
 
         try:
