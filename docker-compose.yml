@@ -1,5 +1,4 @@
 # [R7] Docker Compose — 개발 환경
-version: "3.9"
 
 services:
   db:
