@@ -214,7 +214,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     print(f"\n[Ollama 연동 가이드 - 수동]\n")
     print(f"다음 명령어를 터미널에 입력하여 '{role}' 에이전트를 Ollama에 등록하세요:")
     print(f"ollama create agent-{role} -f {modelfile_path}\n")
-  
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Role-based LoRA Fine-tuning")
     parser.add_argument("--role", choices=["red", "judge", "blue"], required=True, help="에이전트 역할")
