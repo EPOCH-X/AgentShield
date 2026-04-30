@@ -70,6 +70,7 @@ async def full_judge(
         "evidence_scan_result": None,
         "strict_auditor_result": None,
         "context_auditor_result": None,
+        "debate_result": None,
         "auditor_analysis": None, 
         "final_judgment": None,
         "confidence": 0.0,
@@ -96,13 +97,14 @@ async def full_judge(
                 "triage_result": final_state.get("triage_result"),
                 "pattern_scan_result": final_state.get("pattern_scan_result"),
                 "evidence_scan_result": final_state.get("evidence_scan_result"),
-                "strict_auditor_result": final_state.get("strict_auditor_result"),
-                "context_auditor_result": final_state.get("context_auditor_result"),
+                "strict_auditor": final_state.get("strict_auditor_result"),
+                "context_auditor": final_state.get("context_auditor_result"),
+                "debate_result": final_state.get("debate_result"),
                 "consensus_detail": final_state.get("detail")
             }
         }
 
-        # 4. Taxonomy 및 MITRE ID 추가 (기존과 동일)
+        # 4. Taxonomy 및 MITRE ID 추가
         if final_state.get("final_judgment") == "vulnerable":
             taxonomy = _infer_taxonomy(category, attack_prompt, response, final_state.get("detail", ""))
             result.update(taxonomy)
@@ -122,5 +124,5 @@ async def full_judge(
             "severity": None,
             "detail": f"System error during judgment: {str(e)}",
             "mitre_technique_id": "",
-            "debug_nodes": {"error": str(e)} # 에러 정보도 debug_nodes에 포함
+            "debug_nodes": {"error": str(e)}
         }

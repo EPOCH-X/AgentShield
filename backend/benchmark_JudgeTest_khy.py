@@ -25,21 +25,17 @@ OUTPUT_PATH = project_root / "data" / "debug_results_ko.json"
 # 번역 설정
 NARRATIVE_KEYS = ["detail", "reason"]
 MAX_TRANSLATE_CHARS = 2000
-# 중복 인스턴스 생성 방지를 위한 전역 번역기
 GLOBAL_TRANSLATOR = GoogleTranslator(source='en', target='ko')
-# API 과부하 방지를 위한 동시성 제한
 SEMAPHORE = asyncio.Semaphore(10)
 
 async def translate_text(text: str) -> str:
-    """
-    긴 텍스트 분할 및 비동기 번역 처리
-    """
+    """긴 텍스트 분할 및 비동기 번역 처리"""
     if not text or not isinstance(text, str) or text.strip() in ["No detail", ""]:
         return text
     
     async with SEMAPHORE:
         try:
-            # 2000자 초과 시 문장 단위 분할 처리
+            # 2000자 초과 시 문장 단위 분할 번역
             if len(text) > MAX_TRANSLATE_CHARS:
                 sentences = re.split(r'(?<=[.!?])\s+|\n', text)
                 chunks, current_chunk = [], ""
@@ -51,34 +47,36 @@ async def translate_text(text: str) -> str:
                         if current_chunk:
                             chunks.append(await asyncio.to_thread(GLOBAL_TRANSLATOR.translate, current_chunk))
                         current_chunk = sentence
+                        
                 if current_chunk:
                     chunks.append(await asyncio.to_thread(GLOBAL_TRANSLATOR.translate, current_chunk))
                 return " ".join(chunks)
             
-            # 일반 번역 (동기 함수를 스레드에서 실행하여 비동기 보장)
+            # 일반 번역
             return await asyncio.to_thread(GLOBAL_TRANSLATOR.translate, text)
         except Exception as e:
             print(f"번역 오류: {e}")
             return text
 
 async def translate_dict_fields(data_dict: dict) -> dict:
-    """딕셔너리 내 특정 필드(NARRATIVE_KEYS)만 번역하여 구조 유지"""
-    if not data_dict:
-        return {}
+    """딕셔너리 내 핵심 내러티브 필드만 추출하여 번역"""
+    if not isinstance(data_dict, dict):
+        return data_dict
     
     translated_data = data_dict.copy()
-    tasks = []
-    keys_found = []
+    translate_tasks = {}
 
+    # 번역 대상 필터링 및 태스크 매핑
     for key, value in data_dict.items():
-        if key in NARRATIVE_KEYS and isinstance(value, str):
-            keys_found.append(key)
-            tasks.append(translate_text(value))
+        if key in NARRATIVE_KEYS and isinstance(value, str) and value.strip():
+            translate_tasks[key] = translate_text(value)
     
-    if tasks:
-        results = await asyncio.gather(*tasks)
-        for key, result in zip(keys_found, results):
-            translated_data[f"{key}_ko"] = result
+    # 병렬 번역 실행 및 매핑
+    if translate_tasks:
+        keys = list(translate_tasks.keys())
+        results = await asyncio.gather(*translate_tasks.values())
+        for key, result_text in zip(keys, results):
+            translated_data[f"{key}_ko"] = result_text
             
     return translated_data
 
@@ -91,7 +89,7 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, sample_count: i
     with open(dataset_path, "r", encoding="utf-8") as f:
         dataset = json.load(f)
     
-    # 랜덤 샘플링 (중복 방지 및 전체 범위 커버)
+    # 랜덤 샘플링
     test_samples = random.sample(dataset, min(sample_count, len(dataset)))
     
     metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0}
@@ -100,71 +98,89 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, sample_count: i
     print(f"\n[{JUDGE_MODEL}] 벤치마크 시작 (대상: {len(test_samples)}개)\n")
 
     for i, item in enumerate(test_samples):
-        print(f"[{i+1}/{len(test_samples)}] 샘플 판정 및 번역 중")
+        print(f"[{i+1}/{len(test_samples)}] 샘플 판정 및 번역 중...")
 
         category = item.get("category", "LLM01")
-        attack = item.get("mutated_prompt", "")
-        response = item.get("target_response", "")
-        ground_truth = item.get("judgment", "safe")
+        attack_prompt = item.get("mutated_prompt", "")
+        target_response = item.get("target_response", "")
+        expected_judgment = item.get("judgment", "safe")
 
         # 1. 보안 판정 실행
-        result = await full_judge(category, attack, response)
-        pred_judgment = result.get("judgment")
+        result = await full_judge(category, attack_prompt, target_response)
+        predicted_judgment = result.get("judgment", "ambiguous")
         debug_nodes = result.get("debug_nodes", {})
+        consensus_detail = result.get("detail", "No detail")
 
         # 2. 결과 분석 및 지표 업데이트
-        is_correct = (ground_truth == pred_judgment)
-        if ground_truth == "vulnerable":
+        is_correct = (expected_judgment == predicted_judgment)
+        if expected_judgment == "vulnerable":
             metrics["TP" if is_correct else "FN"] += 1
         else:
             metrics["TN" if is_correct else "FP"] += 1
 
-        # 3. 비동기 병렬 번역 (에이전트 의견 + 주요 필드)
+        # 3. 비동기 병렬 번역 준비 (순서 보장)
         node_names = [name for name, data in debug_nodes.items() if data]
         node_tasks = [translate_dict_fields(debug_nodes[name]) for name in node_names]
         
-        # 필드 번역 태스크 통합
+        # 필드 태스크를 딕셔너리로 관리하여 언패킹 오류 방지
+        field_keys = ["attack", "response", "detail"]
         field_tasks = [
-            translate_text(result.get("detail", "No detail")),
-            translate_text(attack),
-            translate_text(response)
+            translate_text(attack_prompt),      # index 0: attack
+            translate_text(target_response),    # index 1: response
+            translate_text(consensus_detail)    # index 2: detail
         ]
         
-        # 모든 번역 동시 대기
-        all_translated = await asyncio.gather(*(node_tasks + field_tasks))
+        # 모든 번역 동시 대기 (노드 + 필드 명확히 분리)
+        all_node_translated = await asyncio.gather(*node_tasks) if node_tasks else []
+        all_field_translated = await asyncio.gather(*field_tasks)
         
-        # 번역 결과 매핑
-        translated_nodes = dict(zip(node_names, all_translated[:len(node_names)]))
-        detail_ko, attack_ko, response_ko = all_translated[len(node_names):]
+        # 3-4. 결과 매핑 (명시적 인덱스 접근)
+        translated_nodes = dict(zip(node_names, all_node_translated))
+        
+        # field_keys 순서와 동일하게 매핑
+        attack_ko = all_field_translated[0]
+        response_ko = all_field_translated[1]
+        detail_ko = all_field_translated[2]
 
         # 4. 로그 엔트리 생성
         log_entry = {
-            "index": i + 1,
+            "sample_id": i + 1,
             "category": category,
-            "is_correct": is_correct,
-            "actual": ground_truth,
-            "pred": pred_judgment,
-            "confidence": result.get("confidence", 0.0),
-            "detail_ko": detail_ko,
-            "agent_opinions_ko": translated_nodes,
-            "attack_ko": attack_ko,
-            "response_ko": response_ko,
-            "original_en": {"attack": attack, "response": response, "detail": result.get("detail")}
+            "evaluation": {
+                "is_correct": is_correct,
+                "expected_judgment": expected_judgment,
+                "predicted_judgment": predicted_judgment,
+                "confidence_score": result.get("confidence", 0.0)
+            },
+            "translated_ko": {
+                "attack_prompt": attack_ko,     # 명확하게 매핑됨
+                "target_response": response_ko, # 명확하게 매핑됨
+                "consensus_detail": detail_ko,  # 명확하게 매핑됨
+                "agent_debug_nodes": translated_nodes
+            },
+            "original_en": {
+                "attack_prompt": attack_prompt,
+                "target_response": target_response,
+                "consensus_detail": consensus_detail
+            }
         }
         results_log.append(log_entry)
 
         status = "[PASS]" if is_correct else "[FAIL]"
-        print(f"   ▶ [{i+1}/{len(test_samples)}] {status} | {ground_truth.upper()} -> {str(pred_judgment).upper()}")
+        print(f"  ▶ {status} | 실제: {expected_judgment.upper()} -> 예측: {str(predicted_judgment).upper()}")
 
-    # 5. 요약 리포트 저장
+    # 5. 최종 리포트 저장
     accuracy = (metrics["TP"] + metrics["TN"]) / len(test_samples) if test_samples else 0
     final_report = {
-        "summary": {
-            "model": JUDGE_MODEL,
-            "accuracy": f"{accuracy:.2%}",
-            "metrics": metrics
+        "metadata": {
+            "model_used": JUDGE_MODEL,
+            "total_samples_tested": len(test_samples)
         },
-        "details": results_log
+        "performance_summary": {
+            "accuracy": f"{accuracy:.2%}",
+            "confusion_matrix": metrics
+        },
+        "detailed_results": results_log
     }
 
     with open(output_path, "w", encoding="utf-8") as f:
@@ -173,4 +189,4 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, sample_count: i
     print(f"\n리포트 저장 완료: {output_path.name}")
 
 if __name__ == "__main__":
-    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, 100))
+    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, 1))
