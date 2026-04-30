@@ -27,64 +27,53 @@ OUTPUT_PATH = project_root / "data" / f"benchmark_result_{TIMESTAMP}.json"
 # 번역 설정
 NARRATIVE_KEYS = ["detail", "reason"]
 MAX_TRANSLATE_CHARS = 2000
-SEMAPHORE = asyncio.Semaphore(3)
 
-async def translate_text(text: str, max_retries: int = 2) -> str:
-    """긴 텍스트 분할 및 비동기 번역 (독립 객체 생성으로 스레드 세이프 보장)"""
+def translate_text_sync(text: str) -> str:
+    """긴 텍스트 분할 및 동기 번역 (데이터 정합성 보장)"""
     if not text or not isinstance(text, str) or text.strip() in ["No detail", ""]:
         return text
     
-    async with SEMAPHORE:
-        for attempt in range(max_retries):
-            try:
-                # 호출 시마다 독립된 번역기 객체를 생성하여 Race Condition 방지
-                translator = GoogleTranslator(source='en', target='ko')
-
-                if len(text) > MAX_TRANSLATE_CHARS:
-                    sentences = re.split(r'(?<=[.!?])\s+|\n', text)
-                    chunks, current_chunk = [], ""
-                    for sentence in sentences:
-                        if len(current_chunk) + len(sentence) < MAX_TRANSLATE_CHARS:
-                            current_chunk += (" " + sentence if current_chunk else sentence)
-                        else:
-                            if current_chunk:
-                                chunks.append(await asyncio.to_thread(translator.translate, current_chunk))
-                            current_chunk = sentence
-                    if current_chunk:
-                        chunks.append(await asyncio.to_thread(translator.translate, current_chunk))
-                    return " ".join(chunks)
-                
-                # 단일 문자열 번역
-                return await asyncio.to_thread(translator.translate, text)
-                
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(1.5)
+    try:
+        translator = GoogleTranslator(source='en', target='ko')
+        
+        # 텍스트가 제한 길이를 초과할 경우 분할 처리
+        if len(text) > MAX_TRANSLATE_CHARS:
+            sentences = re.split(r'(?<=[.!?])\s+|\n', text)
+            chunks, current_chunk = [], ""
+            
+            for sentence in sentences:
+                if len(current_chunk) + len(sentence) < MAX_TRANSLATE_CHARS:
+                    current_chunk += (" " + sentence if current_chunk else sentence)
                 else:
-                    print(f"번역 최종 실패: {e}")
-                    return text
+                    if current_chunk:
+                        chunks.append(translator.translate(current_chunk))
+                    current_chunk = sentence
+            
+            if current_chunk:
+                chunks.append(translator.translate(current_chunk))
+            return " ".join(chunks)
+        
+        return translator.translate(text)
+        
+    except Exception as e:
+        print(f"번역 오류 발생 (원본 유지): {e}")
+        return text
 
-async def translate_dict_fields(data_dict: dict) -> dict:
-    """딕셔너리 내 특정 필드만 추출하여 번역 (키-태스크 명시적 매핑)"""
+def translate_dict_fields_sync(data_dict: dict) -> dict:
+    """딕셔너리 내 특정 필드(detail, reason 등) 동기 번역"""
     if not isinstance(data_dict, dict):
         return data_dict
     
-    translated_data = data_dict.copy()
-    
-    # [최적화] 키 배열과 태스크 배열의 인덱스를 명확히 동기화
-    target_keys = [k for k, v in data_dict.items() if k in NARRATIVE_KEYS and isinstance(v, str) and v.strip()]
-    
-    if target_keys:
-        tasks = [translate_text(data_dict[k]) for k in target_keys]
-        results = await asyncio.gather(*tasks)
-        
-        for key, result_text in zip(target_keys, results):
-            translated_data[f"{key}_ko"] = result_text
+    result_dict = data_dict.copy()
+    for key in NARRATIVE_KEYS:
+        val = data_dict.get(key)
+        if val and isinstance(val, str) and val.strip():
+            result_dict[f"{key}_ko"] = translate_text_sync(val)
             
-    return translated_data
+    return result_dict
 
 async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_class: int = 75):
-    """클래스별 밸런싱(Safe/Vulnerable)을 적용한 보안 판정 벤치마크"""
+    """보안 판정 벤치마크 (번역 단계 동기화로 키 매핑 오류 수정)"""
     if not dataset_path.exists():
         print(f"파일 미존재: {dataset_path}")
         return
@@ -104,10 +93,8 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
     metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0}
     results_log = []
 
-    print(f"\n[{JUDGE_MODEL}] 벤치마크 시작")
-    print(f"▶ 데이터 구성: 총 {len(test_samples)}개 (Safe: {len(sampled_safe)}개, Vulnerable: {len(sampled_vuln)}개)")
-    print("▶ 종료 시 Ctrl+C를 누르면 현재까지의 결과를 저장합니다.\n")
-
+    print(f"\n[{JUDGE_MODEL}] 벤치마크 시작 (번역 모드: 동기식)")
+    
     try:
         for i, item in enumerate(test_samples):
             category = item.get("category", "LLM01")
@@ -115,10 +102,12 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
             target_response = item.get("target_response", "")
             expected_judgment = item.get("judgment", "safe")
 
+            # 판정 수행 (이 부분은 외부 API 호출이므로 비동기 유지)
             result = await full_judge(category, attack_prompt, target_response)
+            
             predicted_judgment = result.get("judgment", "ambiguous")
-            debug_nodes = result.get("debug_nodes", {})
             consensus_detail = result.get("detail", "No detail")
+            debug_nodes = result.get("debug_nodes", {})
 
             is_correct = (expected_judgment == predicted_judgment)
             if expected_judgment == "vulnerable":
@@ -126,26 +115,11 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
             else:
                 metrics["TN" if is_correct else "FP"] += 1
 
-            # 비동기 병렬 번역 준비
-            node_names = [name for name, data in debug_nodes.items() if data]
-            node_tasks = [translate_dict_fields(debug_nodes[name]) for name in node_names]
-            
-            # [안전장치 유지] 인덱스 고정을 통한 명확한 매핑
-            field_tasks = [
-                translate_text(attack_prompt),      # index 0: attack
-                translate_text(target_response),    # index 1: response
-                translate_text(consensus_detail)    # index 2: detail
-            ]
-            
-            all_node_translated = await asyncio.gather(*node_tasks) if node_tasks else []
-            all_field_translated = await asyncio.gather(*field_tasks)
-            
-            translated_nodes = dict(zip(node_names, all_node_translated))
-            
-            # 인덱스를 통해 1:1 매핑 (데이터 꼬임 원천 차단)
-            attack_ko = all_field_translated[0]
-            response_ko = all_field_translated[1]
-            detail_ko = all_field_translated[2]
+            # [핵심 수정] 번역을 동기 방식으로 순차 수행 (키 값 꼬임 방지)
+            translated_nodes = {}
+            for node_name, node_data in debug_nodes.items():
+                if node_data:
+                    translated_nodes[node_name] = translate_dict_fields_sync(node_data)
 
             log_entry = {
                 "sample_id": i + 1,
@@ -157,9 +131,9 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
                     "confidence_score": result.get("confidence", 0.0)
                 },
                 "translated_ko": {
-                    "attack_prompt": attack_ko,
-                    "target_response": response_ko,
-                    "consensus_detail": detail_ko,
+                    "attack_prompt": translate_text_sync(attack_prompt),
+                    "target_response": translate_text_sync(target_response),
+                    "consensus_detail": translate_text_sync(consensus_detail),
                     "agent_debug_nodes": translated_nodes
                 },
                 "original_en": {
@@ -173,12 +147,8 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
             status = "[PASS]" if is_correct else "[FAIL]"
             print(f"  ▶ [{i+1}/{len(test_samples)}] {status} | 실제: {expected_judgment.upper()} -> 예측: {str(predicted_judgment).upper()}")
 
-    except asyncio.CancelledError:
-        print("\n[알림] 사용자에 의해 벤치마크가 취소되었습니다. 데이터를 저장합니다...")
     except KeyboardInterrupt:
-        print("\n[알림] 프로그램 강제 종료 감지. 현재까지의 데이터를 저장합니다...")
-    except Exception as e:
-        print(f"\n[오류] 벤치마크 중 예기치 않은 오류 발생: {e}")
+        print("\n[알림] 중단 요청 감지. 저장 중...")
     finally:
         if results_log:
             accuracy = (metrics["TP"] + metrics["TN"]) / len(results_log)
@@ -186,10 +156,6 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
                 "metadata": {
                     "model_used": JUDGE_MODEL,
                     "total_samples_tested": len(results_log),
-                    "distribution": {
-                        "safe": len(sampled_safe),
-                        "vulnerable": len(sampled_vuln)
-                    },
                     "completed_at": datetime.now().isoformat()
                 },
                 "performance_summary": {
@@ -198,19 +164,12 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
                 },
                 "detailed_results": results_log
             }
-
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(final_report, f, ensure_ascii=False, indent=2)
-                
             print(f"리포트 저장 완료: {output_path.name}")
-        else:
-            print("저장할 테스트 결과가 없습니다.")
 
 if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        
-    try:
-        asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=75))
-    except KeyboardInterrupt:
-        pass
+    
+    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=50))
