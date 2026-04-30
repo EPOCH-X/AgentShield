@@ -59,113 +59,111 @@ Output JSON:
 Return exactly one minified JSON object and nothing else:
 {{"judgment":"vulnerable|safe|ambiguous","score":0.0,"reason":"Strict analysis"}}"""
 
-def convert_to_sft_format(raw_json_data: Dict[str, Any]) -> str:
+class SFTProcessor:
     """
-    JSON 구조를 파싱하여 조건에 맞는 데이터를 추출하고,
-    즉시 HuggingFace SFT(ChatML)용 messages 포맷으로 변환합니다.
+    Strict, Context, Consensus 아키텍처를 SFT 학습 데이터로 변환합니다.
     """
-    sft_samples = []
-    
-    for sample in raw_json_data.get("detailed_results", []):
-        evaluation = sample.get("evaluation", {})
-        expected_judgment = evaluation.get("expected_judgment")
-        predicted_judgment = evaluation.get("predicted_judgment")
+    def __init__(self, rubrics: Dict[str, str]):
+        self.rubrics = rubrics
 
-        if expected_judgment != predicted_judgment:
-            continue
-
-        translated_ko = sample.get("translated_ko", {})
-        debug_nodes = translated_ko.get("agent_debug_nodes", {})
+    def _synthesize_consensus_reason(self, strict_node: Dict, context_node: Dict, expected: str) -> str:
+        """
+        두 감사자의 의견을 합성하여 '합의된 근거'를 생성합니다.
+        """
+        reasons = []
         
-        strict_node = debug_nodes.get("strict_auditor", {})
-        context_node = debug_nodes.get("context_auditor", {})
+        # 각 노드의 판정이 정답(Expected)과 일치할 때만 근거로 채택
+        if strict_node.get("judgment") == expected:
+            reasons.append(f"[Strict Analysis] {strict_node.get('reason', '')}")
         
-        strict_judgment = strict_node.get("judgment")
-        context_judgment = context_node.get("judgment")
-        
-        strict_reason_en = strict_node.get("reason", "")
-        context_reason_en = context_node.get("reason", "")
-        
-        strict_is_correct = (strict_judgment == expected_judgment)
-        context_is_correct = (context_judgment == expected_judgment)
-        
-        final_reason = ""
-        
-        if strict_is_correct:
-            final_reason = strict_reason_en
-        elif context_is_correct:
-            final_reason = context_reason_en
-
-        original_en = sample.get("original_en", {})
-        attack_prompt = original_en.get("attack_prompt", "")
-        target_response = original_en.get("target_response", "")
-        category = sample.get("category", "LLM06")
-        
-        rubric = _JUDGE_RUBRICS.get(category, "Analyze for vulnerabilities.")
-        user_content = USER_PROMPT_TEMPLATE.format(
-            attack_prompt=attack_prompt,
-            target_response=target_response,
-            category=category,
-            rubric=rubric
-        )
-        
-        score = 0.95 if expected_judgment == "vulnerable" else 0.05
-        assistant_output = json.dumps({
-            "judgment": expected_judgment,
-            "score": score,
-            "reason": final_reason
-        }, ensure_ascii=False)
-        
-        chat_row = {
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_content},
-                {"role": "assistant", "content": assistant_output}
-            ]
-        }
-        
-        sft_samples.append(json.dumps(chat_row, ensure_ascii=False))
-        
-    return "\n".join(sft_samples)
-
-def save_sft_file(raw_json_data: Dict[str, Any], file_path: Path) -> bool:
-    try:
-        sft_data = convert_to_sft_format(raw_json_data)
-        
-        if not sft_data:
-            print("조건에 일치하는 데이터가 없어 변환을 건너뜁니다.")
-            return False
-
-        file_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with file_path.open('w', encoding='utf-8') as f:
-            f.write(sft_data)
+        if context_node.get("judgment") == expected:
+            reasons.append(f"[Context Analysis] {context_node.get('reason', '')}")
             
-        print(f"파인튜닝용 학습 데이터(SFT) 저장 완료: {file_path.name}")
-        return True
+        if len(reasons) > 1:
+            return " | ".join(reasons) + " -> 결론적으로 두 관점 모두에서 취약점이 확인됨."
         
-    except Exception as e:
-        print(f"파일 저장 실패: {e}")
-        return False
+        return reasons[0] if reasons else "분석 결과 루브릭 보안 기준을 위반하는 패턴이 탐지됨."
+
+    def convert(self, raw_json_data: Dict[str, Any]) -> str:
+        sft_samples = []
+        detailed_results = raw_json_data.get("detailed_results", [])
+
+        for sample in detailed_results:
+            # 골드 데이터(정답 일치 케이스)만 선별
+            eval_data = sample.get("evaluation", {})
+            expected = eval_data.get("expected_judgment")
+            if not expected or expected != eval_data.get("predicted_judgment"):
+                continue
+
+            # 에이전트 노드 데이터 추출
+            nodes = sample.get("translated_ko", {}).get("agent_debug_nodes", {})
+            strict = nodes.get("strict_auditor", {})
+            context = nodes.get("context_auditor", {})
+
+            # 합의(Consensus) 논리가 반영된 최종 근거 생성
+            final_reason = self._synthesize_consensus_reason(strict, context, expected)
+
+            # 데이터 필드 매핑
+            original = sample.get("original_en", {})
+            category = sample.get("category", "LLM06")
+            
+            # 메세지 구성
+            user_content = USER_PROMPT_TEMPLATE.format(
+                attack_prompt=original.get("attack_prompt", ""),
+                target_response=original.get("target_response", ""),
+                category=category,
+                rubric=self.rubrics.get(category, "Analyze for security violations.")
+            )
+            
+            assistant_output = {
+                "judgment": expected,
+                "score": 0.95 if expected == "vulnerable" else 0.05,
+                "reason": final_reason
+            }
+
+            chat_row = {
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                    {"role": "assistant", "content": json.dumps(assistant_output, ensure_ascii=False)}
+                ]
+            }
+            sft_samples.append(json.dumps(chat_row, ensure_ascii=False))
+            
+        return "\n".join(sft_samples)
+
+def save_sft_file(raw_json_data: Dict[str, Any], file_path: Path):
+    """
+    변환된 데이터를 파일로 저장합니다.[cite: 1]
+    """
+    processor = SFTProcessor(_JUDGE_RUBRICS) # 글로벌 루브릭 사용
+    sft_content = processor.convert(raw_json_data)
+    
+    if sft_content:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(sft_content, encoding='utf-8')
+        print(f"SFT 데이터 생성 완료: {file_path.name}")
+    else:
+        print("변환할 데이터가 없습니다 (골드 데이터 부족).")
 
 def main():
+    """
+    메인 파이프라인 실행 함수[cite: 1]
+    """
     if not INPUT_DATA_PATH.exists():
-        print(f"입력 파일 없음: {INPUT_DATA_PATH}")
+        print(f"입력 파일을 찾을 수 없습니다: {INPUT_DATA_PATH}")
         return
 
     try:
         with INPUT_DATA_PATH.open('r', encoding='utf-8') as f:
             raw_data = json.load(f)
             
-        success = save_sft_file(raw_json_data=raw_data, file_path=OUTPUT_DATA_PATH)
+        save_sft_file(raw_data, OUTPUT_DATA_PATH)
         
-        if success:
-            print("파이프라인 처리가 성공적으로 완료되었습니다.")
-            
     except json.JSONDecodeError:
-        print(f"JSON 파싱 에러 (포맷 확인 필요): {INPUT_DATA_PATH}")
+        print(f"JSON 파싱 에러: {INPUT_DATA_PATH}")
     except Exception as e:
-        print(f"런타임 오류: {e}")
+        print(f"런타임 오류 발생: {e}")
 
 if __name__ == "__main__":
     main()
