@@ -267,7 +267,6 @@ async def _run_phase4(
 
     return {
         "session_id": session_id,
-        "mode": "defended_response_only",
         "total_tested": total_tested,
         "safe": safe_count,
         "unsafe": unsafe_count,
