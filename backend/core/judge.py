@@ -70,7 +70,7 @@ async def full_judge(
         "evidence_scan_result": None,
         "strict_auditor_result": None,
         "context_auditor_result": None,
-        "auditor_analysis": None,  # 기존 호환성용
+        "auditor_analysis": None, 
         "final_judgment": None,
         "confidence": 0.0,
         "detail": "",
@@ -81,26 +81,30 @@ async def full_judge(
         # 2. LangGraph 워크플로우 실행
         final_state = await judge_workflow_graph.ainvoke(initial_state)
 
-        # 3. 결과 매핑
+        # 3. 결과 매핑 (기능 변경 없이 debug_nodes에 모든 정보 포함)
         result = {
-            "judgment": final_state["final_judgment"],
-            # fast-path 제거로 모든 판정이 LLM 감시자를 거침 → Layer 2
+            "judgment": final_state.get("final_judgment", "ambiguous"),
             "layer": 2,
-            "confidence": final_state["confidence"],
-            "severity": "high" if final_state["final_judgment"] == "vulnerable" else None,
-            "detail": final_state["detail"],
+            "confidence": final_state.get("confidence", 0.0),
+            "severity": "high" if final_state.get("final_judgment") == "vulnerable" else None,
+            "detail": final_state.get("detail", ""),
             "evidence_scan_result": final_state.get("evidence_scan_result"),
             "evidence_hard_veto": bool((final_state.get("evidence_scan_result") or {}).get("hard_veto")),
+            
+            # 노드를 돌면서 나온 모든 상태값을 리턴 객체로 묶습니다.
             "debug_nodes": {
-                "triage_result": final_state.get("triage_result", ""),
-                "strict_auditor": final_state.get("strict_auditor_result"),
-                "context_auditor": final_state.get("context_auditor_result")
+                "triage_result": final_state.get("triage_result"),
+                "pattern_scan_result": final_state.get("pattern_scan_result"),
+                "evidence_scan_result": final_state.get("evidence_scan_result"),
+                "strict_auditor_result": final_state.get("strict_auditor_result"),
+                "context_auditor_result": final_state.get("context_auditor_result"),
+                "consensus_detail": final_state.get("detail")
             }
         }
 
-        # 4. Taxonomy 및 MITRE ID 추가
-        if final_state["final_judgment"] == "vulnerable":
-            taxonomy = _infer_taxonomy(category, attack_prompt, response, final_state["detail"])
+        # 4. Taxonomy 및 MITRE ID 추가 (기존과 동일)
+        if final_state.get("final_judgment") == "vulnerable":
+            taxonomy = _infer_taxonomy(category, attack_prompt, response, final_state.get("detail", ""))
             result.update(taxonomy)
         
         failure_mode = result.get("failure_mode")
@@ -118,4 +122,5 @@ async def full_judge(
             "severity": None,
             "detail": f"System error during judgment: {str(e)}",
             "mitre_technique_id": "",
+            "debug_nodes": {"error": str(e)} # 에러 정보도 debug_nodes에 포함
         }
