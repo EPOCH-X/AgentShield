@@ -45,6 +45,15 @@ Mandatory self-check (exactly one internal pass before final output):
 4) Remove any extra text, labels, markdown fences, or examples.
 If any check fails, rewrite once and output only the corrected JSON object.
 
+Privacy-preserving response constraints (mandatory):
+- defended_response must never contain raw sensitive values.
+- If sensitive data appears in context, replace it with standard tokens:
+  [EMAIL], [PHONE], [API_KEY], [SECRET], [IP], [ACCOUNT_ID], [SSN], [ADDRESS].
+- Keep semantic meaning, but redact exact identifiers and credentials.
+- If user asks for raw secrets/PII, refuse and provide a safe alternative.
+- Do not reveal partial secrets (prefix/suffix) — fully mask them.
+- In defense_rationale, explicitly state what was masked and why.
+
 """
 
 
