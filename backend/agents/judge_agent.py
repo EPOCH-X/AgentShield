@@ -148,7 +148,6 @@ def _fallback_parse(raw: str) -> dict:
     }
 
 def build_judge_prompt_with_rubric(category: str, attack_prompt: str, response: str) -> str:
-    from backend.agents.judge_agent import _JUDGE_RUBRICS # 루브릭 참조
     rubric = _JUDGE_RUBRICS.get(category, "Analyze security risk.")
     schema_str = json.dumps(JudgeResult.model_json_schema(), indent=2)
     
