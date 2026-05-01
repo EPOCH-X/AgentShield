@@ -264,6 +264,17 @@ def safe_truncate(text: str, max_chars: int = SAFE_CAP_CHARS) -> str:
     return head + separator + tail
 
 
+QWEN35_DEFAULT_OPTIONS = {
+    "temperature": 0.0,
+    "top_p": 0.8,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.05,
+    "num_predict": 512,
+    "num_ctx": 32768,
+}
+
 async def call_ollama_judge(prompt: str, model_name: str = None, max_retries: int = 3) -> str:
     """/api/chat + think=False 로 판정 모델 호출.
 
@@ -279,11 +290,7 @@ async def call_ollama_judge(prompt: str, model_name: str = None, max_retries: in
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
         "think": False,
-        "options": {
-            "num_predict": 512,
-            "temperature": 0.2,
-            "num_ctx": NUM_CTX,
-        },
+        "options": QWEN35_DEFAULT_OPTIONS,
     }
     if settings.OLLAMA_KEEP_ALIVE:
         payload["keep_alive"] = settings.OLLAMA_KEEP_ALIVE
