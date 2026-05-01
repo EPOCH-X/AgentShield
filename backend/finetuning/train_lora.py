@@ -8,6 +8,7 @@ import torch
 import argparse
 import subprocess
 import shutil
+import json # 추가: 데이터 샘플 출력을 위함
 from transformers import (
     AutoModelForCausalLM, 
     AutoTokenizer, 
@@ -58,7 +59,6 @@ def convert_to_gguf(merged_model_dir: str, output_gguf_path: str):
         return False
 
     try:
-        # F16 precision으로 GGUF 변환 실행 (양자화는 Ollama가 로드 시 처리 가능)
         cmd = [
             sys.executable, convert_script,
             merged_model_dir,
@@ -80,7 +80,8 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     compute_dtype, amp_kwargs = get_optimal_dtype_config()
     
     print(f"\n" + "="*50)
-    print(f"[{role.upper()}] 파인튜닝 및 GGUF 패키징")
+    print(f"[{role.upper()}] 파인튜닝 파이프라인 시작")
+    print(f" - 데이터 경로: {train_file}")
     print(f" - Dtype: {compute_dtype} | BF16: {amp_kwargs['bf16']} | FP16: {amp_kwargs['fp16']}")
     print("="*50 + "\n")
 
@@ -91,7 +92,27 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         hf_model_id = os.getenv("OLLAMA_BLUE_LOCAL_MODEL", "Qwen/Qwen3.5-0.8B")
     else:
         hf_model_id = os.getenv("OLLAMA_JUDGE_LOCAL_MODEL", "Qwen/Qwen3.5-0.8B")
+        
+    print(f"1. 데이터 로드 및 검증 중...")
+    try:
+        dataset = load_dataset("json", data_files=train_file, split="train")
+        print(f" -> 성공적으로 총 {len(dataset)}개의 학습 샘플을 로드했습니다.")
+        
+        # [최적화] 데이터 1건을 터미널에 출력하여 구조 확인
+        print("\n--- [데이터 샘플 확인 (첫 번째 데이터)] ---")
+        sample_messages = dataset[0].get("messages", [])
+        for msg in sample_messages:
+            role_name = msg.get("role", "unknown")
+            # 내용이 길 수 있으므로 150자까지만 자름
+            content_preview = str(msg.get("content", ""))[:150].replace('\n', ' ')
+            print(f"[{role_name.upper()}]: {content_preview}...")
+        print("-------------------------------------------\n")
 
+    except Exception as e:
+        print(f"[오류] 데이터 로드 실패: {e}")
+        sys.exit(1)
+
+    print(f"2. 모델({hf_model_id}) 다운로드 및 로드 중...")
     if is_cuda:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -138,44 +159,48 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         for _, param in model.named_parameters():
             if param.dtype == torch.bfloat16:
                 param.data = param.data.to(torch.float16)
+                
+    # [최적화] 훈련 가능 파라미터 수 확인 로직 추가
+    model.print_trainable_parameters()
 
+    print(f"\n3. SFT 학습 시작...")
     training_args = SFTConfig(
         output_dir=output_dir,
         per_device_train_batch_size=4 if is_cuda else 2,
         gradient_accumulation_steps=4 if is_cuda else 8,
-        num_train_epochs=1,
+        num_train_epochs=5,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
         bf16=amp_kwargs["bf16"],
         fp16=amp_kwargs["fp16"],
         optim="paged_adamw_32bit" if is_cuda else "adamw_torch",
-        logging_steps=5,
+        logging_steps=5, # 5 스텝마다 로스를 출력
         max_grad_norm=0.3,
         gradient_checkpointing=True,
         max_length=1024,
         dataset_text_field="messages",
         packing=False,
+        report_to="none" # 터미널 출력에 집중하기 위해 wandb 등 외부 리포트 비활성화
     )
 
     trainer = SFTTrainer(
         model=model, 
         args=training_args,
-        train_dataset=load_dataset("json", data_files=train_file, split="train"),
+        train_dataset=dataset,
         processing_class=tokenizer
     )
 
-    # 1. 학습 진행
     trainer.train()
 
-    # 2. 임시 어댑터 저장
+    # 4. 임시 어댑터 저장
     temp_adapter_dir = os.path.join(output_dir, "temp_adapter")
     trainer.save_model(temp_adapter_dir)
     tokenizer.save_pretrained(temp_adapter_dir)
     print(f"\n[{role.upper()}] LoRA 어댑터 임시 저장 완료.")
 
-    # 3. CPU에서 베이스 모델 로드 후 어댑터 병합 (VRAM 오버플로우 방지)
-    print("베이스 모델과 어댑터 병합(Merge)을 시작합니다...")
+    # 5. CPU에서 베이스 모델 로드 후 어댑터 병합
+    print("\n5. 베이스 모델과 어댑터 병합(Merge)을 시작합니다...")
     base_model = AutoModelForCausalLM.from_pretrained(
         hf_model_id, 
         torch_dtype=compute_dtype, 
@@ -184,21 +209,19 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     merged_model = PeftModel.from_pretrained(base_model, temp_adapter_dir)
     merged_model = merged_model.merge_and_unload()
     
-    # 병합된 모델을 출력 디렉터리에 저장 (llama.cpp 변환 대상)
     merged_model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
     
-    # 임시 어댑터 정리
     shutil.rmtree(temp_adapter_dir, ignore_errors=True)
-    print("모델 병합 완료.")
+    print(" -> 모델 병합 완료.")
 
-    # 4. GGUF 포맷으로 변환
+    # 6. GGUF 포맷으로 변환
     gguf_filename = f"{role}_model_f16.gguf"
     gguf_path = os.path.join(output_dir, gguf_filename)
     
     success = convert_to_gguf(output_dir, gguf_path)
 
-    # 5. Ollama Modelfile 생성 및 등록 가이드
+    # 7. Ollama Modelfile 생성 및 등록 가이드
     if success:
         modelfile_path = os.path.join(output_dir, "Modelfile")
         modelfile_content = f"FROM ./{gguf_filename}\n"
