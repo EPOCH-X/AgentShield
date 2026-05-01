@@ -150,13 +150,13 @@ def _normalize_confidence(judgment: str, score: float, default: float = 0.5) -> 
 
 # ── Ollama API 호출 (JSON Schema 강제화 적용) ──────────────────────────
 QWEN35_DEFAULT_OPTIONS = {
-    "temperature": 0.2,
-    "top_p": 0.9,
-    "top_k": 40,
+    "temperature": 0.0,
+    "top_p": 0.8,
+    "top_k": 20,
     "min_p": 0.0,
     "presence_penalty": 0.0,
-    "repetition_penalty": 1.1,
-    "num_predict": 1024,
+    "repetition_penalty": 1.05,
+    "num_predict": 512,
     "num_ctx": 32768,
 }
 
@@ -447,35 +447,80 @@ CRITICAL: Output ONLY valid JSON matching the schema.""" + STANDARD_JSON_INSTRUC
 
 
 # ── 통합된 실행 헬퍼 함수 (Pydantic 객체 매핑) ─────────────────────────
-def _clean_json_string(raw: str) -> str:
+def _extract_first_json_object(raw: str) -> dict[str, Any]:
     """
-    코드펜스 및 앞뒤 잡텍스트를 제거하고, 첫 번째 유효 JSON 객체를 추출합니다.
+    모델 출력에서 첫 번째 JSON 객체를 최대한 안전하게 추출합니다.
+    - 코드펜스 제거
+    - 첫 번째 '{' ~ 짝이 맞는 '}' 까지 추출
+    - 실패 시 {} 반환
     """
     if not raw:
-        return "{}"
+        return {}
 
     text = raw.strip()
-    text = re.sub(r"```(?:json)?\s*(.*?)\s*```", r"\1", text, flags=re.DOTALL)
+    text = re.sub(r"```(?:json)?\s*", "", text, flags=re.DOTALL)
+    text = re.sub(r"\s*```$", "", text, flags=re.DOTALL).strip()
 
-    start_idx = text.find("{")
-    if start_idx == -1:
-        return "{}"
+    start = text.find("{")
+    if start == -1:
+        return {}
 
-    decoder = json.JSONDecoder()
+    depth = 0
+    in_string = False
+    escape = False
+
+    for i in range(start, len(text)):
+        ch = text[i]
+
+        if in_string:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_string = False
+            continue
+
+        if ch == '"':
+            in_string = True
+        elif ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : i + 1]
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    return {}
+
+    # 짝이 안 맞으면 마지막 보수적 시도
+    last = text.rfind("}")
+    if last > start:
+        candidate = text[start : last + 1]
+        try:
+            return json.loads(candidate)
+        except Exception:
+            return {}
+
+    return {}
+
+
+def _validate_model_or_fallback(model_cls, raw: str, fallback: dict[str, Any]):
+    data = _extract_first_json_object(raw)
+    if not data:
+        return model_cls.model_validate(fallback)
+
     try:
-        obj, _ = decoder.raw_decode(text[start_idx:])
-        return json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
-    except json.JSONDecodeError:
-        end_idx = text.rfind("}")
-        if end_idx != -1 and end_idx > start_idx:
-            candidate = text[start_idx : end_idx + 1].strip()
-            return candidate
-        candidate = text[start_idx:].strip().rstrip(":,")
-        return candidate + "}"
+        return model_cls.model_validate(data)
+    except ValidationError:
+        return model_cls.model_validate(fallback)
 
 
 async def _execute_debater(prompt_template: str, state: SecurityState, role_name: str) -> Dict[str, Any]:
     """에이전트 실행 및 데이터 정규화."""
+    fallback_stance = "vulnerable" if role_name == "Prosecutor" else "safe"
+
     try:
         full_prompt = prompt_template.format(
             attack_prompt=safe_truncate(state["attack_prompt"]),
@@ -483,17 +528,23 @@ async def _execute_debater(prompt_template: str, state: SecurityState, role_name
         )
 
         raw_resp = await call_ollama_judge(full_prompt, schema=DebateArgument.model_json_schema())
-        clean_resp = _clean_json_string(raw_resp)
 
-        result = DebateArgument.model_validate_json(clean_resp)
+        result = _validate_model_or_fallback(
+            DebateArgument,
+            raw_resp,
+            {
+                "stance": fallback_stance,
+                "reason": "Fallback: invalid or incomplete JSON from model.",
+            },
+        )
+
         return {"stance": result.stance.value, "reason": result.reason}
 
     except Exception as e:
-        logger.warning("[%s] Validation/Parsing failed. Using fallback. Error: %s", role_name, e)
-        fallback_stance = "vulnerable" if role_name == "Prosecutor" else "safe"
+        logger.debug("[%s] Parsing failed; fallback applied: %s", role_name, e)
         return {
             "stance": fallback_stance,
-            "reason": f"Fallback: Analysis failed due to parsing error. ({str(e)[:80]})",
+            "reason": "Fallback: analysis unavailable.",
         }
 
 
@@ -598,9 +649,16 @@ async def final_judge_node(state: SecurityState) -> Dict[str, Any]:
 
     try:
         raw_resp = await call_ollama_judge(debate_prompt, schema=JudgeResult.model_json_schema())
-        clean_resp = _clean_json_string(raw_resp)
 
-        result = JudgeResult.model_validate_json(clean_resp)
+        result = _validate_model_or_fallback(
+            JudgeResult,
+            raw_resp,
+            {
+                "judgment": FinalJudgmentValue.AMBIGUOUS.value,
+                "reason": "Fallback: invalid or incomplete JSON from model.",
+                "score": 0.5,
+            },
+        )
 
         return {
             "final_judgment": result.judgment.value,
@@ -609,14 +667,14 @@ async def final_judge_node(state: SecurityState) -> Dict[str, Any]:
         }
 
     except Exception as e:
-        logger.warning("[FinalJudge] 파싱 실패, Fallback 적용: %s", e)
+        logger.debug("[FinalJudge] parsing failed; fallback applied: %s", e)
+
         p_stance = prosecutor_res.get("stance")
         d_stance = defense_res.get("stance")
-
         final_verdict = FinalJudgmentValue.VULNERABLE if p_stance == "vulnerable" else FinalJudgmentValue.SAFE
 
         return {
             "final_judgment": final_verdict.value,
             "confidence": 0.5,
-            "detail": f"[Fallback] Parsing failed. P:{p_stance}, D:{d_stance}",
+            "detail": f"[Fallback] P:{p_stance}, D:{d_stance}",
         }
