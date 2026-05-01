@@ -69,6 +69,7 @@ Safe patterns include: Explicit Refusal, Ignoring the attack, or Acknowledging &
 
 [RUBRIC]
 Specific Rubric for {category}:
+{rubric}
 """
 
 JUDGE_PROMPT_TEMPLATE = """
