@@ -1,12 +1,13 @@
 """
-[R4] 파인튜닝 — QLoRA 학습 코드 (공용)
+[R4] 파인튜닝 — QLoRA 학습 및 GGUF 변환 코드 (공용)
 """
 
 import os
 import sys
 import torch
 import argparse
-import json
+import subprocess
+import shutil
 from transformers import (
     AutoModelForCausalLM, 
     AutoTokenizer, 
@@ -15,13 +16,18 @@ from transformers import (
 from peft import (
     LoraConfig,
     get_peft_model,
-    prepare_model_for_kbit_training
+    prepare_model_for_kbit_training,
+    PeftModel
 )
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 from backend.config import settings
 from dotenv import load_dotenv
+
 load_dotenv()
+
+# 상수: llama.cpp 저장소 경로 (환경 변수 또는 기본 경로 사용)
+LLAMA_CPP_DIR = os.getenv("LLAMA_CPP_DIR", os.path.join(os.getcwd(), "llama.cpp"))
 
 def detect_device():
     if torch.cuda.is_available():
@@ -31,36 +37,61 @@ def detect_device():
     return "cpu"
 
 def get_optimal_dtype_config():
-    """
-    [최적화] 하드웨어 아키텍처를 감지하여 최적의 Mixed Precision 설정을 반환합니다.
-    """
+    """하드웨어 아키텍처를 감지하여 최적의 Mixed Precision 설정을 반환합니다."""
     if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
-        # RTX 30시리즈 이상: BFloat16 사용 (GradScaler 비활성화로 에러 원천 차단)
         return torch.bfloat16, {"bf16": True, "fp16": False}
-    else:
-        # RTX 20시리즈 이하: FP16 사용
-        return torch.float16, {"bf16": False, "fp16": True}
+    return torch.float16, {"bf16": False, "fp16": True}
+
+def convert_to_gguf(merged_model_dir: str, output_gguf_path: str):
+    """llama.cpp를 사용하여 HuggingFace 모델을 GGUF 포맷으로 변환합니다."""
+    print("\n" + "="*50)
+    print("GGUF 변환 파이프라인 가동")
+    print(f" - 입력 폴더: {merged_model_dir}")
+    print(f" - 출력 파일: {output_gguf_path}")
+    print("="*50)
+
+    convert_script = os.path.join(LLAMA_CPP_DIR, "convert_hf_to_gguf.py")
+    
+    if not os.path.exists(convert_script):
+        print(f"\n[오류] llama.cpp 경로를 찾을 수 없습니다: {convert_script}")
+        print("명령어 예시: git clone https://github.com/ggerganov/llama.cpp.git")
+        return False
+
+    try:
+        # F16 precision으로 GGUF 변환 실행 (양자화는 Ollama가 로드 시 처리 가능)
+        cmd = [
+            sys.executable, convert_script,
+            merged_model_dir,
+            "--outfile", output_gguf_path,
+            "--outtype", "f16"
+        ]
+        
+        print("변환 스크립트 실행 중... (시간이 소요될 수 있습니다)")
+        subprocess.run(cmd, check=True)
+        print(f"GGUF 변환 완료: {output_gguf_path}")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print(f"\n[오류] GGUF 변환 중 시스템 명령 실패: {e}")
+        return False
 
 def train_role_adapter(role: str, train_file: str, output_dir: str):
     is_cuda = torch.cuda.is_available()
-    
-    # 1. 동적 데이터 타입 및 인자 할당 (변수명 통일성 확보)
     compute_dtype, amp_kwargs = get_optimal_dtype_config()
     
     print(f"\n" + "="*50)
-    print(f"[{role.upper()}] 파인튜닝 아키텍처 가동")
-    print(f" - 하드웨어 지원 Dtype: {compute_dtype}")
-    print(f" - AMP 설정: BF16({amp_kwargs['bf16']}), FP16({amp_kwargs['fp16']})")
+    print(f"[{role.upper()}] 파인튜닝 및 GGUF 패키징")
+    print(f" - Dtype: {compute_dtype} | BF16: {amp_kwargs['bf16']} | FP16: {amp_kwargs['fp16']}")
     print("="*50 + "\n")
 
+    # 변수명 통일
     if role == "red":
-        model_id = os.getenv("OLLAMA_RED_MODEL")
+        hf_model_id = os.getenv("OLLAMA_RED_LOCAL_MODEL", "Qwen/Qwen3.5-0.8B")
     elif role == "blue":
-        model_id = os.getenv("OLLAMA_BLUE_MODEL")
+        hf_model_id = os.getenv("OLLAMA_BLUE_LOCAL_MODEL", "Qwen/Qwen3.5-0.8B")
     else:
-        model_id = os.getenv("OLLAMA_JUDGE_MODEL")
+        hf_model_id = os.getenv("OLLAMA_JUDGE_LOCAL_MODEL", "Qwen/Qwen3.5-0.8B")
 
-    # 2. 모델 로드
     if is_cuda:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -69,30 +100,27 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
             bnb_4bit_compute_dtype=compute_dtype,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            model_id,
+            hf_model_id,
             quantization_config=bnb_config,
             device_map="auto"
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            model_id,
+            hf_model_id,
             torch_dtype=compute_dtype,
             device_map="cpu"
         )
 
-    # [핵심 방어 로직] FP16 사용 시, Qwen 모델 내부에 남아있는 BFloat16 잔재를 강제 변환
     if compute_dtype == torch.float16:
-        for name, param in model.named_parameters():
+        for _, param in model.named_parameters():
             if param.dtype == torch.bfloat16:
                 param.data = param.data.to(torch.float16)
 
-    # 3. 토크나이저 설정
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(hf_model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    # 4. LoRA 어댑터 설정
     lora_config = LoraConfig(
         r=16, 
         lora_alpha=32, 
@@ -106,13 +134,11 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         model = prepare_model_for_kbit_training(model)
     model = get_peft_model(model, lora_config)
 
-    # 다시 한 번 강제 변환 (LoRA 가중치 초기화 시점 방어)
     if compute_dtype == torch.float16:
-        for name, param in model.named_parameters():
+        for _, param in model.named_parameters():
             if param.dtype == torch.bfloat16:
                 param.data = param.data.to(torch.float16)
 
-    # 5. SFT 학습 설정
     training_args = SFTConfig(
         output_dir=output_dir,
         per_device_train_batch_size=4 if is_cuda else 2,
@@ -121,8 +147,8 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
-        bf16=amp_kwargs["bf16"], # 동적 할당
-        fp16=amp_kwargs["fp16"], # 동적 할당
+        bf16=amp_kwargs["bf16"],
+        fp16=amp_kwargs["fp16"],
         optim="paged_adamw_32bit" if is_cuda else "adamw_torch",
         logging_steps=5,
         max_grad_norm=0.3,
@@ -139,31 +165,61 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         processing_class=tokenizer
     )
 
+    # 1. 학습 진행
     trainer.train()
-    trainer.save_model(output_dir)
+
+    # 2. 임시 어댑터 저장
+    temp_adapter_dir = os.path.join(output_dir, "temp_adapter")
+    trainer.save_model(temp_adapter_dir)
+    tokenizer.save_pretrained(temp_adapter_dir)
+    print(f"\n[{role.upper()}] LoRA 어댑터 임시 저장 완료.")
+
+    # 3. CPU에서 베이스 모델 로드 후 어댑터 병합 (VRAM 오버플로우 방지)
+    print("베이스 모델과 어댑터 병합(Merge)을 시작합니다...")
+    base_model = AutoModelForCausalLM.from_pretrained(
+        hf_model_id, 
+        torch_dtype=compute_dtype, 
+        device_map="cpu"
+    )
+    merged_model = PeftModel.from_pretrained(base_model, temp_adapter_dir)
+    merged_model = merged_model.merge_and_unload()
+    
+    # 병합된 모델을 출력 디렉터리에 저장 (llama.cpp 변환 대상)
+    merged_model.save_pretrained(output_dir)
     tokenizer.save_pretrained(output_dir)
-    print(f"[{role.upper()}] 어댑터 저장 완료: {output_dir}")
+    
+    # 임시 어댑터 정리
+    shutil.rmtree(temp_adapter_dir, ignore_errors=True)
+    print("모델 병합 완료.")
 
-    modelfile_path = os.path.join(output_dir, "Modelfile")
-    adapter_file = "adapter_model.safetensors" if os.path.exists(os.path.join(output_dir, "adapter_model.safetensors")) else "adapter_model.bin"
-    absolute_adapter_path = os.path.abspath(os.path.join(output_dir, adapter_file)).replace("\\", "/")
-    modelfile_content = f"FROM {model_id}\nADAPTER {absolute_adapter_path}"
+    # 4. GGUF 포맷으로 변환
+    gguf_filename = f"{role}_model_f16.gguf"
+    gguf_path = os.path.join(output_dir, gguf_filename)
+    
+    success = convert_to_gguf(output_dir, gguf_path)
 
-    with open(modelfile_path, "w", encoding="utf-8") as f:
-        f.write(modelfile_content)
-
-    agent_name = f"agent-{role}"
-    print("=" * 50)
-    print(f"\n[Ollama 연동 가이드 - 수동]\n")
-    print(f"다음 명령어를 터미널에 입력하여 '{role}' 에이전트를 Ollama에 등록하세요:")
-    print(f"ollama create {agent_name} -f {modelfile_path}\n")
-
+    # 5. Ollama Modelfile 생성 및 등록 가이드
+    if success:
+        modelfile_path = os.path.join(output_dir, "Modelfile")
+        modelfile_content = f"FROM ./{gguf_filename}\n"
+        
+        with open(modelfile_path, "w", encoding="utf-8") as f:
+            f.write(modelfile_content)
+            
+        agent_name = f"agent-{role}"
+        print("\n" + "=" * 50)
+        print(f"[Ollama 연동 가이드 - GGUF 기반]")
+        print(f"변환된 단일 GGUF 파일로 시스템 환경에 구애받지 않고 배포가 가능합니다.")
+        print(f"터미널에서 아래 폴더로 이동 후 모델을 생성하세요:")
+        print(f"  cd {os.path.abspath(output_dir)}")
+        print(f"  ollama create {agent_name} -f Modelfile")
+        print("=" * 50 + "\n")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Role-based LoRA Fine-tuning")
+    parser = argparse.ArgumentParser(description="Role-based LoRA Fine-tuning and GGUF Conversion")
     parser.add_argument("--role", choices=["red", "judge", "blue"], required=True, help="에이전트 역할")
     parser.add_argument("--data", required=True, help="학습용 JSONL 데이터 경로")
-    parser.add_argument("--output", default=None, help="어댑터 저장 경로")
+    parser.add_argument("--output", default=None, help="최종 저장 경로")
     args = parser.parse_args()
 
     if args.output:
@@ -176,6 +232,6 @@ if __name__ == "__main__":
         }
         final_output = path_map[args.role]
 
-    print(f"최종 저장 경로가 '{final_output}'(으)로 설정되었습니다.")
+    print(f"최종 출력 경로: '{final_output}'")
     os.makedirs(final_output, exist_ok=True)
     train_role_adapter(args.role, args.data, final_output)
