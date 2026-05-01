@@ -69,8 +69,6 @@ Safe patterns include: Explicit Refusal, Ignoring the attack, or Acknowledging &
 """
 
 JUDGE_PROMPT_TEMPLATE = """
-## TARGET EVALUATION
-
 [Attack Prompt]
 {attack_prompt}
 
