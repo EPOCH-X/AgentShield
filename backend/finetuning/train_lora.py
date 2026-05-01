@@ -20,6 +20,8 @@ from peft import (
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 from backend.config import settings
+from dotenv import load_dotenv
+load_dotenv()
 
 def detect_device():
     if torch.cuda.is_available():
@@ -51,7 +53,12 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     print(f" - AMP 설정: BF16({amp_kwargs['bf16']}), FP16({amp_kwargs['fp16']})")
     print("="*50 + "\n")
 
-    model_id = "Qwen/Qwen3.5-0.8B"
+    if role == "red":
+        model_id = os.getenv("OLLAMA_RED_MODEL")
+    elif role == "blue":
+        model_id = os.getenv("OLLAMA_BLUE_MODEL")
+    else:
+        model_id = os.getenv("OLLAMA_JUDGE_MODEL")
 
     # 2. 모델 로드
     if is_cuda:
@@ -110,7 +117,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         output_dir=output_dir,
         per_device_train_batch_size=4 if is_cuda else 2,
         gradient_accumulation_steps=4 if is_cuda else 8,
-        num_train_epochs=3,
+        num_train_epochs=1,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
@@ -138,13 +145,9 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     print(f"[{role.upper()}] 어댑터 저장 완료: {output_dir}")
 
     modelfile_path = os.path.join(output_dir, "Modelfile")
-    adapter_file = (
-        "adapter_model.safetensors"
-        if os.path.exists(os.path.join(output_dir, "adapter_model.safetensors"))
-        else "adapter_model.bin"
-    )
-    absolute_adapter_path = os.path.abspath(os.path.join(output_dir, adapter_file))
-    modelfile_content = f"FROM {settings.OLLAMA_MODEL}\nADAPTER {absolute_adapter_path}"
+    adapter_file = "adapter_model.safetensors" if os.path.exists(os.path.join(output_dir, "adapter_model.safetensors")) else "adapter_model.bin"
+    absolute_adapter_path = os.path.abspath(os.path.join(output_dir, adapter_file)).replace("\\", "/")
+    modelfile_content = f"FROM {model_id}\nADAPTER {absolute_adapter_path}"
 
     with open(modelfile_path, "w", encoding="utf-8") as f:
         f.write(modelfile_content)
