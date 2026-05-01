@@ -67,12 +67,12 @@ data/red_campaigns/
 !data/finetuning/README.md
 
 # Adapters (학습 결과)
-adapters/lora-red/*.bin
-adapters/lora-red/*.safetensors
-adapters/lora-judge/*.bin
-adapters/lora-judge/*.safetensors
-adapters/lora-blue/*.bin
-adapters/lora-blue/*.safetensors
+adapters/lora-red/
+adapters/lora-red/
+adapters/lora-judge/
+adapters/lora-judge/
+adapters/lora-blue/
+adapters/lora-blue/
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
