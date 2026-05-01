@@ -140,6 +140,10 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     # [최적화 적용] Qwen 모델을 위한 명시적 Chat Template 및 패딩 처리
     tokenizer = AutoTokenizer.from_pretrained(hf_model_id, trust_remote_code=True)
     
+    # Qwen 베이스 모델이 종료 토큰을 명시하지 않을 경우를 대비하여 수동으로 할당합니다.
+    if tokenizer.eos_token is None:
+        tokenizer.eos_token = "<|endoftext|>"
+    
     # Qwen 모델의 기본 Chat Template이 적용되도록 보장
     if not hasattr(tokenizer, 'chat_template') or tokenizer.chat_template is None:
         print("[경고] 모델에 기본 Chat Template이 없습니다. Qwen 템플릿을 명시적으로 주입합니다.")
@@ -183,14 +187,14 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         output_dir=output_dir,
         per_device_train_batch_size=4 if is_cuda else 2,
         gradient_accumulation_steps=4 if is_cuda else 8,
-        num_train_epochs=5,
+        num_train_epochs=10,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
         bf16=amp_kwargs["bf16"],
         fp16=amp_kwargs["fp16"],
         optim="paged_adamw_32bit" if is_cuda else "adamw_torch",
-        logging_steps=5, # 5 스텝마다 로스를 출력
+        logging_steps=3, # 5 스텝마다 로스를 출력
         max_grad_norm=0.3,
         gradient_checkpointing=True,
         max_length=1024,
