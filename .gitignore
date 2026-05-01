@@ -122,3 +122,5 @@ results/
 scripts/calibrate_result.txtsocket/.s.PGSQL.*
 
 nohup.out
+.mcp.json
+.opencode.json
