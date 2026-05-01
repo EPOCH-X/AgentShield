@@ -1,7 +1,8 @@
 import json
 import sys
+import random
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 # 동적 경로 설정
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -85,29 +86,32 @@ class SFTProcessor:
         return reasons[0] if reasons else "분석 결과 루브릭 보안 기준을 위반하는 패턴이 탐지됨."
 
     def convert(self, raw_json_data: Dict[str, Any]) -> str:
-        sft_samples = []
         detailed_results = raw_json_data.get("detailed_results", [])
 
+        # 비율 조정을 위해 클래스별로 데이터를 분리 저장
+        samples_by_class: Dict[str, List[str]] = {
+            "safe": [],
+            "vulnerable": [],
+            "ambiguous": []
+        }
+        
         for sample in detailed_results:
-            # 골드 데이터(정답 일치 케이스)만 선별
             eval_data = sample.get("evaluation", {})
             expected = eval_data.get("expected_judgment")
+            
+            # 정답과 예측이 일치하는 골드 데이터만 선별
             if not expected or expected != eval_data.get("predicted_judgment"):
                 continue
 
-            # 에이전트 노드 데이터 추출
             nodes = sample.get("translated_ko", {}).get("agent_debug_nodes", {})
             strict = nodes.get("strict_auditor", {})
             context = nodes.get("context_auditor", {})
 
-            # 합의(Consensus) 논리가 반영된 최종 근거 생성
             final_reason = self._synthesize_consensus_reason(strict, context, expected)
 
-            # 데이터 필드 매핑
             original = sample.get("original_en", {})
             category = sample.get("category", "LLM06")
             
-            # 메세지 구성
             user_content = USER_PROMPT_TEMPLATE.format(
                 attack_prompt=original.get("attack_prompt", ""),
                 target_response=original.get("target_response", ""),
@@ -128,28 +132,39 @@ class SFTProcessor:
                     {"role": "assistant", "content": json.dumps(assistant_output, ensure_ascii=False)}
                 ]
             }
-            sft_samples.append(json.dumps(chat_row, ensure_ascii=False))
+            if expected in samples_by_class:
+                samples_by_class[expected].append(json.dumps(chat_row, ensure_ascii=False))
             
-        return "\n".join(sft_samples)
+        # 데이터 밸런싱 로직 (가장 적은 샘플 수에 맞춰 언더샘플링 진행)
+        if self.balance_data:
+            min_count = min(len(samples_by_class["safe"]), len(samples_by_class["vulnerable"]))
+            if min_count > 0:
+                balanced_safe = random.sample(samples_by_class["safe"], min_count)
+                balanced_vuln = random.sample(samples_by_class["vulnerable"], min_count)
+                final_samples = balanced_safe + balanced_vuln
+                random.shuffle(final_samples) # SFT 모델 학습을 위해 순서 섞기
+            else:
+                final_samples = samples_by_class["safe"] + samples_by_class["vulnerable"]
+        else:
+            final_samples = samples_by_class["safe"] + samples_by_class["vulnerable"]
+
+        return "\n".join(final_samples)
 
 def save_sft_file(raw_json_data: Dict[str, Any], file_path: Path):
     """
-    변환된 데이터를 파일로 저장합니다.[cite: 1]
+    변환된 데이터를 파일로 저장합니다.
     """
-    processor = SFTProcessor(_JUDGE_RUBRICS) # 글로벌 루브릭 사용
+    processor = SFTProcessor(_JUDGE_RUBRICS, balance_data=True) 
     sft_content = processor.convert(raw_json_data)
     
     if sft_content:
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(sft_content, encoding='utf-8')
-        print(f"SFT 데이터 생성 완료: {file_path.name}")
+        print(f"SFT 데이터 생성 완료 (밸런싱 적용): {file_path.name}")
     else:
         print("변환할 데이터가 없습니다 (골드 데이터 부족).")
 
 def main():
-    """
-    메인 파이프라인 실행 함수[cite: 1]
-    """
     if not INPUT_DATA_PATH.exists():
         print(f"입력 파일을 찾을 수 없습니다: {INPUT_DATA_PATH}")
         return
@@ -164,6 +179,6 @@ def main():
         print(f"JSON 파싱 에러: {INPUT_DATA_PATH}")
     except Exception as e:
         print(f"런타임 오류 발생: {e}")
-
+        
 if __name__ == "__main__":
     main()

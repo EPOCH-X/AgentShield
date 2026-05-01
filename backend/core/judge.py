@@ -5,11 +5,11 @@ import logging
 
 from backend.graph.judge_graph import judge_workflow_graph
 from backend.core.mitre_mapping import get_primary_technique_id
-from backend.core.judge_utils import _infer_taxonomy, rule_based_judge
+from backend.core.judge_utils import _infer_taxonomy
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["full_judge", "rule_based_judge"]
+__all__ = ["full_judge"]
 
 
 async def full_judge(
@@ -18,7 +18,9 @@ async def full_judge(
     response: str,
     llm=None,  # noqa: ARG001
 ) -> dict:
-    """Run the evidence-first LangGraph judge and return a normalized verdict."""
+    """Run the strictly polarized debate LangGraph judge and return a normalized verdict."""
+    
+    # 1. 신규 SecurityState 스키마에 맞춘 초기 상태 선언 (가비지 데이터 제거)
     initial_state = {
         "category": category,
         "attack_prompt": attack_prompt,
@@ -26,10 +28,8 @@ async def full_judge(
         "triage_result": None,
         "pattern_scan_result": None,
         "evidence_scan_result": None,
-        "strict_auditor_result": None,
-        "context_auditor_result": None,
-        "debate_result": None,
-        "auditor_analysis": None, 
+        "prosecutor_result": None,  # 신규 공격측 에이전트 상태
+        "defense_result": None,     # 신규 방어측 에이전트 상태
         "final_judgment": None,
         "confidence": 0.0,
         "detail": "",
@@ -39,9 +39,8 @@ async def full_judge(
     try:
         final_state = await judge_workflow_graph.ainvoke(initial_state)
 
-
         result = {
-            "judgment": final_state["final_judgment"],
+            "judgment": final_state.get("final_judgment", "ambiguous"),
             "layer": 2,
             "confidence": final_state.get("confidence", 0.0),
             "severity": "high" if final_state.get("final_judgment") == "vulnerable" else None,
@@ -49,20 +48,23 @@ async def full_judge(
             "evidence_scan_result": final_state.get("evidence_scan_result"),
             "evidence_hard_veto": bool((final_state.get("evidence_scan_result") or {}).get("hard_veto")),
             
-            # 노드를 돌면서 나온 모든 상태값을 리턴 객체로 묶습니다.
+            # 2. 디버그 노드 매핑 업데이트: 향후 SFT 학습 데이터 추출을 위한 직관적 네이밍
             "debug_nodes": {
                 "triage_result": final_state.get("triage_result"),
                 "pattern_scan_result": final_state.get("pattern_scan_result"),
                 "evidence_scan_result": final_state.get("evidence_scan_result"),
-                "strict_auditor": final_state.get("strict_auditor_result"),
-                "context_auditor": final_state.get("context_auditor_result"),
-                "debate_result": final_state.get("debate_result"),
-                "consensus_detail": final_state.get("detail")
+                "prosecutor_agent": final_state.get("prosecutor_result"),
+                "defense_agent": final_state.get("defense_result"),
+                "judge_agent": {
+                    "judgment": final_state.get("final_judgment"),
+                    "reason": final_state.get("detail")
+                }
             }
         }
 
-        if final_state["final_judgment"] == "vulnerable":
-            taxonomy = _infer_taxonomy(category, attack_prompt, response, final_state["detail"])
+        # 3. 취약점 분류 및 MITRE ATT&CK 매핑 로직 유지
+        if final_state.get("final_judgment") == "vulnerable":
+            taxonomy = _infer_taxonomy(category, attack_prompt, response, final_state.get("detail", ""))
             result.update(taxonomy)
         
         failure_mode = result.get("failure_mode")

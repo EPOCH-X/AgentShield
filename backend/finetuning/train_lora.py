@@ -17,6 +17,8 @@
 
 import os
 import sys
+from dotenv import load_dotenv
+load_dotenv()
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, "../../"))
 sys.path.append(project_root)
@@ -26,8 +28,7 @@ import subprocess
 from transformers import (
     AutoModelForCausalLM, 
     AutoTokenizer, 
-    BitsAndBytesConfig, 
-    TrainingArguments
+    BitsAndBytesConfig
 )
 from peft import (
     LoraConfig,
@@ -38,7 +39,6 @@ from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 
 from backend.config import settings
-
 
 def detect_device():
     """
@@ -70,7 +70,12 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     print("="*50 + "\n")
 
     # 모델 id 설정
-    model_id = "Qwen/Qwen3.5-0.8B"
+    if role == "red":
+        model_id = os.getenv("OLLAMA_RED_LOCAL_MODEL")
+    elif role == "judge":
+        model_id = os.getenv("OLLAMA_JUDGE_LOCAL_MODEL")
+    else:
+        model_id = os.getenv("OLLAMA_BLUE_LOCAL_MODEL")
 
     # 기반 모델 로드 — CUDA는 QLoRA 4-bit, MPS/CPU는 float16 전체 로드
     if use_quantization:
