@@ -1,7 +1,8 @@
 import json
 import sys
+import random
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 # 동적 경로 설정
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -61,38 +62,28 @@ Return exactly one minified JSON object and nothing else:
 
 class SFTProcessor:
     """
-    Strict, Context, Consensus 아키텍처를 SFT 학습 데이터로 변환합니다.
+    Strict, Context, Consensus 아키텍처를 SFT 학습 데이터로 변환하고 언더샘플링을 수행합니다.
+    (오탐된 케이스 중 부분 정답을 도출한 에이전트의 데이터를 추출하는 Hard Sample Mining 적용)
     """
     def __init__(self, rubrics: Dict[str, str]):
         self.rubrics = rubrics
 
-    def _synthesize_consensus_reason(self, strict_node: Dict, context_node: Dict, expected: str) -> str:
-        """
-        두 감사자의 의견을 합성하여 '합의된 근거'를 생성합니다.
-        """
-        reasons = []
-        
-        # 각 노드의 판정이 정답(Expected)과 일치할 때만 근거로 채택
-        if strict_node.get("judgment") == expected:
-            reasons.append(f"[Strict Analysis] {strict_node.get('reason', '')}")
-        
-        if context_node.get("judgment") == expected:
-            reasons.append(f"[Context Analysis] {context_node.get('reason', '')}")
-            
-        if len(reasons) > 1:
-            return " | ".join(reasons) + " -> 결론적으로 두 관점 모두에서 취약점이 확인됨."
-        
-        return reasons[0] if reasons else "분석 결과 루브릭 보안 기준을 위반하는 패턴이 탐지됨."
-
     def convert(self, raw_json_data: Dict[str, Any]) -> str:
-        sft_samples = []
+        # 라벨별로 데이터를 분류하기 위한 딕셔너리 초기화
+        grouped_samples: Dict[str, List[Dict[str, Any]]] = {
+            "vulnerable": [],
+            "safe": [],
+            "ambiguous": []
+        }
+
         detailed_results = raw_json_data.get("detailed_results", [])
 
         for sample in detailed_results:
-            # 골드 데이터(정답 일치 케이스)만 선별
             eval_data = sample.get("evaluation", {})
             expected = eval_data.get("expected_judgment")
-            if not expected or expected != eval_data.get("predicted_judgment"):
+            predicted = eval_data.get("predicted_judgment")
+            
+            if not expected:
                 continue
 
             # 에이전트 노드 데이터 추출
@@ -100,8 +91,28 @@ class SFTProcessor:
             strict = nodes.get("strict_auditor", {})
             context = nodes.get("context_auditor", {})
 
-            # 합의(Consensus) 논리가 반영된 최종 근거 생성
-            final_reason = self._synthesize_consensus_reason(strict, context, expected)
+            # [핵심 로직] 정답(expected)과 일치하는 에이전트의 근거(reason)만 수집
+            valid_reasons = []
+            if strict.get("judgment") == expected:
+                valid_reasons.append(f"[Strict Analysis] {strict.get('reason', '')}")
+            if context.get("judgment") == expected:
+                valid_reasons.append(f"[Context Analysis] {context.get('reason', '')}")
+
+            # 두 에이전트 모두 정답을 맞추지 못했다면(배울 점이 없다면) 데이터 파기
+            if not valid_reasons:
+                continue
+
+            # 최종 판정(predicted)이 틀렸는데(오탐/미탐), 에이전트 중 하나가 정답을 맞춘 경우
+            # = 모델의 약점을 보완하는 최고 품질의 'Hard Sample (오답 노트)'
+            reason_prefix = ""
+            if expected != predicted:
+                reason_prefix = "[Correction Analysis] "
+
+            # 근거 합성
+            if len(valid_reasons) > 1:
+                final_reason = reason_prefix + " | ".join(valid_reasons)
+            else:
+                final_reason = reason_prefix + valid_reasons[0]
 
             # 데이터 필드 매핑
             original = sample.get("original_en", {})
@@ -128,9 +139,32 @@ class SFTProcessor:
                     {"role": "assistant", "content": json.dumps(assistant_output, ensure_ascii=False)}
                 ]
             }
-            sft_samples.append(json.dumps(chat_row, ensure_ascii=False))
             
-        return "\n".join(sft_samples)
+            # 예상되는 판단(라벨)에 맞춰 그룹화
+            if expected in grouped_samples:
+                grouped_samples[expected].append(chat_row)
+
+        # --- 언더샘플링 (Under-sampling) 로직 유지 ---
+        active_counts = {label: len(items) for label, items in grouped_samples.items() if len(items) > 0}
+        
+        if not active_counts:
+            print("변환할 유효한 데이터가 없습니다.")
+            return ""
+
+        min_count = min(active_counts.values())
+        print(f"[데이터 밸런싱] 최소 라벨 데이터 수: {min_count}개 (Hard Sample 포함)")
+
+        balanced_samples = []
+        for label, items in grouped_samples.items():
+            if len(items) > 0:
+                sampled_items = random.sample(items, min_count)
+                balanced_samples.extend(sampled_items)
+                print(f" - {label} 라벨: 총 {len(items)}개 (오탐 교정 데이터 포함) 중 {min_count}개 무작위 추출됨")
+
+        random.shuffle(balanced_samples)
+
+        sft_jsonl_lines = [json.dumps(row, ensure_ascii=False) for row in balanced_samples]
+        return "\n".join(sft_jsonl_lines)
 
 def save_sft_file(raw_json_data: Dict[str, Any], file_path: Path):
     """
