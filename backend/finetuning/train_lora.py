@@ -137,11 +137,26 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
             if param.dtype == torch.bfloat16:
                 param.data = param.data.to(torch.float16)
 
-    tokenizer = AutoTokenizer.from_pretrained(hf_model_id)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
+    # [최적화 적용] Qwen 모델을 위한 명시적 Chat Template 및 패딩 처리
+    tokenizer = AutoTokenizer.from_pretrained(hf_model_id, trust_remote_code=True)
+    
+    # Qwen 모델의 기본 Chat Template이 적용되도록 보장
+    if not hasattr(tokenizer, 'chat_template') or tokenizer.chat_template is None:
+        print("[경고] 모델에 기본 Chat Template이 없습니다. Qwen 템플릿을 명시적으로 주입합니다.")
+        # Qwen 모델의 일반적인 템플릿 구조 (버전에 따라 약간 다를 수 있음)
+        tokenizer.chat_template = "{% for message in messages %}{{'<|im_start|>' + message['role'] + '\n' + message['content'] + '<|im_end|>' + '\n'}}{% endfor %}{% if add_generation_prompt %}{{ '<|im_start|>assistant\n' }}{% endif %}"
 
+    # Qwen 특화 패딩 토큰 설정 (eos_token 대신 eod_id/eos_token 사용)
+    if tokenizer.pad_token_id is None:
+        if hasattr(tokenizer, 'eod_id'):
+            tokenizer.pad_token_id = tokenizer.eod_id
+            tokenizer.pad_token = tokenizer.decode(tokenizer.eod_id)
+        else:
+            tokenizer.pad_token_id = tokenizer.eos_token_id
+            tokenizer.pad_token = tokenizer.eos_token
+    
+    tokenizer.padding_side = "right"
+    
     lora_config = LoraConfig(
         r=16, 
         lora_alpha=32, 
