@@ -11,8 +11,8 @@ PROJECT_ROOT = CURRENT_DIR.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# 파일 입출력 경로
-INPUT_DATA_PATH = PROJECT_ROOT / "data" / "benchmark_result_20260430_141225.json"
+# 파일 입출력 경로 (벤치마크 스크립트에서 생성된 최신 파일명으로 변경 필요 시 수정)
+INPUT_DATA_PATH = PROJECT_ROOT / "data" / "benchmark_result_en_500sample.json"
 OUTPUT_DATA_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train.jsonl"
 
 _JUDGE_RUBRICS = {
@@ -86,24 +86,25 @@ class SFTProcessor:
             if not expected:
                 continue
 
-            # 에이전트 노드 데이터 추출
-            nodes = sample.get("translated_ko", {}).get("agent_debug_nodes", {})
+            # [수정됨] 번역 모듈 제거에 따른 키 추출 경로 단일화
+            original_data = sample.get("original_en", {})
+            nodes = original_data.get("agent_debug_nodes", {})
+            
             strict = nodes.get("strict_auditor", {})
             context = nodes.get("context_auditor", {})
 
-            # [핵심 로직] 정답(expected)과 일치하는 에이전트의 근거(reason)만 수집
+            # 정답(expected)과 일치하는 에이전트의 근거(reason)만 수집
             valid_reasons = []
             if strict.get("judgment") == expected:
                 valid_reasons.append(f"[Strict Analysis] {strict.get('reason', '')}")
             if context.get("judgment") == expected:
                 valid_reasons.append(f"[Context Analysis] {context.get('reason', '')}")
 
-            # 두 에이전트 모두 정답을 맞추지 못했다면(배울 점이 없다면) 데이터 파기
+            # 두 에이전트 모두 정답을 맞추지 못했다면 데이터 파기
             if not valid_reasons:
                 continue
 
-            # 최종 판정(predicted)이 틀렸는데(오탐/미탐), 에이전트 중 하나가 정답을 맞춘 경우
-            # = 모델의 약점을 보완하는 최고 품질의 'Hard Sample (오답 노트)'
+            # 모델의 약점을 보완하는 최고 품질의 'Hard Sample (오답 노트)' 태깅
             reason_prefix = ""
             if expected != predicted:
                 reason_prefix = "[Correction Analysis] "
@@ -114,14 +115,12 @@ class SFTProcessor:
             else:
                 final_reason = reason_prefix + valid_reasons[0]
 
-            # 데이터 필드 매핑
-            original = sample.get("original_en", {})
-            category = sample.get("category", "LLM06")
+            category = sample.get("category", "LLM01")
             
-            # 메세지 구성
+            # 메세지 구성 (original_data에서 바로 추출)
             user_content = USER_PROMPT_TEMPLATE.format(
-                attack_prompt=original.get("attack_prompt", ""),
-                target_response=original.get("target_response", ""),
+                attack_prompt=original_data.get("attack_prompt", ""),
+                target_response=original_data.get("target_response", ""),
                 category=category,
                 rubric=self.rubrics.get(category, "Analyze for security violations.")
             )
@@ -144,7 +143,7 @@ class SFTProcessor:
             if expected in grouped_samples:
                 grouped_samples[expected].append(chat_row)
 
-        # --- 언더샘플링 (Under-sampling) 로직 유지 ---
+        # --- 언더샘플링 (Under-sampling) 로직 ---
         active_counts = {label: len(items) for label, items in grouped_samples.items() if len(items) > 0}
         
         if not active_counts:
@@ -170,7 +169,7 @@ def save_sft_file(raw_json_data: Dict[str, Any], file_path: Path):
     """
     변환된 데이터를 파일로 저장합니다.[cite: 1]
     """
-    processor = SFTProcessor(_JUDGE_RUBRICS) # 글로벌 루브릭 사용
+    processor = SFTProcessor(_JUDGE_RUBRICS) 
     sft_content = processor.convert(raw_json_data)
     
     if sft_content:
@@ -184,6 +183,7 @@ def main():
     """
     메인 파이프라인 실행 함수[cite: 1]
     """
+    # 주의: INPUT_DATA_PATH 변수가 실제 벤치마크 결과 파일명과 일치하는지 꼭 확인하세요!
     if not INPUT_DATA_PATH.exists():
         print(f"입력 파일을 찾을 수 없습니다: {INPUT_DATA_PATH}")
         return

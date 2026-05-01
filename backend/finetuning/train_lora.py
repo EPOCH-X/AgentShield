@@ -78,21 +78,20 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16
+            bnb_4bit_compute_dtype=torch.float16,
         )
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
+            torch_dtype=torch.float16,   # 추가
             quantization_config=bnb_config,
-            device_map="auto"
+            device_map="auto",
         )
     else:
         model = AutoModelForCausalLM.from_pretrained(
             model_id,
-            torch_dtype=torch.float16,
-            device_map="auto" if device_type == "cpu" else None
+            torch_dtype=torch.float16,   # CPU/MPS도 일단 float16 통일
+            device_map="auto" if device_type == "cpu" else None,
         )
-        if device_type == "mps":
-            model = model.to("mps")
 
     # 토그나이저
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -131,11 +130,12 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         output_dir=output_dir,
         per_device_train_batch_size=batch_size,
         gradient_accumulation_steps=grad_accum,
-        num_train_epochs=3,
+        num_train_epochs=1,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
         fp16=use_fp16,
+        bf16=False,   # 확실히 끄기
         use_cpu=is_cpu,
         optim=optimizer,
         save_strategy="epoch",
@@ -143,7 +143,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         max_grad_norm=0.3,
         gradient_checkpointing=True,
         max_length=2048,
-        packing=False
+        packing=False,
     )
 
     # SFTTrainer로 학습
@@ -172,27 +172,9 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
 
     agent_name = f"agent-{role}"
     print("=" * 50)
-    print(f"\n[Ollama {agent_name} 자동 저장 시작]\n")
-    try:
-        # subprocess.run을 사용해 터미널 명령어를 직접 실행합니다.
-        result = subprocess.run(
-            ["ollama", "create", agent_name, "-f", modelfile_path],
-            capture_output=True, # 실행 결과를 변수에 담음
-            text=True,           # 출력을 문자열로 처리
-            check=True           # 명령어 실패 시 예외 발생
-        )
-        print(f"[Ollama] 등록 성공: {result.stdout.strip()}")
-    except subprocess.CalledProcessError as e:
-        print(f"[Ollama] 등록 실패: {e.stderr}")
-    except FileNotFoundError:
-        print("[Ollama] 시스템에서 'ollama' 명령어를 찾을 수 없습니다. Ollama가 설치되어 있나요?")
-        
-    print(f"\n[완료 {role.upper()}] 아래의 수동버전은 실행할 필요 없습니다.\n")
-
-    print("=" * 50)
     print(f"\n[Ollama 연동 가이드 - 수동]\n")
     print(f"다음 명령어를 터미널에 입력하여 '{role}' 에이전트를 Ollama에 등록하세요:")
-    print(f"ollama create agent-{role} -f {modelfile_path}\n")
+    print(f"ollama create {agent_name} -f {modelfile_path}\n")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Role-based LoRA Fine-tuning")
