@@ -20,7 +20,8 @@ export default function LoginPage() {
       const data = await login(username, password);
       setToken(data.access_token);
       setUsername(username);
-      router.replace("/scan");
+      sessionStorage.removeItem("intro_done"); // 로그인마다 인트로 재생
+      router.replace("/intro");
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "로그인에 실패했습니다.");
     } finally {
