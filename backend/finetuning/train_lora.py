@@ -172,16 +172,9 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         task_type="CAUSAL_LM",
         bias="none"
     )
-    
-    def get_latest_checkpoint(path):
-        checkpoints = [d for d in os.listdir(path) if d.startswith("checkpoint-")]
-        if not checkpoints:
-            return path
-        latest = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))[-1]
-        return os.path.join(path, latest)
 
     # judge 역할만 기존 LoRA 체크
-    judge_adapter_dir = get_latest_checkpoint(judge_adapter_dir)
+    judge_adapter_dir = os.path.join(PROJECT_ROOT, "adapters", "lora-judge", "checkpoint-270")
     print(f"[DEBUG] judge_adapter_dir={judge_adapter_dir}, exists={os.path.exists(judge_adapter_dir)}")
 
     if is_cuda:
@@ -225,7 +218,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         output_dir=output_dir,
         per_device_train_batch_size=4 if is_cuda else 2,
         gradient_accumulation_steps=4 if is_cuda else 8,
-        num_train_epochs=20,
+        num_train_epochs=10,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
