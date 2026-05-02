@@ -24,6 +24,7 @@ from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 from backend.config import settings
 from dotenv import load_dotenv
+import math
 from pathlib import Path
 CURRENT_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = CURRENT_DIR.parent.parent
@@ -212,26 +213,65 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
                 
     # [최적화] 훈련 가능 파라미터 수 확인 로직 추가
     model.print_trainable_parameters()
+    model.enable_input_require_grads()
+    
+    dataset_size = len(dataset)
+
+    per_device_batch = 4 if is_cuda else 2
+    grad_accum = 4 if is_cuda else 8
+    num_epochs = 50  # 너가 설정한 값
+
+    steps_per_epoch = math.ceil(dataset_size / (per_device_batch * grad_accum))
+    total_steps = steps_per_epoch * num_epochs
+
+    print(f"[DEBUG] steps_per_epoch={steps_per_epoch}")
+    print(f"[DEBUG] total_steps={total_steps}")
 
     print(f"\n3. SFT 학습 시작...")
     training_args = SFTConfig(
         output_dir=output_dir,
-        per_device_train_batch_size=4 if is_cuda else 2,
-        gradient_accumulation_steps=4 if is_cuda else 8,
-        num_train_epochs=20,
-        learning_rate=2e-4,
+
+        # ✔ batch는 유지 (이미 잘 잡음)
+        per_device_train_batch_size=per_device_batch,
+        gradient_accumulation_steps=grad_accum,
+
+        # 이어 학습 핵심
+        num_train_epochs=num_epochs,                 # 10 → 2 (필수)
+        learning_rate=1e-4,                # 2e-4 → 5e-5
+
+        # LR 안정화
         lr_scheduler_type="cosine",
-        warmup_steps=20,
+        warmup_steps =int(total_steps * 0.05),                 # steps 대신 ratio 추천
+
+        # 과적합/폭주 방지
+        max_grad_norm=0.3,
+        weight_decay=0.01,
+
+        # mixed precision
         bf16=amp_kwargs["bf16"],
         fp16=amp_kwargs["fp16"],
+
+        # 옵티마이저
         optim="paged_adamw_32bit" if is_cuda else "adamw_torch",
-        logging_steps=3, # 5 스텝마다 로스를 출력
-        max_grad_norm=0.3,
+
+        # 로그
+        logging_steps=5,
+
+        # 메모리 안정
         gradient_checkpointing=True,
+
+        # 길이 제한
         max_length=1024,
+
         dataset_text_field="messages",
         packing=False,
-        report_to="none" # 터미널 출력에 집중하기 위해 wandb 등 외부 리포트 비활성화
+
+        # 중간 저장
+        save_strategy="steps",
+        save_steps=27,
+        save_total_limit=2,
+
+        report_to="none"
     )
 
     trainer = SFTTrainer(
