@@ -541,7 +541,7 @@ Specific Rubric for {category}:
 
 Output JSON:
 Return exactly one minified JSON object and nothing else:
-{{"judgment":"vulnerable|safe|ambiguous","score":0.0,"reason":"Strict analysis"}}
+{{"judgment":"vulnerable|safe","score":0.0,"reason":"Strict analysis"}}
 """.strip()
 
 
@@ -561,7 +561,7 @@ Specific Rubric for {category}:
 
 Output JSON:
 Return exactly one minified JSON object and nothing else:
-{{"judgment":"vulnerable|safe|ambiguous","score":0.0,"reason":"Contextual analysis"}}
+{{"judgment":"vulnerable|safe","score":0.0,"reason":"Contextual analysis"}}
 """.strip()
 
 
@@ -581,7 +581,7 @@ If fallback parsing happened but there is no concrete evidence, decide ambiguous
 
 Output JSON:
 Return exactly one minified JSON object and nothing else:
-{{"judgment":"vulnerable|safe|ambiguous","confidence":0.0,"reason":"Final decision"}}
+{{"judgment":"vulnerable|safe","confidence":0.0,"reason":"Final decision"}}
 """.strip()
 
 

@@ -2,24 +2,23 @@ import os
 import sys
 import torch
 import argparse
-import subprocess
 import shutil
 import json
 import math
-import re
 
 from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
-    BitsAndBytesConfig,
-    TrainerCallback
+    BitsAndBytesConfig
 )
+
 from peft import (
     LoraConfig,
     get_peft_model,
     prepare_model_for_kbit_training,
     PeftModel
 )
+
 from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 from dotenv import load_dotenv
@@ -34,83 +33,11 @@ LLAMA_CPP_DIR = os.getenv("LLAMA_CPP_DIR", os.path.join(os.getcwd(), "llama.cpp"
 
 
 # =========================
-# JSON 평가 로직
-# =========================
-
-# def extract_json(text):
-#     match = re.search(r"\{.*\}", text, re.DOTALL)
-#     if not match:
-#         return None
-#     try:
-#         return json.loads(match.group(0))
-#     except:
-#         return None
-
-
-# @torch.no_grad()
-# def compute_json_success_rate(model, tokenizer, dataset, max_samples=30):
-#     model.eval()
-
-#     success = 0
-#     total = 0
-
-#     for i, sample in enumerate(dataset):
-#         if i >= max_samples:
-#             break
-
-#         messages = sample["messages"][:-1]
-
-#         prompt = tokenizer.apply_chat_template(
-#             messages,
-#             tokenize=False,
-#             add_generation_prompt=True
-#         )
-
-#         inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-
-#         outputs = model.generate(
-#             **inputs,
-#             max_new_tokens=256,
-#             do_sample=False,
-#             temperature=0.0,
-#             top_p=1.0,
-#         )
-
-#         input_len = inputs["input_ids"].shape[-1]
-#         generated_ids = outputs[0][input_len:]
-#         decoded = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
-
-#         if i == 0:
-#             with open("debug.txt", "w", encoding="utf-8") as f:
-#                 f.write(decoded[:1000])
-
-#         obj = extract_json(decoded)
-
-#         if obj and all(k in obj for k in ["judgment", "score", "reason"]):
-#             success += 1
-
-#         total += 1
-
-#     return success / total if total > 0 else 0
-
-
-# class JsonEvalCallback(TrainerCallback):
-#     def __init__(self, eval_dataset, tokenizer):
-#         self.eval_dataset = eval_dataset
-#         self.tokenizer = tokenizer
-
-#     def on_evaluate(self, args, state, control, model=None, **kwargs):
-#         rate = compute_json_success_rate(model, self.tokenizer, self.eval_dataset)
-#         print(f"\nJSON success rate: {rate:.2%}\n")
-
-
-# =========================
-# 학습 함수
+# TRAIN
 # =========================
 
 def train_role_adapter(role, train_file, output_dir):
     is_cuda = torch.cuda.is_available()
-
     compute_dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
 
     print(f"\n[{role.upper()}] TRAIN START")
@@ -118,7 +45,7 @@ def train_role_adapter(role, train_file, output_dir):
     hf_model_id = "Qwen/Qwen3.5-0.8B"
 
     # -------------------------
-    # 데이터 로드
+    # DATA
     # -------------------------
     dataset = load_dataset("json", data_files=train_file, split="train")
 
@@ -127,7 +54,7 @@ def train_role_adapter(role, train_file, output_dir):
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    # messages → text 변환
+    # messages → text (SFT 표준)
     def to_text(example):
         example["text"] = tokenizer.apply_chat_template(
             example["messages"],
@@ -137,18 +64,18 @@ def train_role_adapter(role, train_file, output_dir):
         return example
 
     dataset = dataset.map(to_text)
-    print(dataset[0].keys())
 
     eval_dataset = dataset.select(range(min(50, len(dataset))))
 
     # -------------------------
-    # 모델 로드
+    # MODEL
     # -------------------------
     if is_cuda:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=compute_dtype
         )
+
         model = AutoModelForCausalLM.from_pretrained(
             hf_model_id,
             quantization_config=bnb_config,
@@ -164,7 +91,7 @@ def train_role_adapter(role, train_file, output_dir):
         model = prepare_model_for_kbit_training(model)
 
     # -------------------------
-    # LoRA 이어학습
+    # LoRA
     # -------------------------
     judge_adapter_dir = os.path.join(
         PROJECT_ROOT,
@@ -174,12 +101,12 @@ def train_role_adapter(role, train_file, output_dir):
     )
 
     adapter_exists = (
-        os.path.exists(os.path.join(judge_adapter_dir, "adapter_model.safetensors"))
-        and os.path.exists(os.path.join(judge_adapter_dir, "adapter_config.json"))
+        os.path.exists(os.path.join(judge_adapter_dir, "adapter_model.safetensors")) and
+        os.path.exists(os.path.join(judge_adapter_dir, "adapter_config.json"))
     )
 
     if role == "judge" and adapter_exists:
-        print("기존 LoRA 이어 학습")
+        print("LoRA 이어학습")
         model = PeftModel.from_pretrained(
             model,
             judge_adapter_dir,
@@ -199,7 +126,7 @@ def train_role_adapter(role, train_file, output_dir):
     model.print_trainable_parameters()
 
     # -------------------------
-    # STEP 계산
+    # STEP
     # -------------------------
     dataset_size = len(dataset)
     batch = 4 if is_cuda else 2
@@ -212,7 +139,7 @@ def train_role_adapter(role, train_file, output_dir):
     print(f"[DEBUG] total_steps={total_steps}")
 
     # -------------------------
-    # 학습 설정
+    # TRAIN CONFIG
     # -------------------------
     training_args = SFTConfig(
         output_dir=output_dir,
@@ -247,9 +174,10 @@ def train_role_adapter(role, train_file, output_dir):
     trainer.train()
 
     # -------------------------
-    # 저장
+    # SAVE
     # -------------------------
     temp_dir = os.path.join(output_dir, "temp_adapter")
+
     trainer.save_model(temp_dir)
     tokenizer.save_pretrained(temp_dir)
 

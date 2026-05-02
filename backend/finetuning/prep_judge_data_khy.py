@@ -27,7 +27,7 @@ except ImportError:
     sys.exit(1)
 
 # 파일 경로
-INPUT_DATA_PATH = PROJECT_ROOT / "data" / "benchmark_result_en_500sample.json"
+INPUT_DATA_PATH = PROJECT_ROOT / "data" / "benchmark_result.json"
 OUTPUT_DATA_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train.jsonl"
 
 
