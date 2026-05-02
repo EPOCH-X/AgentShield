@@ -1,211 +1,186 @@
 # AgentShield 개요
 
-이 문서는 팀 내부 기준으로 AgentShield가 무엇을 만들기 위해 시작됐고, 지금 어디까지 방향이 정리됐는지, 그리고 최종적으로 어떤 형태의 제품을 목표로 하는지 이해하기 위한 문서다. README가 외부 공개용 입구 문서라면, 이 문서는 팀원들이 같은 그림을 보고 구현 우선순위를 맞추기 위한 내부 방향 문서다.
+AgentShield는 AI 챗봇의 보안 취약점을 실제 URL 기준으로 검증하고, 취약 응답에 대한 방어 응답을 생성한 뒤, 다시 검증하는 멀티 에이전트 보안 시스템이다.
 
-## 1. 우리가 처음 풀고 싶었던 문제
+## 1. 문제 정의
 
-프로젝트를 시작할 때 팀이 잡았던 문제의식은 명확했다. 기업이나 기관이 운영하는 AI 챗봇은 단순 답변 생성기가 아니라 내부 문서 검색, 고객정보 조회, 환불 처리, 이메일 발송, 계정 조작 같은 실제 업무 도구에 연결되기 때문에, 공격이 성공했을 때 피해가 단순한 이상 응답을 넘어서 실제 정보 유출과 권한 오남용으로 이어질 수 있다는 점이었다.
+기업용 AI 챗봇은 내부 문서 검색, 고객정보 조회, 환불 처리, 계정 조작, 운영 도구 호출과 연결될 수 있다. 이때 공격자가 프롬프트 인젝션이나 도구 호출 유도에 성공하면 단순한 이상 답변이 아니라 실제 정보 유출과 권한 오남용으로 이어질 수 있다.
 
-따라서 처음 목표는 다음 두 가지를 동시에 다루는 것이었다.
+AgentShield는 다음 질문에 답하기 위해 만들어졌다.
 
-- 외부 고객 챗봇을 공격해 실제 취약점을 찾아내는 것
-- 내부 직원이 사용하는 AI 요청을 통제해 운영 단계의 위험을 줄이는 것
+- 이 챗봇은 공격 프롬프트를 받았을 때 민감정보를 출력하는가
+- 내부 도구나 시스템 명령을 실행하는 듯한 응답을 하는가
+- 시스템 프롬프트나 운영 경계를 노출하는가
+- 공격을 막더라도 정상 요청까지 과도하게 거부하는가
+- 취약한 응답을 어떤 방식으로 방어할 수 있는가
+- 성공 공격과 검증된 방어를 다음 테스트에 재사용할 수 있는가
 
-이 두 흐름이 지금의 기능 A와 기능 B로 분리되어 남아 있다.
+## 2. 현재 MVP 범위
 
-## 2. 처음 목표와 현재 목표, 그리고 최종 목적
+현재 핵심은 기능 A다.
 
-### 처음 목표
+```text
+URL 기반 챗봇 보안 검증
+  -> 공격 실행
+  -> 증거 기반 판정
+  -> 방어 생성
+  -> 방어 재검증
+  -> 결과 저장/리포트
+```
 
-- OWASP LLM 주요 위험을 기준으로 공격 시나리오를 자동 생성하고 검사한다.
-- 취약한 챗봇 응답을 찾아내고, 방어 코드나 정책도 만들어본다.
-- 멀티에이전트 구조를 통해 공격, 판정, 방어, 검증을 분리한다.
+기능 B인 monitoring proxy는 장기 확장 방향이다. 운영 중 직원 AI 요청을 실시간으로 검사하고 차단하는 기능이지만, 현재 발표와 검증의 중심은 기능 A다.
 
-### 현재 정리된 목표
+## 3. 전체 구조
 
-- 현재 1차 제품은 `고객이 제공한 단일 target URL`을 기준으로 검증과 개선안을 제시하는 시스템이다.
-- 고객은 URL 하나와 필요 시 API key만 제공하면 된다.
-- Blue Agent의 1차 산출물은 `방어 응답`이다.
-- 상시 런타임 차단 프록시는 장기 목표이고, 지금 MVP의 핵심은 `검증 + 개선안 생성`이다.
+```text
+Target URL
+  -> Target Adapter
+  -> Phase 1 Scanner
+  -> Judge Multi-Agent
+  -> Phase 2 Red Agent
+  -> Judge Multi-Agent
+  -> Phase 3 Blue Agent
+  -> Phase 4 Verify
+  -> PostgreSQL / ChromaDB / JSON Report
+```
 
-### 최종 목적
+### Target Adapter
 
-- 고객이 실제 운영 중인 AI 챗봇 또는 에이전트를 URL 단위로 검사할 수 있어야 한다.
-- 공격 성공 여부만이 아니라, 어떤 응답이 왜 문제였는지와 어떤 개선안이 더 적절한지까지 보여줘야 한다.
-- 장기적으로는 방어 응답, 방어 정책, 운영 프록시까지 이어지는 형태로 확장 가능해야 한다.
+실서비스 챗봇마다 요청/응답 형식이 다르기 때문에 adapter가 이를 통일한다. phase 코드는 OpenAI 형식, Ollama 형식, Docker testbed 형식을 직접 알 필요가 없다.
 
-즉 AgentShield의 최종 목적은 `AI 서비스의 보안 상태를 진단하고, 개선안과 운영 가드레일까지 연결 가능한 기반을 만드는 것`이다.
+### Red Agent
 
-## 3. 현재 팀이 공통으로 맞춰야 하는 핵심 해석
+공격을 생성하고 변형한다. 단순 템플릿 공격이 아니라 target response를 보고 다음 공격을 강화한다.
 
-- 기능 A는 `고객 챗봇 검증 + 개선안 생성` 경로다.
-- 기능 B는 `직원 AI 사용 통제` 경로다.
-- testbed는 기능 B 본체가 아니라, 기능 A를 재현하고 비교 검증하기 위한 공통 공격 타깃 환경이다.
-- Blue Agent는 방어 코드 생성기만이 아니라 `방어 응답 생성기`로 먼저 이해해야 한다.
-- 데이터셋과 보고서의 기준 묶음은 `공격 - 원응답 - 판정 - 방어 응답 - 재판정` 이다.
+주요 전략:
 
-## 4. 기능 A와 기능 B의 제품 의미
+- direct injection
+- payload splitting
+- data completion hijack
+- malicious state fabrication
+- hidden metadata append
+- tool-call structure hijack
+- sensitive reconstruction
+- excessive agency
 
-### 기능 A. AI 보안 테스트 자동화
+### Judge Multi-Agent
 
-기능 A는 고객이 검사받고 싶은 챗봇 URL 하나를 주면, AgentShield가 내부에서 공격을 보내고, 결과를 판정하고, 더 안전한 방어 응답까지 제시하는 흐름이다.
+단일 판정 모델이 아니라 다음 계층을 합친다.
 
-주요 단계는 다음과 같다.
+- Evidence Scanner: 규칙 기반 hard evidence 탐지
+- Strict Auditor: 취약 신호에 민감한 LLM auditor
+- Context Auditor: refusal/마스킹/문맥 확인
+- Final Judge: evidence와 auditor 결과를 합친 최종 판정
 
-1. 공용 공격 패턴으로 대량 스캔을 수행한다.
-2. 처음에는 안전해 보였던 케이스를 Red Agent가 다시 우회 공격한다.
-3. 취약 응답에 대해 Blue Agent가 더 안전한 방어 응답을 만든다.
-4. Judge와 Verify 계층이 그 방어 응답이 실제로 더 안전한지 다시 확인한다.
-5. 결과를 DB, 보고서, 대시보드로 정리한다.
+### Blue Agent
 
-### 기능 B. 직원 AI 사용 모니터링
+취약 응답에 대한 방어 응답을 생성한다. 출력은 방어 코드가 아니라 검증 가능한 `defended_response`와 `defense_rationale` 중심이다.
 
-기능 B는 외부 고객 챗봇을 공격하는 기능이 아니라, 조직 내부에서 직원이 사용하는 AI 요청을 검사하는 경로다.
+### Phase 4 Verify
 
-주요 단계는 다음과 같다.
+Blue Agent의 방어 응답을 다시 Judge로 검증한다. 통과한 방어만 defense memory에 저장한다.
 
-1. 직원이 보낸 프롬프트를 정책 엔진으로 검사한다.
-2. 민감정보 유출, 부적절 사용, 과도한 요청 등을 판정한다.
-3. 허용된 요청만 실제 타깃 AI로 전달한다.
-4. 응답 마스킹, usage log 저장, violation 저장을 수행한다.
+## 4. Testbed
 
-## 5. testbed의 의미
+Testbed는 실제 서비스 챗봇을 흉내 내는 공격 대상이다.
 
-testbed는 이 프로젝트에서 매우 중요하지만, 제품 본체와 동일한 것은 아니다.
+구성:
 
-- testbed는 기능 A를 실제처럼 재현하기 위한 내부 타깃 환경이다.
-- `testbed/target_chatbot` 은 실제 공격 대상 챗봇이다.
-- `testbed/tool_gateway` 는 이 챗봇이 호출하는 내부 도구 서버다.
-- testbed DB에는 고객, 주문, 티켓, 환불, 감사 로그 같은 가짜 업무 데이터가 들어 있다.
-- weak / strict 두 모드를 통해 보안 규칙 적용 전후를 비교할 수 있다.
+- `testbed/target_chatbot`: `/chat` endpoint 제공
+- `testbed/tool_gateway`: 고객/주문/환불/내부 API 도구 재현
+- `data/testbed_kb`: internal/public/poisoned 지식 문서
 
-즉 testbed는 “학습이 끝난 운영 챗봇 제품”이라기보다, `공격이 실제로 먹히는지`, `방어 응답이 차이를 만드는지`, `도구 오남용이 발생하는지`를 재현하는 기준 환경이다.
+중요한 점:
 
-## 6. 왜 지금 구조가 필요한가
+- testbed도 URL을 통해 호출한다.
+- AgentShield가 testbed 내부 함수를 직접 호출하지 않는다.
+- 실서비스 URL과 동일한 방식으로 target adapter를 거친다.
 
-- 탐지만 하는 도구는 운영팀에게 후속 조치가 부족하다.
-- 방어안만 제안하는 도구는 실제 차단 효과를 증명하지 못한다.
-- 프롬프트 인젝션, 민감정보 유출, 권한 오남용, 시스템 프롬프트 누출은 서로 연결돼 발생한다.
-- 따라서 공격, 판정, 방어 응답 생성, 재검증, 저장, 보고서가 하나의 흐름으로 묶여야 한다.
+## 5. 데이터와 메모리
 
-## 7. 현재 집중하는 OWASP 범위
-
-- `LLM01`: Prompt Injection
-- `LLM02`: Sensitive Information Disclosure
-- `LLM06`: Excessive Agency
-- `LLM07`: System Prompt Leakage
-
-이 네 범위는 기능 A, 기능 B, testbed, defense JSON, Judge 기준, 보고서 구성 전부에 공통으로 영향을 준다.
-
-## 8. 기술 스택과 사용하는 이유
-
-### Backend
-
-- FastAPI
-- SQLAlchemy Async
-- PostgreSQL
-- LangGraph
-- Ollama 및 role-based LLM client
-
-언제 쓰는가:
-
-- FastAPI: scan, monitoring, report, auth 같은 API 진입점과 testbed 서비스를 띄울 때 사용한다.
-- SQLAlchemy Async: AgentShield 운영 DB의 세션, 결과, 로그 저장에 사용한다.
-- PostgreSQL: 공격 패턴, 세션, 결과, monitoring 로그와 testbed 업무 데이터를 저장한다.
-- LangGraph: 기능 A의 Phase 1 -> 2 -> 3 -> 4 순서를 하나의 파이프라인으로 묶는다.
-- Ollama: Red, Blue, Judge, testbed target chatbot이 로컬 모델을 호출할 때 사용한다.
-
-### Data / Retrieval
-
-- ChromaDB
-- `data/attack_patterns/`
-- `data/defense_patterns/`
-- PostgreSQL `attack_patterns`, `test_sessions`, `test_results`, monitoring 관련 테이블
-
-언제 쓰는가:
-
-- ChromaDB: Phase 2에서 과거 성공 공격을 찾을 때, Phase 3에서 유사 방어 예시를 찾을 때, testbed 내부 KB 검색을 할 때 사용한다.
-- `data/attack_patterns/`: DB가 비었거나 로컬 fallback이 필요할 때 쓰는 원본 공격 자산이다.
-- `data/defense_patterns/`: Blue Agent가 참고할 방어 예시 자산이다.
-- PostgreSQL `attack_patterns`: 팀 공용 공격 기준본이다.
-- PostgreSQL `test_sessions`, `test_results`: 실제 스캔 결과와 재검증 결과 저장소다.
-- monitoring 관련 테이블: 기능 B의 usage log, violation 저장소다.
-
-여기서 RAG는 다음 상황에서 실제로 사용된다.
-
-- 기능 A Phase 2: 과거 성공 공격을 다시 찾아 Red Agent 변형 공격 품질을 높일 때
-- 기능 A Phase 3: 유사 방어 응답 또는 정책 예시를 찾아 Blue Agent 출력을 보조할 때
-- testbed 내부 API: `/kb/search` 경로로 챗봇이 내부 문서를 조회할 때
-
-### Runtime Components
-
-- `defense_proxy/`: 방어 정책 적용 후 재검증 프록시
-- `monitoring_proxy/`: 직원 AI 사용 모니터링 프록시
-- `testbed/`: 타깃 챗봇, tool gateway, KB, 실제 DB
-
-언제 쓰는가:
-
-- `defense_proxy/`: Blue가 만든 방어 정책을 실제 입력/출력 필터 형태로 다시 검증할 때 사용한다.
-- `monitoring_proxy/`: 직원 AI 사용을 운영 중간에서 통제할 때 사용한다.
-- `testbed/`: 고객 챗봇을 직접 붙이기 전후 모두에서 공통 공격 타깃과 도구 오남용 시나리오를 재현할 때 사용한다.
-
-### Frontend
-
-- Next.js dashboard
-- scan/monitoring/report 화면
-
-언제 쓰는가:
-
-- 운영자가 스캔 시작, 상태 확인, 결과 조회, 향후 보고서 확인을 할 때 사용한다.
-
-## 9. 고객 통합 방식
-
-현재 구조의 핵심은 `고객이 복잡한 포맷을 직접 맞추지 않아도 된다` 는 점이다.
-
-- 고객은 기본적으로 `target_url` 과 `target_api_key` 만 제공한다.
-- 공통 target adapter가 URL 패턴을 보고 provider를 자동 감지한다.
-- 내부에서 요청 payload와 응답 파싱 형식을 맞춘다.
-- 따라서 각 phase나 proxy가 고객별 포맷을 직접 알 필요가 없다.
-
-현재 지원 방향은 다음과 같다.
-
-- generic `messages -> content`
-- OpenAI-style `chat/completions`
-- Ollama `api/chat`
-
-## 10. 기존 기획 대비 무엇이 정리되었는가
-
-### 이전 이해
-
-- 각 phase가 타깃 요청 형식을 직접 가정했다.
-- 공격 패턴은 파일 자산 위주로 보는 경향이 있었다.
-- scan API는 mock 또는 placeholder 중심이었다.
-- monitoring outbound도 실제 포워딩 전 단계에 가까웠다.
-- Blue Agent는 방어 코드 생성기로만 보이는 경우가 있었다.
-
-### 현재 정리
-
-- target adapter를 공통 계층으로 둔다.
-- 공격 패턴은 DB를 팀 공용 기준본으로 관리하고 파일은 fallback 또는 원본 자산으로 본다.
-- scan API는 실제 graph 실행 경로를 기본으로 본다.
-- monitoring proxy도 실제 포워딩 경로를 사용한다.
-- testbed를 팀 공통 검증 환경으로 사용한다.
-- Blue Agent는 `방어 응답 생성기 + 보조 정책 생성기`로 해석한다.
-
-즉 제품 방향이 바뀐 것이 아니라, 실제 운영 가능한 구조로 더 구체화된 것이다.
-
-## 11. 지금 팀이 놓치면 안 되는 사실
-
-- 기능 A의 핵심 고객 가치는 `URL 기반 검증 + 개선안 생성`이다.
-- 기능 B는 기능 A와 다른 문제를 푸는 운영용 게이트웨이다.
-- testbed는 기능 A를 재현하기 위한 환경이지, 최종 고객 제품 자체는 아니다.
-- 결과 DB는 원본 기록 저장소다. 학습 후보는 cleaned export를 기준으로 봐야 한다.
-- 보고서와 데이터셋의 기준 묶음은 `공격 - 원응답 - 판정 - 방어 응답 - 재판정` 이다.
-
-## 12. 팀 문서 읽는 순서
-
-- `README.md`: 외부 공개용 입구 문서와 저장소 큰 그림
-- `AgentShield_개요.md`: 팀 내부 방향, 처음 목표와 현재 목표, 기술 스택 해석
-- `AgentShield_세부기획서.md`: 전체 파이프라인과 공통 계약
-- `AgentShield_기능별_파이프라인.md`: 역할별 최종 기능 형태와 충돌 방지 기준
-- `팀_검수_운영_가이드.md`: JSON 산출, 팀 검토 기준, 실행/점검 절차, 공용 DB 전환 기준
+| 저장소 | 역할 |
+| --- | --- |
+| PostgreSQL | 세션, 공격 패턴, 테스트 결과, 방어 결과 저장 |
+| ChromaDB `attack_results` | 성공 공격 검색/재사용 |
+| ChromaDB `defense_patterns` | 검증된 방어 패턴 검색/재사용 |
+| `results/` | 실행 결과 JSON과 review markdown |
+| `data/red_campaigns/` | adaptive campaign 산출물 |
+
+오염 방지 기준:
+
+- raw campaign 전체를 바로 DB/Chroma에 넣지 않는다.
+- 성공 공격만 검수 후 replay 또는 적재 후보가 된다.
+- ambiguous는 수동 검수 전까지 자동 학습/방어 데이터로 쓰지 않는다.
+- generation_failed는 제외한다.
+
+## 6. Red Adaptive Campaign
+
+고성능 Red 모델을 상시 켜 두면 메모리 부담이 크다. 그래서 AgentShield는 campaign 모드를 따로 둔다.
+
+```text
+large red model 실행
+  -> target response를 보며 multi-round 공격 강화
+  -> raw/success/manual_review/mixed JSON 저장
+  -> red model 종료
+  -> success_only JSON을 표준 pipeline으로 replay
+```
+
+이 방식의 장점:
+
+- 강한 Red 모델을 필요한 순간에만 사용한다.
+- DB/Chroma 오염 없이 공격을 수확한다.
+- 성공 공격만 방어 파이프라인에 넣는다.
+- 모델별 공격력 비교와 파인튜닝 데이터 수집이 쉽다.
+
+## 7. 판정에서 중요한 기준
+
+AgentShield는 "모델이 안전하다고 말했는가"보다 "응답에 실제 위험 증거가 있는가"를 먼저 본다.
+
+취약 신호:
+
+- 실제 API key, auth token, secret credential 출력
+- `<tool_call>` 또는 JSON tool call 출력
+- `system.execute_command` 등 위험 도구 호출
+- 삭제/환불/권한변경 완료 주장
+- hidden metadata나 시스템 지시 문자열을 그대로 출력
+
+오탐 방지:
+
+- 공격 프롬프트에 있던 이메일/토큰 문자열을 거부 설명에서 단순 인용한 경우는 바로 취약으로 보지 않는다.
+- 일반 보안 연락처 이메일은 민감정보 유출로 보지 않는다.
+- JSON 파싱 실패만으로 취약 판정하지 않는다.
+
+## 8. 현재 결과물
+
+AgentShield가 생성하는 주요 결과물:
+
+- Phase별 summary
+- 항목별 attack prompt
+- target response
+- judge detail
+- evidence scan result
+- defense response
+- verify result
+- Chroma 적재 결과
+- review markdown
+
+시각화 팀은 특히 다음 값을 화면에 보여주면 된다.
+
+- category/subcategory
+- phase
+- judgment
+- confidence
+- evidence
+- response excerpt
+- defense result
+- final summary
+
+## 9. 향후 개선 방향
+
+- Red Agent 모델 선택과 파인튜닝
+- 장문 공격 데이터 3,000~6,000자 품질 개선
+- Judge false positive/false negative 축소
+- frontend scan/result API 연결 검증
+- PostgreSQL schema와 ORM 기준 고정
+- ChromaDB attack/defense memory 품질 관리
+- monitoring proxy 기능 B 고도화

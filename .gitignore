@@ -61,6 +61,7 @@ data/attack_patterns/*.csv
 data/phase3_defenses/
 data/phase3_failures/
 data/defense_patterns/phase4_verified_*.json
+data/red_campaigns/
 !data/attack_patterns/README.md
 !data/defense_patterns/README.md
 !data/finetuning/README.md
@@ -121,3 +122,10 @@ results/
 scripts/calibrate_result.txtsocket/.s.PGSQL.*
 
 nohup.out
+# Added by code-review-graph
+.code-review-graph/
+.claude
+.cursor
+.mcp.json
+.opencode.json
+

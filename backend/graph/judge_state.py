@@ -5,18 +5,14 @@ class SecurityState(TypedDict):
     category: str
     attack_prompt: str
     target_response: str
-    
-    # 기존 필드
     triage_result: Optional[Dict[str, Any]]
     pattern_scan_result: Optional[Dict[str, Any]]
     evidence_scan_result: Optional[Dict[str, Any]]
     
-    # 신규: 병렬 Auditor 결과
     strict_auditor_result: Optional[Dict[str, Any]]
     context_auditor_result: Optional[Dict[str, Any]]
     
-    # 기존/신규 공통
-    auditor_analysis: Optional[Dict[str, Any]] # 호환성을 위해 유지
+    auditor_analysis: Optional[Dict[str, Any]]
     final_judgment: Optional[str]
     confidence: float
     detail: str

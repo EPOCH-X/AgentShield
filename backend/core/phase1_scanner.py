@@ -1,22 +1,5 @@
 # backend/core/phase1_scanner.py
-"""
-Phase 1 Scanner — 공격 패턴 실행 및 판정
-
-[수정 사항]
-- _load_attack_patterns_from_file():
-    파일 경로 data/attack_patterns.json → data/attack_patterns/**/*.json 로 수정
-    JSON 키 매핑: prompt_text → attack_prompt, vector_id → id (fallback)
-- _load_attack_patterns() DB 경로:
-    ORM 필드명 불일치(prompt_text vs attack_prompt) getattr로 양쪽 허용
-    빈 결과 시 warning → error 레벨로 상향
-- run_phase1() 내부에서 _load_attacks를 _self._load_attacks로 호출:
-    smoke 스크립트의 monkey-patch가 반드시 반영되도록 모듈 속성 경유
-- asyncio.Semaphore(2): _execute_attack_pattern 내부에서 직접 획득
-- send_fn 파라미터: smoke 스크립트가 Ollama 형식 변환 함수를 주입
-- _load_attacks 별칭: smoke 스크립트의 monkey-patch 대상
-- Exponential Backoff: 실패 attempt 1→2초, 2→4초, 3→8초
-- error_source / failure_mode 필드: smoke 스크립트 에러 출력용
-"""
+"""Phase 1 scanner: load attack patterns, call target, judge responses."""
 
 import asyncio
 import logging
@@ -37,11 +20,9 @@ MAX_TARGET_RETRIES = 3
 
 
 def _backoff(attempt: int) -> float:
-    """지수 백오프 대기 시간. attempt 1→2초, 2→4초, 3→8초"""
+    """Exponential retry backoff."""
     return float(2 ** attempt)
 
-
-# ── 진입점 ───────────────────────────────────────────────────────────────────
 
 async def run_phase1(
     session_id: str,
@@ -53,28 +34,7 @@ async def run_phase1(
     llm=None,
     on_result=None,
 ) -> dict:
-    """
-    Phase 1 실행 — 공격 패턴 전송 → 타겟 응답 수집 → Judge 판정
-
-    llm_security_graph.py 호출 방식:
-        run_phase1(session_id, target_url,
-                   target_config=..., on_result=phase1_result_callback)
-        → category 생략 시 "ALL" 기본값 사용
-
-    smoke 스크립트 호출 방식:
-        wrapped_run_phase1(..., send_fn=ollama_send_fn, on_result=_print_result)
-        → send_fn으로 Ollama /api/chat 형식 변환 주입
-
-    Parameters
-    ----------
-    send_fn : optional
-        smoke 스크립트가 주입하는 커스텀 HTTP 전송 함수.
-        signature: async def send_fn(client: httpx.AsyncClient, prompt: str) -> str
-        None이면 target_adapter.send_messages_to_target 사용.
-    on_result : optional
-        결과 하나가 완료될 때마다 호출되는 콜백.
-        graph의 phase1_result_callback 또는 smoke의 _print_result가 전달됨.
-    """
+    """Run Phase 1 and optionally stream each result through on_result."""
     adapter_config = TargetAdapterConfig.from_input(
         target_url=target_url,
         api_key=(target_config or {}).get("api_key"),
@@ -82,9 +42,6 @@ async def run_phase1(
         model=(target_config or {}).get("model"),
     )
 
-    # ★ 반드시 모듈 속성(_self._load_attacks)으로 호출해야
-    #   smoke 스크립트의 monkey-patch(_patched_phase1_loader)가 반영됨.
-    #   직접 _load_attack_patterns(...)를 호출하면 patch가 무시됨.
     import backend.core.phase1_scanner as _self
     attack_patterns = await _self._load_attacks(category, max_attacks)
 
@@ -262,8 +219,6 @@ async def _load_attack_patterns_from_file(
     return patterns
 
 
-# ── 단일 패턴 실행 ────────────────────────────────────────────────────────────
-
 async def _execute_attack_pattern(
     session_id: str,
     pattern: Dict[str, Any],
@@ -271,17 +226,13 @@ async def _execute_attack_pattern(
     send_fn=None,
     on_result=None,
 ) -> Dict[str, Any]:
-    """
-    단일 공격 패턴 실행.
-    흐름: Semaphore 획득 → 타겟 호출(재시도) → Judge 판정 → DB 저장 → 반환
-    """
+    """Execute one attack pattern and persist the judged result."""
     category          = pattern.get("category", "LLM01")
     subcategory       = pattern.get("subcategory", "")
     attack_prompt     = pattern.get("attack_prompt", "")
     attack_pattern_id = pattern.get("id", "")
     seed_id           = pattern.get("seed_id", "")
 
-    # run_phase1의 for 루프가 직렬화를 보장 — 여기서 별도 Semaphore 불필요
     target_response, error_reason = await _call_target_with_retry(
         adapter_config=adapter_config,
         attack_prompt=attack_prompt,
