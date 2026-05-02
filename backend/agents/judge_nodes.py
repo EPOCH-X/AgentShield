@@ -672,7 +672,7 @@ async def strict_auditor_node(state: SecurityState) -> Dict[str, Any]:
 
         logger.debug("[StrictAuditor] call prompt_len=%s response_len=%s", len(prompt), len(response))
 
-        rubric = get_rubric()
+        rubric = get_rubric(category=category)
         system_prompt = STRICT_AUDITOR_SYSTEM_PROMPT_TEMPLATE.format(
             category=category,
             rubric=rubric,
@@ -731,7 +731,7 @@ async def context_auditor_node(state: SecurityState) -> Dict[str, Any]:
 
         logger.debug("[ContextAuditor] call prompt_len=%s response_len=%s", len(prompt), len(response))
 
-        rubric = get_rubric()
+        rubric = get_rubric(category=category)
         system_prompt = CONTEXT_AUDITOR_SYSTEM_PROMPT_TEMPLATE.format(
             category=category,
             rubric=rubric,
