@@ -84,7 +84,7 @@ class SFTProcessor:
             # label JSON (ambiguous 없음)
             assistant_dict = {
                 "judgment": expected,
-                "confidence": 0.95 if expected == "vulnerable" else 0.05,
+                "score": 0.95 if expected == "vulnerable" else 0.05,
                 "reason": final_reason,
             }
 

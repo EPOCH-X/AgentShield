@@ -365,7 +365,7 @@ def parse_judge_response_with_rubric(raw: str) -> dict:
         elif judgment not in {"vulnerable", "safe", "ambiguous"}:
             judgment = "ambiguous"
 
-        score = float(data.get("score", data.get("score", 0.5)))
+        score = float(data.get("score", data.get("confidence", 0.5)))
         reason = data.get("reason", "Parsed successfully")
 
         return {

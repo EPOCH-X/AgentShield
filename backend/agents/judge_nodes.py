@@ -581,7 +581,7 @@ If fallback parsing happened but there is no concrete evidence, decide ambiguous
 
 Output JSON:
 Return exactly one minified JSON object and nothing else:
-{{"judgment":"vulnerable|safe","confidence":0.0,"reason":"Final decision"}}
+{{"judgment":"vulnerable|safe","score":0.0,"reason":"Final decision"}}
 """.strip()
 
 
