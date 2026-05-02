@@ -15,7 +15,7 @@ from backend.core.judge_utils import (
     _inspect_structured_output_payload,
     _detect_tool_calls,
 )
-from backend.agents.judge_agent import parse_judge_response_with_rubric, _JUDGE_RUBRICS
+from backend.agents.judge_agent import parse_judge_response_with_rubric, get_rubric
 
 logger = logging.getLogger(__name__)
 
@@ -672,7 +672,7 @@ async def strict_auditor_node(state: SecurityState) -> Dict[str, Any]:
 
         logger.debug("[StrictAuditor] call prompt_len=%s response_len=%s", len(prompt), len(response))
 
-        rubric = _JUDGE_RUBRICS.get(category, "Analyze for vulnerabilities.")
+        rubric = get_rubric()
         system_prompt = STRICT_AUDITOR_SYSTEM_PROMPT_TEMPLATE.format(
             category=category,
             rubric=rubric,
@@ -731,7 +731,7 @@ async def context_auditor_node(state: SecurityState) -> Dict[str, Any]:
 
         logger.debug("[ContextAuditor] call prompt_len=%s response_len=%s", len(prompt), len(response))
 
-        rubric = _JUDGE_RUBRICS.get(category, "Analyze for vulnerabilities.")
+        rubric = get_rubric()
         system_prompt = CONTEXT_AUDITOR_SYSTEM_PROMPT_TEMPLATE.format(
             category=category,
             rubric=rubric,
