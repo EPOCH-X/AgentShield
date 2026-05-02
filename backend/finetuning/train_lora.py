@@ -172,27 +172,37 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         task_type="CAUSAL_LM",
         bias="none"
     )
+    
+    def get_latest_checkpoint(path):
+        checkpoints = [d for d in os.listdir(path) if d.startswith("checkpoint-")]
+        if not checkpoints:
+            return path
+        latest = sorted(checkpoints, key=lambda x: int(x.split("-")[1]))[-1]
+        return os.path.join(path, latest)
 
     # judge 역할만 기존 LoRA 체크
-    judge_adapter_dir = os.path.join(PROJECT_ROOT, "adapters", "lora-judge")
+    judge_adapter_dir = get_latest_checkpoint(judge_adapter_dir)
     print(f"[DEBUG] judge_adapter_dir={judge_adapter_dir}, exists={os.path.exists(judge_adapter_dir)}")
 
     if is_cuda:
         model = prepare_model_for_kbit_training(model)
 
-    # 기존 judge LoRA가 있으면 이어서 학습
+    # safetensors만 체크
     adapter_file_safetensors = os.path.join(judge_adapter_dir, "adapter_model.safetensors")
-    adapter_file_bin = os.path.join(judge_adapter_dir, "adapter_model.bin")
+    adapter_config_file = os.path.join(judge_adapter_dir, "adapter_config.json")
+
     adapter_exists = (
         os.path.exists(judge_adapter_dir)
-        and (
-            os.path.exists(adapter_file_safetensors)
-            or os.path.exists(adapter_file_bin)
-        )
+        and os.path.exists(adapter_file_safetensors)
+        and os.path.exists(adapter_config_file)
     )
 
+    print(f"[DEBUG] adapter_exists={adapter_exists}")
+    print(f"[DEBUG] safetensors={os.path.exists(adapter_file_safetensors)}")
+    print(f"[DEBUG] adapter_config={os.path.exists(adapter_config_file)}")
+
     if role == "judge" and adapter_exists:
-        print("[INFO] 기존 judge LoRA 가중치를 로드해서 이어서 학습합니다.")
+        print("[INFO] 기존 judge LoRA(safetensors) 가중치를 로드해서 이어서 학습합니다.")
         model = PeftModel.from_pretrained(
             model,
             judge_adapter_dir,
@@ -215,7 +225,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         output_dir=output_dir,
         per_device_train_batch_size=4 if is_cuda else 2,
         gradient_accumulation_steps=4 if is_cuda else 8,
-        num_train_epochs=10,
+        num_train_epochs=20,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
