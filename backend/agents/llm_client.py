@@ -211,16 +211,28 @@ class AgentShieldLLM:
                 api_path = "/api/chat" if use_chat_api else "/api/generate"
                 url = f"{self.ollama_base_url.rstrip('/')}{api_path}"
                 if use_chat_api:
+                    messages: list = [{"role": "user", "content": prompt}]
+                    if role == "red":
+                        from backend.agents.red_agent import get_system_prompt
+                        sys_prompt = get_system_prompt()
+                        if sys_prompt:
+                            messages = [{"role": "system", "content": sys_prompt}] + messages
                     payload: Dict[str, Any] = {
                         "model": self.active_ollama_model,
-                        "messages": [{"role": "user", "content": prompt}],
+                        "messages": messages,
                         "stream": False,
                         "options": options,
                     }
                 else:
+                    effective_prompt = prompt
+                    if role == "red":
+                        from backend.agents.red_agent import get_system_prompt
+                        sys_prompt = get_system_prompt()
+                        if sys_prompt:
+                            effective_prompt = f"{sys_prompt}\n\n[USER TASK]\n{prompt}"
                     payload = {
                         "model": self.active_ollama_model,
-                        "prompt": prompt,
+                        "prompt": effective_prompt,
                         "stream": False,
                         "options": options,
                     }
