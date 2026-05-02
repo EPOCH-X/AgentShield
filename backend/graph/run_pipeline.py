@@ -355,8 +355,7 @@ OLLAMA_BASE_URL = settings.OLLAMA_BASE_URL
 
 # Red Agent 모델 — 런타임 변형 생성용
 AGENT_MODEL = settings.OLLAMA_RED_MODEL
-# 모델에 따라 시스템 프롬프트 자동 선택 (abliterated → 공격 특화, 일반 → 우회 프레이밍)
-RED_AGENT_SYSTEM_PROMPT = get_system_prompt(AGENT_MODEL)
+RED_AGENT_SYSTEM_PROMPT = get_system_prompt()
 # Red Agent 짧은 라벨 (로그/메타데이터용)
 _AGENT_LABEL = AGENT_MODEL.split("/")[-1].split(":")[0][:20]
 # 타겟 모델 — 보안 테스트 대상 (CLI --target 으로 변경 가능)
