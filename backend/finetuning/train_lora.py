@@ -24,6 +24,9 @@ from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 from backend.config import settings
 from dotenv import load_dotenv
+from pathlib import Path
+CURRENT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = CURRENT_DIR.parent.parent
 
 load_dotenv()
 
@@ -170,9 +173,34 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         bias="none"
     )
 
+    # judge 역할만 기존 LoRA 체크
+    judge_adapter_dir = os.path.join(PROJECT_ROOT, "adapters", "lora-judge")
+    print(f"[DEBUG] judge_adapter_dir={judge_adapter_dir}, exists={os.path.exists(judge_adapter_dir)}")
+
     if is_cuda:
         model = prepare_model_for_kbit_training(model)
-    model = get_peft_model(model, lora_config)
+
+    # 기존 judge LoRA가 있으면 이어서 학습
+    adapter_file_safetensors = os.path.join(judge_adapter_dir, "adapter_model.safetensors")
+    adapter_file_bin = os.path.join(judge_adapter_dir, "adapter_model.bin")
+    adapter_exists = (
+        os.path.exists(judge_adapter_dir)
+        and (
+            os.path.exists(adapter_file_safetensors)
+            or os.path.exists(adapter_file_bin)
+        )
+    )
+
+    if role == "judge" and adapter_exists:
+        print("[INFO] 기존 judge LoRA 가중치를 로드해서 이어서 학습합니다.")
+        model = PeftModel.from_pretrained(
+            model,
+            judge_adapter_dir,
+            is_trainable=True
+        )
+    else:
+        print("[INFO] 새 LoRA를 생성해서 학습합니다.")
+        model = get_peft_model(model, lora_config)
 
     if compute_dtype == torch.float16:
         for _, param in model.named_parameters():
