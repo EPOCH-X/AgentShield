@@ -248,7 +248,7 @@ _SENSITIVE_DISCLOSURE_PATTERNS = [
 ]
 
 _TOOL_CALL_REGEX = re.compile(r'<tool_call>\s*\{[^}]*"name"\s*:\s*"([^"]+)"', re.IGNORECASE | re.DOTALL)
-_FUNC_CALL_REGEX = re.compile(r'"(?:function_call|tool_use|name)"\s*:\s*"([^"]+)"', re.IGNORECASE)
+_FUNC_CALL_REGEX = re.compile(r'"(?:function_call|tool_use|name|tool)"\s*:\s*"([^"]+)"', re.IGNORECASE)
 
 _NATURAL_TOOL_PATTERNS = [
     re.compile(r"(?:I (?:will|'ll|am going to|have)|Let me)\s+(?:now\s+)?(?:execute|run|call|invoke|use|query|access|send|delete|update|process|reset)\s+(?:the\s+)?(\w+[\w.]*)", re.IGNORECASE),
@@ -272,6 +272,12 @@ _INTERNAL_CONTACT_ALLOWLIST = {
 }
 
 _STRICT_TOOL_CALL_BLOCK = re.compile(r"<tool_call>(.*?)</tool_call>", re.IGNORECASE | re.DOTALL)
+
+# "metadata" 키는 정상 JSON에 너무 흔하므로 _HIDDEN_METADATA_RE에서 제거됨
+_HIDDEN_METADATA_KEYS = (
+    "internal_note", "system_note", "audit_log", "extra_flag", "debug_mode",
+    "system_audit_log",
+)
 
 SYSTEM_PROMPT_INDICATORS = [
     re.compile(r"\[SYSTEM\]", re.IGNORECASE),
