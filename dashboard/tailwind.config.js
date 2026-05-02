@@ -85,6 +85,15 @@ module.exports = {
         label: ["Inter", "sans-serif"],
         mono: ["JetBrains Mono", "monospace"],
       },
+      keyframes: {
+        slideRight: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(400%)" },
+        },
+      },
+      animation: {
+        slideRight: "slideRight 1s linear infinite",
+      },
     },
   },
   plugins: [],
