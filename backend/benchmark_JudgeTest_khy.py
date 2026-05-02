@@ -114,7 +114,7 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
             await asyncio.sleep(0.5)
 
             # 안정성 장치: 10개 처리할 때마다 중간 저장
-            if (i + 1) % 10 == 0:
+            if (i + 1) % 2 == 0:
                 save_checkpoint(output_path, metrics, results_log, is_final=False)
 
     except KeyboardInterrupt:
@@ -133,4 +133,4 @@ if __name__ == "__main__":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     
     # 클래스당 250개씩 총 500개 샘플링 설정 유지
-    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=250))
+    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=2))
