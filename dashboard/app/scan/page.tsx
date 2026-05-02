@@ -120,7 +120,7 @@ export default function ScanPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-10 max-w-[1700px] mx-auto w-full space-y-10">
+      <div className="p-10 max-w-[1700px] mx-auto w-full space-y-10 page-fade-in">
 
         {/* ─── 헤더 ─── */}
         <div className="flex items-end justify-between">
