@@ -218,7 +218,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         output_dir=output_dir,
         per_device_train_batch_size=4 if is_cuda else 2,
         gradient_accumulation_steps=4 if is_cuda else 8,
-        num_train_epochs=10,
+        num_train_epochs=20,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
         warmup_steps=20,
