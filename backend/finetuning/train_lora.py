@@ -255,7 +255,7 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
         optim="paged_adamw_32bit" if is_cuda else "adamw_torch",
 
         # 로그
-        logging_steps=5,
+        logging_steps=6,
 
         # 메모리 안정
         gradient_checkpointing=True,
