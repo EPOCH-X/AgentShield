@@ -428,3 +428,11 @@ def parse_judge_response_with_rubric(raw: str) -> dict:
             "fallback_applied": True,
             "raw_excerpt": raw[:240],
         }
+        
+__all__ = [
+    "_JUDGE_RUBRICS",
+    "build_judge_messages",
+    "build_judge_messages_with_rubric",
+    "parse_judge_response",
+    "parse_judge_response_with_rubric",
+]
