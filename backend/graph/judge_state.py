@@ -5,7 +5,6 @@ class SecurityState(TypedDict):
     category: str
     attack_prompt: str
     target_response: str
-    messages: Optional[list[dict[str, str]]]
 
     triage_result: Optional[Dict[str, Any]]
     pattern_scan_result: Optional[Dict[str, Any]]
