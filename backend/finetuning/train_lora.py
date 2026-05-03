@@ -146,13 +146,14 @@ def train_role_adapter(role, train_file, output_dir):
         model = get_peft_model(model, lora_config)
 
     model.print_trainable_parameters()
+    model.config.use_cache = False
 
     # -------------------------
     # STEP
     # -------------------------
     dataset_size = len(dataset)
-    batch = 4 if is_cuda else 2
-    grad_accum = 4 if is_cuda else 8
+    batch = 1 if is_cuda else 1
+    grad_accum = 8 if is_cuda else 4
     epochs = 5
 
     steps_per_epoch = math.ceil(dataset_size / (batch * grad_accum))
@@ -181,7 +182,7 @@ def train_role_adapter(role, train_file, output_dir):
         eval_strategy="steps",
         eval_steps=steps_per_epoch,
         dataset_text_field="text",
-        max_length=8192,
+        max_length=2048,
         report_to="none"
     )
 

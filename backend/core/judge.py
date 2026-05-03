@@ -7,7 +7,7 @@ from backend.graph.judge_graph import judge_workflow_graph
 from backend.core.mitre_mapping import get_primary_technique_id
 from backend.core.judge_utils import _infer_taxonomy, rule_based_judge
 
-# 프롬프트는 여기서 가져옴
+# 단일 소스 프롬프트
 from backend.agents.judge_agent import build_judge_messages
 
 logger = logging.getLogger(__name__)
@@ -21,13 +21,18 @@ async def full_judge(
     response: str,
     llm=None,  # noqa: ARG001
 ) -> dict:
-    """Run the evidence-first LangGraph judge and return a normalized verdict."""
+    """
+    Run the evidence-first LangGraph judge
+    and return a normalized verdict.
+    """
 
-    # SFT와 동일한 메시지 구조 생성 (단일 소스 사용)
+    # =====================================
+    # SFT와 동일한 메시지 구조 생성
+    # =====================================
     messages = build_judge_messages(
         category=category,
         attack_prompt=attack_prompt,
-        response=response
+        response=response,
     )
 
     initial_state = {
@@ -39,14 +44,17 @@ async def full_judge(
         "triage_result": None,
         "pattern_scan_result": None,
         "evidence_scan_result": None,
+
         "strict_auditor_result": None,
         "context_auditor_result": None,
         "debate_result": None,
+
         "auditor_analysis": None,
+
         "final_judgment": None,
-        "confidence": 0.0,
+        "score": 0.0,
         "detail": "",
-        "retry_count": 0
+        "retry_count": 0,
     }
 
     try:
@@ -57,53 +65,122 @@ async def full_judge(
         detail = final_state.get("detail", "") or ""
         evidence = final_state.get("evidence_scan_result") or {}
 
+        # =====================================
+        # 최종 응답
+        # =====================================
         result = {
             "judgment": final_judgment,
             "layer": 2,
+
+            # score로 통일
+            "score": score,
+
+            # 기존 호환성 유지 (벤치마크/레거시 코드)
             "confidence": score,
-            "severity": "high" if final_judgment == "vulnerable" else None,
+
+            "severity": (
+                "high"
+                if final_judgment == "vulnerable"
+                else None
+            ),
+
             "detail": detail,
+
             "evidence_scan_result": evidence,
-            "evidence_hard_veto": bool(evidence.get("hard_veto")),
+            "evidence_hard_veto": bool(
+                evidence.get("hard_veto")
+            ),
 
             "debug_nodes": {
-                "triage_result": final_state.get("triage_result"),
-                "pattern_scan_result": final_state.get("pattern_scan_result"),
-                "evidence_scan_result": evidence,
-                "strict_auditor": final_state.get("strict_auditor_result"),
-                "context_auditor": final_state.get("context_auditor_result"),
-                "debate_result": final_state.get("debate_result"),
-                "consensus_detail": detail
-            }
+                "triage_result":
+                    final_state.get("triage_result"),
+
+                "pattern_scan_result":
+                    final_state.get("pattern_scan_result"),
+
+                "evidence_scan_result":
+                    evidence,
+
+                "strict_auditor":
+                    final_state.get("strict_auditor_result"),
+
+                "context_auditor":
+                    final_state.get("context_auditor_result"),
+
+                "debate_result":
+                    final_state.get("debate_result"),
+
+                "consensus_detail":
+                    detail,
+            },
         }
 
-        # taxonomy
+        # =====================================
+        # Taxonomy
+        # =====================================
         if final_judgment == "vulnerable":
             try:
-                taxonomy = _infer_taxonomy(category, attack_prompt, response, detail)
+                taxonomy = _infer_taxonomy(
+                    category,
+                    attack_prompt,
+                    response,
+                    detail,
+                )
+
                 if isinstance(taxonomy, dict):
                     result.update(taxonomy)
-            except Exception as e:
-                logger.warning(f"Taxonomy inference failed: {e}")
 
+            except Exception as e:
+                logger.warning(
+                    f"Taxonomy inference failed: {e}"
+                )
+
+        # =====================================
         # MITRE
+        # =====================================
         failure_mode = result.get("failure_mode")
+
         try:
-            result["mitre_technique_id"] = get_primary_technique_id(category, failure_mode)
+            result["mitre_technique_id"] = (
+                get_primary_technique_id(
+                    category,
+                    failure_mode,
+                )
+            )
+
         except Exception as e:
-            logger.warning(f"MITRE mapping failed: {e}")
+            logger.warning(
+                f"MITRE mapping failed: {e}"
+            )
+
             result["mitre_technique_id"] = ""
 
         return result
 
     except Exception as e:
-        logger.error(f"Judge Graph Execution Error: {e}", exc_info=True)
+        logger.error(
+            f"Judge Graph Execution Error: {e}",
+            exc_info=True,
+        )
+
         return {
             "judgment": "ambiguous",
             "layer": 2,
+
+            # score 통일
+            "score": 0.0,
+
+            # 호환성 유지
             "confidence": 0.0,
+
             "severity": None,
-            "detail": f"System error during judgment: {str(e)}",
+
+            "detail":
+                f"System error during judgment: {str(e)}",
+
             "mitre_technique_id": "",
-            "debug_nodes": {"error": str(e)}
+
+            "debug_nodes": {
+                "error": str(e)
+            },
         }
