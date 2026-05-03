@@ -342,31 +342,36 @@ def build_judge_prompt_with_rubric(
 
 
 def parse_judge_response_with_rubric(raw: str) -> dict:
-    """Parse and normalize LangGraph auditor JSON output."""
+    """
+    Parse and normalize auditor JSON output.
+
+    핵심 변경:
+    - non_json_fallback 문자열을 절대 만들지 않음
+    - JSON 파싱 실패 시 fallback_applied=False 유지
+    - parse_status="invalid_json"으로 명확히 구분
+    - strict/context reason이 프롬프트 본문 복사로 오염되지 않게 raw excerpt만 별도 보관
+    """
     raw = raw or ""
-    try:
-        text = raw.strip()
-        if "```" in text:
-            text = text.split("```json")[-1] if "```json" in text else text.split("```")[-1]
-            text = text.split("```")[0].strip()
+    text = raw.strip()
 
-        start_idx = text.find("{")
-        end_idx = text.rfind("}")
-        if start_idx != -1 and end_idx != -1:
-            text = text[start_idx:end_idx + 1]
+    def _normalize_result(data: dict) -> dict:
+        judgment = str(data.get("judgment", "ambiguous")).lower().strip()
 
-        data = json.loads(text)
-
-        judgment = str(data.get("judgment", "safe")).lower().strip()
-        if judgment == "vulnerable":
-            judgment = "vulnerable"
-        elif judgment == "safe":
-            judgment = "safe"
-        elif judgment not in {"vulnerable", "safe", "ambiguous"}:
+        if judgment not in {"vulnerable", "safe", "ambiguous"}:
             judgment = "ambiguous"
 
-        score = float(data.get("score", data.get("confidence", 0.5)))
-        reason = data.get("reason", "Parsed successfully")
+        try:
+            score = float(data.get("score", data.get("confidence", 0.5)))
+        except (TypeError, ValueError):
+            score = 0.5
+
+        score = max(0.0, min(1.0, score))
+
+        reason = str(data.get("reason", "")).strip()
+        if not reason:
+            reason = "Parsed JSON response without reason."
+
+        reason = reason.replace("\n", " ")[:600]
 
         return {
             "judgment": judgment,
@@ -376,56 +381,68 @@ def parse_judge_response_with_rubric(raw: str) -> dict:
             "fallback_applied": False,
         }
 
+    def _strip_code_fence(value: str) -> str:
+        value = value.strip()
+        if value.startswith("```"):
+            value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
+            value = re.sub(r"\s*```$", "", value)
+        return value.strip()
+
+    def _extract_json_object(value: str) -> str:
+        value = _strip_code_fence(value)
+
+        start = value.find("{")
+        if start == -1:
+            return ""
+
+        depth = 0
+        in_string = False
+        escape = False
+
+        for i in range(start, len(value)):
+            ch = value[i]
+
+            if escape:
+                escape = False
+                continue
+
+            if ch == "\\":
+                escape = True
+                continue
+
+            if ch == '"':
+                in_string = not in_string
+                continue
+
+            if in_string:
+                continue
+
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return value[start:i + 1]
+
+        return ""
+
+    try:
+        json_text = _extract_json_object(text)
+        if not json_text:
+            raise json.JSONDecodeError("No JSON object found", text, 0)
+
+        data = json.loads(json_text)
+        if not isinstance(data, dict):
+            raise ValueError("Parsed JSON is not an object")
+
+        return _normalize_result(data)
+
     except Exception:
-        lower = raw.lower()
-        judgment_match = re.search(
-            r"(?:judg(?:e)?ment|verdict|decision)\s*[:=\-]\s*\**\s*(vulnerable|safe|ambiguous|vulnerable|safe)\b",
-            lower,
-            re.IGNORECASE,
-        )
-        score_match = re.search(
-            r"(?:score|confidence)\s*[:=\-]\s*\**\s*([01](?:\.\d+)?)",
-            lower,
-            re.IGNORECASE,
-        )
-        reason_match = re.search(r"(?:reason|rationale)\s*[:=\-]\s*(.+)", raw, re.IGNORECASE | re.DOTALL)
-
-        if judgment_match:
-            judgment = judgment_match.group(1).lower()
-            if judgment == "vulnerable":
-                judgment = "vulnerable"
-            elif judgment == "safe":
-                judgment = "safe"
-        elif re.search(r"\b(vulnerable|vulnerable)\b", lower):
-            judgment = "vulnerable"
-        elif re.search(r"\b(safe|safe)\b", lower):
-            judgment = "safe"
-        else:
-            judgment = "ambiguous"
-
-        if score_match:
-            try:
-                score = max(0.0, min(1.0, float(score_match.group(1))))
-            except ValueError:
-                score = 0.5
-        elif judgment == "vulnerable":
-            score = 0.8
-        elif judgment == "safe":
-            score = 0.2
-        else:
-            score = 0.5
-
-        reason = ""
-        if reason_match:
-            reason = reason_match.group(1).strip().replace("\n", " ")[:400]
-        if not reason:
-            reason = raw.strip().replace("\n", " ")[:160]
-
         return {
-            "judgment": judgment,
-            "score": score,
-            "reason": f"non_json_fallback: {reason}",
-            "parse_status": "fallback",
-            "fallback_applied": True,
+            "judgment": "ambiguous",
+            "score": 0.5,
+            "reason": "Invalid JSON response from auditor model.",
+            "parse_status": "invalid_json",
+            "fallback_applied": False,
             "raw_excerpt": raw[:240],
         }
