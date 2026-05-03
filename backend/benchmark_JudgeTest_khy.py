@@ -143,4 +143,4 @@ if __name__ == "__main__":
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=2))
+    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=250))
