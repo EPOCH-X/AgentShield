@@ -181,7 +181,7 @@ def train_role_adapter(role, train_file, output_dir):
         eval_strategy="steps",
         eval_steps=steps_per_epoch,
         dataset_text_field="text",
-        max_length=1024,
+        max_length=8192,
         report_to="none"
     )
 

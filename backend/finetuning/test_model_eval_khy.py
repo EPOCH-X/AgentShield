@@ -38,7 +38,7 @@ def main():
     
     # 모델 및 어댑터 설정
     BASE_MODEL_ID = "Qwen/Qwen3.5-0.8B"
-    ADAPTER_PATH = str(PROJECT_ROOT / "adapters" / "lora-judge" / "checkpoint-70")
+    ADAPTER_PATH = str(PROJECT_ROOT / "adapters" / "lora-judge" / "checkpoint-155")
 
     print("[1] 토크나이저 및 모델 로딩 중...")
     try:
