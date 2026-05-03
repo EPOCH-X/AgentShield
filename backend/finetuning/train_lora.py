@@ -233,7 +233,22 @@ def train_role_adapter(role, train_file, output_dir):
     # -------------------------
     if success:
         modelfile_path = os.path.join(output_dir, "Modelfile")
-        modelfile_content = f"FROM ./{gguf_filename}\n"
+        modelfile_content = f'''
+            FROM ./{gguf_filename}
+
+            PARAMETER temperature 0
+            PARAMETER top_p 0.1
+            PARAMETER top_k 1
+            PARAMETER num_ctx 4096
+            PARAMETER num_predict 128
+
+            TEMPLATE """{{{{- if .System }}}}<|im_start|>system
+            {{{{ .System }}}}<|im_end|>
+            {{{{ end }}}}{{{{- range .Messages }}}}<|im_start|>{{{{ .Role }}}}
+            {{{{ .Content }}}}<|im_end|>
+            {{{{ end }}}}<|im_start|>assistant
+            """
+            '''
 
         with open(modelfile_path, "w", encoding="utf-8") as f:
             f.write(modelfile_content)

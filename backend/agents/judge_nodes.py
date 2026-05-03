@@ -590,7 +590,6 @@ async def call_ollama_judge(
         "messages": messages,
         "stream": False,
         "think": False,
-        "format": "json",
         "options": QWEN35_DEFAULT_OPTIONS,
     }
 
