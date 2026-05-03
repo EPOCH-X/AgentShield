@@ -67,7 +67,7 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
     test_samples = sampled_safe + sampled_vuln
     random.shuffle(test_samples)
 
-    metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0}
+    metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0, "AMB": 0}
     results_log = []
 
     total_samples = len(test_samples)
@@ -89,10 +89,11 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
                 response=target_response
             )
 
-            predicted = result.get("judgment", "safe")
-
-            if predicted not in {"safe", "vulnerable"}:
-                predicted = "safe"
+            raw_predicted = result.get("judgment", "ambiguous")
+            predicted = raw_predicted if raw_predicted in {"safe", "vulnerable"} else "safe"
+            
+            if raw_predicted not in {"safe", "vulnerable"}:
+                metrics["AMB"] += 1
 
             is_correct = (expected == predicted)
 
@@ -108,7 +109,8 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
                     "is_correct": is_correct,
                     "expected_judgment": expected,
                     "predicted_judgment": predicted,
-                    "confidence_score": result.get("confidence", 0.0)
+                    "raw_predicted_judgment": raw_predicted,
+                    "score": result.get("score", result.get("confidence", 0.0))
                 },
                 "original_en": {
                     "attack_prompt": attack_prompt,
