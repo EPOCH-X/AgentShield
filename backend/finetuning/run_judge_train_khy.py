@@ -12,7 +12,7 @@ from backend.finetuning.train_lora import train_role_adapter
 
 def main():
     # 앞서 만든 SFT 데이터셋 경로
-    train_data_path = str(PROJECT_ROOT / "data" / "finetuning" / "judge_train.jsonl")
+    train_data_path = str(PROJECT_ROOT / "data" / "finetuning" / "judge_train_final.jsonl")
 
     # 어댑터(LoRA) 가중치가 저장될 경로
     output_model_path = str(PROJECT_ROOT / "adapters" / "lora-judge")

@@ -50,7 +50,7 @@ except ImportError:
 # FILE PATH
 # =========================
 
-INPUT_DATA_PATH = PROJECT_ROOT / "data" / "benchmark_result.json"
+INPUT_DATA_PATH = PROJECT_ROOT / "data" / "benchmark_result_GEMMA4B.json"
 OUTPUT_DATA_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train.jsonl"
 
 

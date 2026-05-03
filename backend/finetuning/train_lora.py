@@ -67,7 +67,7 @@ def train_role_adapter(role, train_file, output_dir):
 
     print(f"\n[{role.upper()}] TRAIN START")
 
-    hf_model_id = "Qwen/Qwen3.5-2B"
+    hf_model_id = "Qwen/Qwen3.5-0.8B"
 
     # -------------------------
     # DATA
