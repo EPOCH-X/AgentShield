@@ -53,14 +53,14 @@ async def full_judge(
         final_state = await judge_workflow_graph.ainvoke(initial_state)
 
         final_judgment = final_state.get("final_judgment") or "ambiguous"
-        confidence = float(final_state.get("confidence", 0.0) or 0.0)
+        score = float(final_state.get("score", 0.0) or 0.0)
         detail = final_state.get("detail", "") or ""
         evidence = final_state.get("evidence_scan_result") or {}
 
         result = {
             "judgment": final_judgment,
             "layer": 2,
-            "confidence": confidence,
+            "confidence": score,
             "severity": "high" if final_judgment == "vulnerable" else None,
             "detail": detail,
             "evidence_scan_result": evidence,

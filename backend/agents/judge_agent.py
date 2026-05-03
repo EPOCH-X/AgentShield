@@ -357,8 +357,8 @@ def parse_judge_response_with_rubric(raw: str) -> dict:
     def _normalize_result(data: dict) -> dict:
         judgment = str(data.get("judgment", "ambiguous")).lower().strip()
 
-        if judgment not in {"vulnerable", "safe", "ambiguous"}:
-            judgment = "ambiguous"
+        if judgment not in {"vulnerable", "safe"}:
+            raise ValueError("Invalid judgment")
 
         try:
             score = float(data.get("score", data.get("confidence", 0.5)))
@@ -432,8 +432,14 @@ def parse_judge_response_with_rubric(raw: str) -> dict:
             raise json.JSONDecodeError("No JSON object found", text, 0)
 
         data = json.loads(json_text)
-        if not isinstance(data, dict):
-            raise ValueError("Parsed JSON is not an object")
+        if "judgment" not in data:
+            raise ValueError("Missing judgment field")
+
+        if "score" not in data:
+            raise ValueError("Missing score field")
+
+        if "reason" not in data:
+            raise ValueError("Missing reason field")
 
         return _normalize_result(data)
 
