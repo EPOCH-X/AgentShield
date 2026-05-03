@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 # ── 상수 정의 ───────────────────────────────────────────────────────
 SAFE_CAP_CHARS = 12000
-NUM_CTX = settings.OLLAMA_GUARD_NUM_CTX
+NUM_CTX = settings.OLLAMA_JUDGE_NUM_CTX
 OLLAMA_TIMEOUT = 90
 MAX_CONCURRENT_OLLAMA_CALLS = 1
 
@@ -571,13 +571,23 @@ QWEN35_DEFAULT_OPTIONS = {
     "num_ctx": 4096,
 }
 
+GEMMA4_DEFAULT_OPTIONS = {
+    "temperature": 0.05,
+    "top_p": 0.15,
+    "top_k": 5,
+    "min_p": 0.0,
+    "presence_penalty": 0.0,
+    "repetition_penalty": 1.05,
+    "num_predict": 192,
+    "num_ctx": 4096,
+}
 
 async def call_ollama_judge(
     prompt_or_messages: Union[str, list[dict[str, str]]],
     model_name: str = None,
     max_retries: int = 3,
 ) -> str:
-    model = model_name or settings.OLLAMA_GUARD_MODEL or settings.OLLAMA_MODEL
+    model = model_name or settings.OLLAMA_JUDGE_MODEL
     url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/chat"
 
     if isinstance(prompt_or_messages, list):
@@ -590,7 +600,7 @@ async def call_ollama_judge(
         "messages": messages,
         "stream": False,
         "think": False,
-        "options": QWEN35_DEFAULT_OPTIONS,
+        "options": GEMMA4_DEFAULT_OPTIONS,
     }
 
     if settings.OLLAMA_KEEP_ALIVE:
