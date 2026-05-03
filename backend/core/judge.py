@@ -71,47 +71,29 @@ async def full_judge(
         result = {
             "judgment": final_judgment,
             "layer": 2,
-
             # score로 통일
             "score": score,
-
             # 기존 호환성 유지 (벤치마크/레거시 코드)
             "confidence": score,
-
             "severity": (
                 "high"
                 if final_judgment == "vulnerable"
                 else None
             ),
-
             "detail": detail,
-
             "evidence_scan_result": evidence,
             "evidence_hard_veto": bool(
                 evidence.get("hard_veto")
             ),
-
             "debug_nodes": {
-                "triage_result":
-                    final_state.get("triage_result"),
-
-                "pattern_scan_result":
-                    final_state.get("pattern_scan_result"),
-
-                "evidence_scan_result":
-                    evidence,
-
-                "strict_auditor":
-                    final_state.get("strict_auditor_result"),
-
-                "context_auditor":
-                    final_state.get("context_auditor_result"),
-
-                "debate_result":
-                    final_state.get("debate_result"),
-
-                "consensus_detail":
-                    detail,
+                "triage_result": None,
+                "pattern_scan_result": None,
+                "evidence_scan_result": None,
+                "strict_auditor": None,
+                "context_auditor": None,
+                "debate_result": None,
+                "consensus_detail": f"System error during judgment: {str(e)}",
+                "error": str(e),
             },
         }
 
@@ -126,10 +108,8 @@ async def full_judge(
                     response,
                     detail,
                 )
-
                 if isinstance(taxonomy, dict):
                     result.update(taxonomy)
-
             except Exception as e:
                 logger.warning(
                     f"Taxonomy inference failed: {e}"
@@ -147,14 +127,11 @@ async def full_judge(
                     failure_mode,
                 )
             )
-
         except Exception as e:
             logger.warning(
                 f"MITRE mapping failed: {e}"
             )
-
             result["mitre_technique_id"] = ""
-
         return result
 
     except Exception as e:
@@ -162,24 +139,17 @@ async def full_judge(
             f"Judge Graph Execution Error: {e}",
             exc_info=True,
         )
-
         return {
             "judgment": "ambiguous",
             "layer": 2,
-
             # score 통일
             "score": 0.0,
-
             # 호환성 유지
             "confidence": 0.0,
-
             "severity": None,
-
             "detail":
                 f"System error during judgment: {str(e)}",
-
             "mitre_technique_id": "",
-
             "debug_nodes": {
                 "error": str(e)
             },

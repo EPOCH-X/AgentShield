@@ -67,7 +67,7 @@ def train_role_adapter(role, train_file, output_dir):
 
     print(f"\n[{role.upper()}] TRAIN START")
 
-    hf_model_id = "Qwen/Qwen3.5-0.8B"
+    hf_model_id = "Qwen/Qwen3.5-2B"
 
     # -------------------------
     # DATA
@@ -95,7 +95,9 @@ def train_role_adapter(role, train_file, output_dir):
     if is_cuda:
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
-            bnb_4bit_compute_dtype=compute_dtype
+            bnb_4bit_compute_dtype=compute_dtype,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True
         )
 
         model = AutoModelForCausalLM.from_pretrained(
@@ -137,8 +139,8 @@ def train_role_adapter(role, train_file, output_dir):
     else:
         print("새 LoRA 생성")
         lora_config = LoraConfig(
-            r=16,
-            lora_alpha=32,
+            r=8,
+            lora_alpha=16,
             lora_dropout=0.05,
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
             task_type="CAUSAL_LM",
@@ -153,7 +155,7 @@ def train_role_adapter(role, train_file, output_dir):
     # -------------------------
     dataset_size = len(dataset)
     batch = 1 if is_cuda else 1
-    grad_accum = 8 if is_cuda else 4
+    grad_accum = 16 if is_cuda else 8
     epochs = 5
 
     steps_per_epoch = math.ceil(dataset_size / (batch * grad_accum))
@@ -182,7 +184,7 @@ def train_role_adapter(role, train_file, output_dir):
         eval_strategy="steps",
         eval_steps=steps_per_epoch,
         dataset_text_field="text",
-        max_length=2048,
+        max_length=1536,
         report_to="none"
     )
 
