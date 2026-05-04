@@ -67,7 +67,7 @@ def train_role_adapter(role, train_file, output_dir):
 
     print(f"\n[{role.upper()}] TRAIN START")
 
-    hf_model_id = "Qwen/Qwen3.5-0.8B"
+    hf_model_id = "Qwen/Qwen3.5-2B"
 
     # -------------------------
     # DATA
@@ -142,7 +142,10 @@ def train_role_adapter(role, train_file, output_dir):
             r=16,
             lora_alpha=32,
             lora_dropout=0.03,
-            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            target_modules=[
+                "q_proj", "k_proj", "v_proj", "o_proj",
+                "gate_proj", "up_proj", "down_proj"
+            ],
             task_type="CAUSAL_LM",
         )
         model = get_peft_model(model, lora_config)
@@ -156,7 +159,7 @@ def train_role_adapter(role, train_file, output_dir):
     dataset_size = len(dataset)
     batch = 2 if is_cuda else 1
     grad_accum = 8 if is_cuda else 8
-    epochs = 10
+    epochs = 5
 
     steps_per_epoch = math.ceil(dataset_size / (batch * grad_accum))
     total_steps = steps_per_epoch * epochs
@@ -240,21 +243,22 @@ def train_role_adapter(role, train_file, output_dir):
     if success:
         modelfile_path = os.path.join(output_dir, "Modelfile")
         modelfile_content = f'''
-            FROM ./{gguf_filename}
+        FROM ./{gguf_filename}
 
-            PARAMETER temperature 0
-            PARAMETER top_p 0.1
-            PARAMETER top_k 1
-            PARAMETER num_ctx 4096
-            PARAMETER num_predict 128
+        PARAMETER temperature 0
+        PARAMETER top_p 0.1
+        PARAMETER top_k 1
+        PARAMETER num_ctx 4096
+        PARAMETER num_predict 128
+        PARAMETER stop "<|im_end|>"
 
-            TEMPLATE """{{{{- if .System }}}}<|im_start|>system
-            {{{{ .System }}}}<|im_end|>
-            {{{{ end }}}}{{{{- range .Messages }}}}<|im_start|>{{{{ .Role }}}}
-            {{{{ .Content }}}}<|im_end|>
-            {{{{ end }}}}<|im_start|>assistant
-            """
-            '''
+        TEMPLATE """{{{{- if .System }}}}<|im_start|>system
+        {{{{ .System }}}}<|im_end|>
+        {{{{ end }}}}{{{{- range .Messages }}}}<|im_start|>{{{{ .Role }}}}
+        {{{{ .Content }}}}<|im_end|>
+        {{{{ end }}}}<|im_start|>assistant
+        """
+        '''
 
         with open(modelfile_path, "w", encoding="utf-8") as f:
             f.write(modelfile_content)

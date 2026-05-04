@@ -10,7 +10,7 @@ PROJECT_ROOT = CURRENT_DIR.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-BASE_MODEL_ID = "Qwen/Qwen3.5-0.8B"
+BASE_MODEL_ID = "Qwen/Qwen3.5-2B"
 DATA_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train_final.jsonl"
 MAX_LENGTH = 2048
 
