@@ -570,17 +570,6 @@ QWEN35_DEFAULT_OPTIONS = {
     "stop": ["<|im_end|>"]
 }
 
-GEMMA4_DEFAULT_OPTIONS = {
-    "temperature": 0.05,
-    "top_p": 0.15,
-    "top_k": 5,
-    "min_p": 0.0,
-    "presence_penalty": 0.0,
-    "repetition_penalty": 1.05,
-    "num_predict": 192,
-    "num_ctx": 4096,
-}
-
 async def call_ollama_judge(
     prompt_or_messages: Union[str, list[dict[str, str]]],
     model_name: str = None,
