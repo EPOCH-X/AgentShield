@@ -258,7 +258,7 @@ async def _run_phase4(
     db_updated, db_failed_ids = await _persist_verify_results(details)
     chroma_saved = 0
     chroma_failed_ids: list[str] = []
-    if passed_threshold:
+    if safe_count > 0:
         chroma_saved, chroma_failed_ids = _register_defense_patterns_via_ingest(
             session_id=session_id,
             payload_rows=payload_rows,
