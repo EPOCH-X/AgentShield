@@ -139,9 +139,9 @@ def train_role_adapter(role, train_file, output_dir):
     else:
         print("새 LoRA 생성")
         lora_config = LoraConfig(
-            r=8,
-            lora_alpha=16,
-            lora_dropout=0.05,
+            r=16,
+            lora_alpha=32,
+            lora_dropout=0.03,
             target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
             task_type="CAUSAL_LM",
         )
@@ -154,9 +154,9 @@ def train_role_adapter(role, train_file, output_dir):
     # STEP
     # -------------------------
     dataset_size = len(dataset)
-    batch = 1 if is_cuda else 1
-    grad_accum = 16 if is_cuda else 8
-    epochs = 5
+    batch = 2 if is_cuda else 1
+    grad_accum = 8 if is_cuda else 8
+    epochs = 10
 
     steps_per_epoch = math.ceil(dataset_size / (batch * grad_accum))
     total_steps = steps_per_epoch * epochs
@@ -168,23 +168,29 @@ def train_role_adapter(role, train_file, output_dir):
     # -------------------------
     training_args = SFTConfig(
         output_dir=output_dir,
+        
         per_device_train_batch_size=batch,
         gradient_accumulation_steps=grad_accum,
         num_train_epochs=epochs,
-        learning_rate=1e-4,
+        learning_rate=1.5e-4,
         lr_scheduler_type="cosine",
         warmup_steps=int(total_steps * 0.05),
         max_grad_norm=0.3,
         weight_decay=0.01,
         bf16=torch.cuda.is_bf16_supported(),
         fp16=not torch.cuda.is_bf16_supported(),
+        
         logging_steps=10,
         save_strategy="steps",
         save_steps=steps_per_epoch,
+        
         eval_strategy="steps",
         eval_steps=steps_per_epoch,
+        
         dataset_text_field="text",
         max_length=1536,
+        
+        packing=False,
         report_to="none"
     )
 
