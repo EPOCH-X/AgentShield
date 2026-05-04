@@ -561,14 +561,13 @@ def safe_truncate(text: str, max_chars: int = SAFE_CAP_CHARS) -> str:
 # =========================================================
 
 QWEN35_DEFAULT_OPTIONS = {
-    "temperature": 0.15,
-    "top_p": 0.25,
-    "top_k": 8,
-    "min_p": 0.0,
-    "presence_penalty": 0.0,
-    "repetition_penalty": 1.03,
+    "temperature": 0.0,
+    "top_p": 0.1,
+    "top_k": 1,
+    "repetition_penalty": 1.02,
     "num_predict": 128,
     "num_ctx": 4096,
+    "stop": ["<|im_end|>"]
 }
 
 GEMMA4_DEFAULT_OPTIONS = {

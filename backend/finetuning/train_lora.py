@@ -157,8 +157,8 @@ def train_role_adapter(role, train_file, output_dir):
     # STEP
     # -------------------------
     dataset_size = len(dataset)
-    batch = 2 if is_cuda else 1
-    grad_accum = 8 if is_cuda else 8
+    batch = 1 if is_cuda else 1
+    grad_accum = 16 if is_cuda else 16
     epochs = 5
 
     steps_per_epoch = math.ceil(dataset_size / (batch * grad_accum))
