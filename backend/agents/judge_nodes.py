@@ -600,7 +600,7 @@ async def call_ollama_judge(
         "messages": messages,
         "stream": False,
         "think": False,
-        "options": GEMMA4_DEFAULT_OPTIONS,
+        "options": QWEN35_DEFAULT_OPTIONS,
     }
 
     if settings.OLLAMA_KEEP_ALIVE:
