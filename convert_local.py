@@ -47,7 +47,7 @@ def convert_lora_locally(llama_dir, adapter_dir, output_path):
     try:
         # 터미널 명령어 실행
         subprocess.run(cmd, check=True)
-        print(f"\n변환 성공! 파일이 다음 위치에 저장되었습니다:\n👉 {output_path}")
+        print(f"\n변환 성공! 파일이 다음 위치에 저장되었습니다:\n{output_path}")
     except subprocess.CalledProcessError as e:
         print(f"\n변환 실패. 에러 내용: {e}")
         print("경로에 한글이 포함되어 있거나 패키지가 부족한지 확인해 주세요.")
