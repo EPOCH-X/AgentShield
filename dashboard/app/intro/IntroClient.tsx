@@ -93,14 +93,14 @@ export default function IntroClient() {
     const t = [
       setTimeout(() => setPhase("shield"),   400),
       setTimeout(() => setPhase("scanning"), 1400),
-      setTimeout(() => setPhase("unlock"),   3200),
       setTimeout(() => {
         setClawSlash(true);
         setTimeout(() => setScreenFlash(true),  200);
         setTimeout(() => setScreenFlash(false), 580);
         setTimeout(() => setClawSlash(false),   900);
-      }, 3700),
-      setTimeout(() => setPhase("flash"),    3950),
+      }, 2800),
+      setTimeout(() => setPhase("unlock"),   3750),
+      setTimeout(() => setPhase("flash"),    3980),
       setTimeout(() => setPhase("granted"),  4500),
       setTimeout(() => {
         setGlitching(true);
@@ -187,23 +187,41 @@ export default function IntroClient() {
           50%     { opacity: 1; }
         }
         /* 발톱 */
-        @keyframes clawCut {
-          0%   { stroke-dashoffset: 160; opacity: 0; }
-          6%   { opacity: 1; }
-          42%  { stroke-dashoffset: 0; opacity: 1; }
-          70%  { stroke-dashoffset: 0; opacity: 0.55; }
-          100% { stroke-dashoffset: 0; opacity: 0; }
+        @keyframes clawSwoop {
+          0%   {
+            transform: translate(90%, -110%) rotate(20deg) scale(1.1);
+            opacity: 0;
+            filter: blur(10px) drop-shadow(0 0 30px rgba(45,212,212,1));
+          }
+          12%  {
+            opacity: 1;
+            filter: blur(4px) drop-shadow(0 0 25px rgba(45,212,212,0.9));
+          }
+          40%  {
+            transform: translate(0%, 0%) rotate(5deg) scale(1);
+            opacity: 1;
+            filter: blur(0) drop-shadow(0 0 20px rgba(45,212,212,0.7));
+          }
+          65%  {
+            transform: translate(-12%, 14%) rotate(2deg) scale(0.97);
+            opacity: 0.6;
+          }
+          100% {
+            transform: translate(-25%, 28%) rotate(-2deg) scale(0.92);
+            opacity: 0;
+          }
         }
         @keyframes impactFlare {
           0%   { transform: scale(0.4); opacity: 0; }
           22%  { opacity: 1; transform: scale(1); }
           100% { transform: scale(2.6); opacity: 0; }
         }
-        @keyframes clawScratch {
-          0%   { opacity: 0; }
-          15%  { opacity: 0.6; }
-          70%  { opacity: 0.3; }
-          100% { opacity: 0; }
+        @keyframes scratchDraw {
+          0%   { stroke-dashoffset: 400; opacity: 0; }
+          6%   { opacity: 1; }
+          55%  { stroke-dashoffset: 0; opacity: 0.9; }
+          80%  { stroke-dashoffset: 0; opacity: 0.45; }
+          100% { stroke-dashoffset: 0; opacity: 0; }
         }
       `}} />
 
@@ -236,47 +254,52 @@ export default function IntroClient() {
             style={{ borderColor: color, zIndex: 2 }} />
         ))}
 
-        {/* ══ 표범 발톱 슬래시 ══ */}
+        {/* ══ 발톱 이미지 슬래시 ══ */}
         {clawSlash && (
           <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 14 }}>
             {/* 임팩트 플레어 — 방패 중심 */}
             <div className="absolute" style={{
-              left:"50%", top:"45%", width:170, height:170, marginLeft:-85, marginTop:-85,
+              left:"50%", top:"45%", width:200, height:200, marginLeft:-100, marginTop:-100,
               borderRadius:"50%",
-              background:"radial-gradient(circle, rgba(255,255,255,0.95) 0%, rgba(251,191,36,0.6) 25%, rgba(52,211,153,0.25) 55%, transparent 75%)",
-              animation:"impactFlare 0.6s ease-out forwards",
+              background:"radial-gradient(circle, rgba(255,255,255,0.9) 0%, rgba(45,212,212,0.55) 25%, rgba(45,212,212,0.2) 55%, transparent 75%)",
+              animation:"impactFlare 0.65s 0.25s ease-out both",
+              opacity:0,
             }} />
+            {/* 발톱 이미지 */}
+            <div className="absolute inset-0 flex items-center justify-center" style={{ marginTop: "-6%" }}>
+              <img
+                src="/claw.png"
+                alt=""
+                draggable={false}
+                style={{
+                  width: 700,
+                  height: "auto",
+                  animation: "clawSwoop 0.88s cubic-bezier(0.22, 0.61, 0.36, 1) forwards",
+                  filter: "drop-shadow(0 0 18px rgba(45,212,212,0.85)) drop-shadow(0 0 40px rgba(45,212,212,0.4)) brightness(1.1)",
+                  userSelect: "none",
+                }}
+              />
+            </div>
+            {/* 긁힌 자국 — 발톱 지나간 뒤 뒤따라 그려짐 */}
             <svg viewBox="0 0 100 100" preserveAspectRatio="none"
-              style={{ position:"absolute", inset:0, width:"100%", height:"100%" }}>
+              style={{ position:"absolute", inset:0, width:"100%", height:"100%", overflow:"visible" }}>
               {[
-                { x1:91, y1:12, x2:25, y2:58, w:0.22, d:0,    a:0.65, clr:"#fbbf24" },
-                { x1:95, y1:21, x2:32, y2:64, w:0.45, d:0.05, a:0.9,  clr:"#ffffff" },
-                { x1:98, y1:30, x2:39, y2:71, w:0.58, d:0.10, a:1.0,  clr:"#ffffff" },
-                { x1:100,y1:39, x2:46, y2:78, w:0.45, d:0.15, a:0.9,  clr:"#ffffff" },
-                { x1:100,y1:48, x2:53, y2:85, w:0.22, d:0.20, a:0.65, clr:"#fbbf24" },
-              ].map((c, i) => (
-                <g key={i}>
-                  <line x1={c.x1} y1={c.y1} x2={c.x2} y2={c.y2}
-                    stroke={c.clr} strokeWidth={c.w} strokeLinecap="round"
-                    style={{
-                      strokeDasharray:160, strokeDashoffset:160, opacity:c.a,
-                      filter:`drop-shadow(0 0 1px ${c.clr}) drop-shadow(0 0 3px rgba(251,191,36,0.5))`,
-                      animation:`clawCut 0.8s ${c.d}s cubic-bezier(0.15,0.7,0.3,1) forwards`,
-                    }} />
-                  {i>=1 && i<=3 && (
-                    <line x1={c.x1+0.3} y1={c.y1} x2={c.x2+0.3} y2={c.y2}
-                      stroke="rgba(255,240,200,0.9)" strokeWidth={0.1} strokeLinecap="round"
-                      style={{ strokeDasharray:160, strokeDashoffset:160,
-                        animation:`clawCut 0.8s ${c.d}s cubic-bezier(0.15,0.7,0.3,1) forwards` }} />
-                  )}
-                </g>
-              ))}
-              {/* 긁힌 자국 잔상 */}
-              {[32,39,46].map((x2, i) => (
-                <line key={`s${i}`}
-                  x1={[95,98,100][i]} y1={[21,30,39][i]} x2={x2} y2={[64,71,78][i]}
-                  stroke="rgba(251,191,36,0.35)" strokeWidth={0.07} strokeLinecap="round"
-                  style={{ animation:`clawScratch 1.1s 0.25s ease-out forwards` }} />
+                { x1:78, y1:2,  x2:22, y2:90, w:0.55, delay:0.30, color:"#2DD4D4",            glow:"rgba(45,212,212,0.8)" },
+                { x1:83, y1:2,  x2:27, y2:90, w:0.9,  delay:0.34, color:"#ffffff",            glow:"rgba(45,212,212,0.6)" },
+                { x1:88, y1:2,  x2:32, y2:90, w:1.1,  delay:0.38, color:"#ffffff",            glow:"rgba(45,212,212,0.6)" },
+                { x1:93, y1:2,  x2:37, y2:90, w:0.9,  delay:0.42, color:"#ffffff",            glow:"rgba(45,212,212,0.6)" },
+                { x1:98, y1:2,  x2:42, y2:90, w:0.55, delay:0.46, color:"#2DD4D4",            glow:"rgba(45,212,212,0.8)" },
+              ].map((s, i) => (
+                <line key={i}
+                  x1={s.x1} y1={s.y1} x2={s.x2} y2={s.y2}
+                  stroke={s.color} strokeWidth={s.w} strokeLinecap="round"
+                  style={{
+                    strokeDasharray: 400,
+                    strokeDashoffset: 400,
+                    filter: `drop-shadow(0 0 2px ${s.glow}) drop-shadow(0 0 6px ${s.glow})`,
+                    animation: `scratchDraw 0.55s ${s.delay}s cubic-bezier(0.4,0,0.2,1) forwards`,
+                  }}
+                />
               ))}
             </svg>
           </div>
@@ -292,7 +315,7 @@ export default function IntroClient() {
 
         {/* ══ 방패 ══ */}
         <div className="relative flex flex-col items-center gap-8" style={{ zIndex: 5 }}>
-          <div className="relative flex items-center justify-center" style={{ width:200, height:220 }}>
+          <div className="relative flex items-center justify-center" style={{ width:260, height:285 }}>
 
             {/* 스파크 */}
             {flashActive && SPARKS.map((s, i) => (
@@ -317,14 +340,14 @@ export default function IntroClient() {
               { d:0.24, c:"rgba(52,211,153,0.5)",  w:1 },
             ].map((r, i) => (
               <div key={i} className="absolute rounded-full" style={{
-                width:180, height:180,
+                width:230, height:230,
                 border:`${r.w}px solid ${r.c}`,
                 animation:`ringExpand 0.8s ${r.d}s ease-out forwards`,
               }} />
             ))}
             {!flashActive && shieldVisible && (
               <div className="absolute rounded-full" style={{
-                width:180, height:180,
+                width:230, height:230,
                 border:`1px solid rgba(${unlocked?"45,212,212":"14,165,165"},0.22)`,
                 animation:"ringExpand 2s ease-out infinite",
               }} />
@@ -332,7 +355,7 @@ export default function IntroClient() {
 
             {/* 방패 SVG */}
             {shieldVisible && (
-              <svg viewBox="0 0 100 115" width={180} height={207} style={{
+              <svg viewBox="0 0 100 115" width={230} height={264} style={{
                 opacity: shieldVisible ? 1 : 0,
                 transition:"opacity 0.4s",
                 animation: flashActive ? "shieldFlash 0.75s ease-out forwards" : undefined,
@@ -401,19 +424,20 @@ export default function IntroClient() {
             {/* glow 반사 */}
             {unlocked && (
               <div className="absolute bottom-0 left-1/2 -translate-x-1/2" style={{
-                width:130, height:30,
+                width:170, height:36,
                 background:"radial-gradient(ellipse, rgba(52,211,153,0.35) 0%, transparent 70%)",
                 animation:"titleIn 0.5s ease-out forwards",
               }} />
             )}
           </div>
 
-          {/* 텍스트 영역 */}
-          <div className="flex flex-col items-center gap-4 text-center">
+          {/* 텍스트 영역 — 고정 높이로 방패 위치 고정 */}
+          <div style={{ position:"relative", width:500, height:130 }}>
 
             {/* 스캔 중 — amber 텍스트 */}
             {scanVisible && (
               <div style={{
+                position:"absolute", inset:0, display:"flex", alignItems:"center", justifyContent:"center",
                 fontFamily:"'Share Tech Mono', monospace", fontSize:13,
                 letterSpacing:"0.4em", textTransform:"uppercase",
                 color: phase === "unlock" ? "#34d399" : "#fbbf24",
@@ -424,41 +448,41 @@ export default function IntroClient() {
               </div>
             )}
 
-            {/* ACCESS GRANTED — emerald 그린 */}
+            {/* ACCESS GRANTED + 타이틀 — 같은 절대 컨테이너에서 순서대로 */}
             {grantedVisible && (
-              <div style={{ position:"relative" }}>
-                <div style={{
-                  fontFamily:"'Orbitron', sans-serif", fontSize:36, fontWeight:900,
-                  color:"#34d399", letterSpacing:"0.18em",
-                  textShadow:"0 0 20px rgba(52,211,153,0.9), 0 0 55px rgba(52,211,153,0.4), 0 0 90px rgba(52,211,153,0.15)",
-                  animation:"grantedIn 0.8s cubic-bezier(0.34,1.56,0.64,1) forwards",
-                }}>ACCESS GRANTED</div>
-                {glitching && (<>
-                  <div style={{ position:"absolute", inset:0,
-                    fontFamily:"'Orbitron', sans-serif", fontSize:36, fontWeight:900,
-                    color:"#ef4444", letterSpacing:"0.18em",
-                    animation:"glitchR 0.1s steps(1) infinite", opacity:0.7 }}>ACCESS GRANTED</div>
-                  <div style={{ position:"absolute", inset:0,
-                    fontFamily:"'Orbitron', sans-serif", fontSize:36, fontWeight:900,
-                    color:"#a78bfa", letterSpacing:"0.18em",
-                    animation:"glitchB 0.1s steps(1) infinite", opacity:0.7 }}>ACCESS GRANTED</div>
-                </>)}
-              </div>
-            )}
-
-            {/* 타이틀 */}
-            {titleVisible && (
-              <div style={{ animation:"titleIn 0.6s ease-out forwards", textAlign:"center" }}>
-                <p style={{ fontFamily:"'Orbitron', sans-serif", fontSize:26, fontWeight:700,
-                  color:"#ffffff", letterSpacing:"0.12em",
-                  textShadow:"0 0 20px rgba(255,255,255,0.25), 0 0 40px rgba(167,139,250,0.3)" }}>
-                  AgentShield
-                </p>
-                <p style={{ fontFamily:"'Share Tech Mono', monospace", fontSize:11,
-                  letterSpacing:"0.5em", color:"rgba(167,139,250,0.75)",
-                  marginTop:6, textTransform:"uppercase" }}>
-                  Sentinel Advanced
-                </p>
+              <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:12 }}>
+                <div style={{ position:"relative" }}>
+                  <div style={{
+                    fontFamily:"'Orbitron', sans-serif", fontSize:44, fontWeight:900,
+                    color:"#34d399", letterSpacing:"0.18em", whiteSpace:"nowrap",
+                    textShadow:"0 0 20px rgba(52,211,153,0.9), 0 0 55px rgba(52,211,153,0.4), 0 0 90px rgba(52,211,153,0.15)",
+                    animation:"grantedIn 0.8s cubic-bezier(0.34,1.56,0.64,1) forwards",
+                  }}>ACCESS GRANTED</div>
+                  {glitching && (<>
+                    <div style={{ position:"absolute", inset:0,
+                      fontFamily:"'Orbitron', sans-serif", fontSize:44, fontWeight:900,
+                      color:"#ef4444", letterSpacing:"0.18em", whiteSpace:"nowrap",
+                      animation:"glitchR 0.1s steps(1) infinite", opacity:0.7 }}>ACCESS GRANTED</div>
+                    <div style={{ position:"absolute", inset:0,
+                      fontFamily:"'Orbitron', sans-serif", fontSize:44, fontWeight:900,
+                      color:"#a78bfa", letterSpacing:"0.18em", whiteSpace:"nowrap",
+                      animation:"glitchB 0.1s steps(1) infinite", opacity:0.7 }}>ACCESS GRANTED</div>
+                  </>)}
+                </div>
+                {titleVisible && (
+                  <div style={{ animation:"titleIn 0.6s ease-out forwards", textAlign:"center" }}>
+                    <p style={{ fontFamily:"'Orbitron', sans-serif", fontSize:32, fontWeight:700,
+                      color:"#ffffff", letterSpacing:"0.12em",
+                      textShadow:"0 0 20px rgba(255,255,255,0.25), 0 0 40px rgba(167,139,250,0.3)" }}>
+                      AgentShield
+                    </p>
+                    <p style={{ fontFamily:"'Share Tech Mono', monospace", fontSize:13,
+                      letterSpacing:"0.5em", color:"rgba(167,139,250,0.75)",
+                      marginTop:6, textTransform:"uppercase" }}>
+                      Sentinel Advanced
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </div>

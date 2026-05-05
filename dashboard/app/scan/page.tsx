@@ -97,7 +97,7 @@ export default function ScanPage() {
     try {
       let data: { session_id: string; status: string };
       try {
-        data = await startScan(targetUrl.trim(), projectName.trim(), targetApiKey.trim() || undefined, "auto");
+        data = await startScan(targetUrl.trim(), projectName.trim(), targetApiKey.trim() || undefined);
       } catch {
         data = { session_id: MOCK_SESSION_ID, status: "running" };
       }

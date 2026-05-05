@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
 import PipelineFlowViz from "../../../components/PipelineFlowViz";
-import { getScanStatus, getScanResults, ScanResult } from "../../../lib/api";
+import { getScanStatus, getScanResults, cancelScan, ScanResult } from "../../../lib/api";
 import { MOCK_SCAN_STATUS, MOCK_SCAN_RESULTS } from "../../../lib/mockClientData";
 
 const PHASE_LABELS: Record<number, string> = {
@@ -250,10 +250,23 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
         let r: ScanResult[];
         try {
           r = await getScanResults(sessionId);
+          if (r.length === 0 && (s.vulnerable_count > 0 || s.safe_count > 0)) {
+            // 결과가 비어있지만 카운트는 있음 → 재시도
+            await new Promise((res) => setTimeout(res, 1500));
+            r = await getScanResults(sessionId);
+          }
         } catch {
+          r = [];
+        }
+        if (r.length === 0) {
           r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
         }
-        enqueueNewResults(r);
+        // 완료된 스캔은 드립 없이 한 번에 전부 표시
+        const fresh = r.filter((x) => !seenIds.current.has(x.id));
+        fresh.forEach((x) => seenIds.current.add(x.id));
+        if (fresh.length > 0) {
+          setDisplayedResults(fresh.slice().reverse());
+        }
         const lastAttack = r.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
         if (lastAttack) setLatestAttackPrompt(lastAttack);
         if (pollRef.current) clearInterval(pollRef.current);
@@ -284,13 +297,13 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
     };
   }, [fetchStatus, sessionId]);
 
-  // 1초마다 큐에서 결과 하나씩 꺼내서 표시
+  // 300ms마다 큐에서 결과 꺼내서 표시 (running 중에만 사용)
   useEffect(() => {
     const dequeue = setInterval(() => {
       if (pendingQueue.current.length === 0) return;
       const next = pendingQueue.current.shift()!;
       setDisplayedResults((prev) => [next, ...prev]); // 최신이 위에
-    }, 1000);
+    }, 300);
     return () => clearInterval(dequeue);
   }, []);
 
@@ -366,7 +379,15 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
               </button>
             ) : (
               <button
-                onClick={() => { if (pollRef.current) clearInterval(pollRef.current); }}
+                onClick={async () => {
+                  if (pollRef.current) clearInterval(pollRef.current);
+                  try {
+                    await cancelScan(sessionId);
+                    addLog("INFO", "스캔 취소 요청 전송됨");
+                  } catch {
+                    addLog("ERROR", "스캔 취소 요청 실패");
+                  }
+                }}
                 className="p-3.5 h-12 w-12 rounded-xl bg-error/10 text-error flex items-center justify-center hover:bg-error/20 transition-all border border-error/20"
               >
                 <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>stop</span>
