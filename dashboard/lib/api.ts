@@ -191,6 +191,8 @@ export interface ScanResult {
   defense_code?: string;
   verify_result?: string;
   created_at: string;
+  summary?: string;
+  danger_highlight?: string;
 }
 
 // --- Monitoring ---
