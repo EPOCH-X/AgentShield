@@ -61,18 +61,10 @@ data/**
 *.jsonl
 models/
 
-# Adapters (학습 결과)
-# 기본 3폴더(lora-red / lora-judge / lora-blue) 안의 가중치만 무시 — README·Modelfile 등은 커밋 가능
-adapters/lora-red/*.bin
-adapters/lora-red/*.safetensors
-adapters/lora-judge/*.bin
-adapters/lora-judge/*.safetensors
-adapters/lora-blue/*.bin
-adapters/lora-blue/*.safetensors
-# 실험·버전별 폴더 전체 (예: lora-blue-qwen35-2b-..., checkpoint-*, optimizer.pt 등)
-adapters/lora-red-*/
-adapters/lora-judge-*/
-adapters/lora-blue-*/
+# Adapters — LoRA/PEFT 산출물·체크포인트는 로컬·코랩·드라이브에만 둠(용량·바이너리)
+adapters/**
+!adapters/**/
+!adapters/**/README.md
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
