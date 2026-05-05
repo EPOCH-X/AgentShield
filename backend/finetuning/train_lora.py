@@ -131,7 +131,7 @@ def _unsupported_qwen35_transformers_hint(model_id: str, cause: BaseException) -
         "최신 릴리스로도 안 되면 소스 설치:\n"
         "  pip install -U git+https://github.com/huggingface/transformers.git\n\n"
         f"(원인: {cause})"
-    ) from cause
+    )
 
 
 def _load_base_model(model_id: str, use_quantization: bool, device_type: str):
