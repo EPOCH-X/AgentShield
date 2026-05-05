@@ -96,12 +96,11 @@ export async function getMe(): Promise<{ username: string; role: string }> {
 export async function startScan(
   target_url: string,
   project_name: string,
-  api_key?: string,
-  scan_mode?: string
+  target_api_key?: string,
 ): Promise<{ session_id: string; status: string }> {
   const res = await apiFetch("/api/v1/scan/llm-security", {
     method: "POST",
-    body: JSON.stringify({ target_url, project_name, api_key, scan_mode }),
+    body: JSON.stringify({ target_url, project_name, target_api_key }),
   });
   if (!res.ok) throw new Error("스캔을 시작할 수 없습니다.");
   return res.json();
@@ -119,6 +118,49 @@ export async function getScanStatus(sessionId: string): Promise<{
 }> {
   const res = await apiFetch(`/api/v1/scan/${sessionId}/status`);
   if (!res.ok) throw new Error("스캔 상태를 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function cancelScan(sessionId: string): Promise<{ session_id: string; status: string }> {
+  const res = await apiFetch(`/api/v1/scan/${sessionId}/cancel`, { method: "POST" });
+  if (!res.ok) throw new Error("스캔을 취소할 수 없습니다.");
+  return res.json();
+}
+
+export async function getLatestScan(): Promise<{
+  session_id: string;
+  status: string;
+  project_name: string;
+  target_url: string;
+  created_at?: string;
+  completed_at?: string;
+}> {
+  const res = await apiFetch("/api/v1/scan/latest");
+  if (!res.ok) throw new Error("최근 스캔을 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function getFrrStats(sessionId: string): Promise<{
+  session_id: string;
+  total_legitimate_requests: number;
+  false_refusals: number;
+  frr_rate: number;
+  frr_percentage: number;
+}> {
+  const res = await apiFetch(`/api/v1/scan/${sessionId}/frr`);
+  if (!res.ok) throw new Error("FRR 통계를 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function getScanReviewQueue(sessionId: string): Promise<ScanResult[]> {
+  const res = await apiFetch(`/api/v1/scan/${sessionId}/review-queue`);
+  if (!res.ok) throw new Error("리뷰 큐를 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function getScanResult(sessionId: string, resultId: number): Promise<ScanResult> {
+  const res = await apiFetch(`/api/v1/scan/${sessionId}/results/${resultId}`);
+  if (!res.ok) throw new Error("결과를 가져올 수 없습니다.");
   return res.json();
 }
 
