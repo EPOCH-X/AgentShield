@@ -82,14 +82,6 @@ services:
       - ./data:/app/data
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
-  monitoring-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8002:8002"
-    command: uvicorn monitoring_proxy.monitor_server:app --host 0.0.0.0 --port 8002 --reload
-
 volumes:
   pgdata:
   chromadata:
