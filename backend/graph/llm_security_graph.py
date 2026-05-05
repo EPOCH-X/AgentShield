@@ -27,6 +27,8 @@ class ScanState(TypedDict):
     phase2_result: dict[str, Any]  # [R1] Phase 2 출력
     phase3_result: dict[str, Any]  # [R3] Phase 3 출력
     phase4_result: dict[str, Any]  # [R3] Phase 4 출력
+    phase3_history: list[dict[str, Any]]  # [R3] Phase3 반복 이력
+    phase4_history: list[dict[str, Any]]  # [R3] Phase4 반복 이력
     iteration: int                 # Phase 4 재검증 재시도 카운터
 
 
@@ -55,7 +57,36 @@ async def phase3_node(state: ScanState) -> dict:
         phase2_result=state["phase2_result"],
         phase4_result=state.get("phase4_result"),
     )
-    return {"phase3_result": result}
+
+    attempt = int(state.get("iteration") or 0) + 1
+    result["attempt"] = attempt
+
+    prev_phase3 = state.get("phase3_result") or {}
+    cumulative_generated = int(prev_phase3.get("cumulative_defenses_generated") or 0) + int(
+        result.get("defenses_generated") or 0
+    )
+    cumulative_failed = int(prev_phase3.get("cumulative_failed") or 0) + int(
+        result.get("failed") or 0
+    )
+    cumulative_input = int(prev_phase3.get("cumulative_total_vulnerabilities") or 0) + int(
+        result.get("total_vulnerabilities") or 0
+    )
+    initial_input = int(
+        prev_phase3.get("initial_total_vulnerabilities")
+        or result.get("total_vulnerabilities")
+        or 0
+    )
+    result["cumulative_defenses_generated"] = cumulative_generated
+    result["cumulative_failed"] = cumulative_failed
+    result["cumulative_total_vulnerabilities"] = cumulative_input
+    result["initial_total_vulnerabilities"] = initial_input
+    prev_history = state.get("phase3_history") or []
+    history_row = {
+        "attempt": attempt,
+        "source_vulnerabilities": result.get("source_vulnerabilities") or [],
+        "defense_json_files": result.get("defense_json_files") or [],
+    }
+    return {"phase3_result": result, "phase3_history": prev_history + [history_row]}
 
 
 async def phase4_node(state: ScanState) -> dict:
@@ -66,7 +97,29 @@ async def phase4_node(state: ScanState) -> dict:
         session_id=state["session_id"],
         phase3_result=state["phase3_result"],
     )
-    return {"phase4_result": result, "iteration": state["iteration"] + 1}
+    attempt = int(state.get("iteration") or 0) + 1
+    result["attempt"] = attempt
+
+    prev_phase4 = state.get("phase4_result") or {}
+    result["cumulative_total_tested"] = int(prev_phase4.get("cumulative_total_tested") or 0) + int(
+        result.get("total_tested") or 0
+    )
+    result["cumulative_safe"] = int(prev_phase4.get("cumulative_safe") or 0) + int(
+        result.get("safe") or 0
+    )
+    result["cumulative_unsafe"] = int(prev_phase4.get("cumulative_unsafe") or 0) + int(
+        result.get("unsafe") or 0
+    )
+    prev_history = state.get("phase4_history") or []
+    history_row = {
+        "attempt": attempt,
+        "details": result.get("details") or [],
+    }
+    return {
+        "phase4_result": result,
+        "phase4_history": prev_history + [history_row],
+        "iteration": state["iteration"] + 1,
+    }
 
 
 # ── 조건부 엣지 ──────────────────────────────────────────────────
@@ -124,6 +177,61 @@ def build_security_graph(
     return graph.compile()
 
 
+def build_security_graph_phase34():
+    """Phase3 → Phase4만 실행 (시드 phase1/phase2가 initial state에 채워진 경우)."""
+    graph = StateGraph(ScanState)
+    graph.add_node("phase3", phase3_node)
+    graph.add_node("phase4", phase4_node)
+    graph.set_entry_point("phase3")
+    graph.add_edge("phase3", "phase4")
+    graph.add_conditional_edges("phase4", should_retry_defense)
+    return graph.compile()
+
+
+async def run_scan_phase34(
+    session_id: str,
+    target_url: str,
+    target_config: Optional[dict[str, Any]] = None,
+    phase1_result: Optional[dict[str, Any]] = None,
+    phase2_result: Optional[dict[str, Any]] = None,
+) -> ScanState:
+    """Phase3·4만 실행. phase1_result / phase2_result는 사전에 채운 시드여야 한다."""
+    effective_target_config = target_config or {}
+    adapter_config = TargetAdapterConfig.from_input(
+        target_url=target_url,
+        api_key=effective_target_config.get("api_key"),
+        provider=effective_target_config.get("provider"),
+        model=effective_target_config.get("model"),
+    )
+    try:
+        probe_result = await probe_target_contract(adapter_config)
+        logger.info(
+            "[target probe] ok provider=%s content_len=%s",
+            probe_result.get("provider"),
+            probe_result.get("content_len"),
+        )
+    except Exception as exc:
+        logger.warning("[target probe] skipped after failure: %s", exc.__class__.__name__)
+
+    app = build_security_graph_phase34()
+
+    initial_state: ScanState = {
+        "session_id": session_id,
+        "target_url": target_url,
+        "target_config": effective_target_config,
+        "phase1_result": phase1_result or {},
+        "phase2_result": phase2_result or {},
+        "phase3_result": {},
+        "phase4_result": {},
+        "phase3_history": [],
+        "phase4_history": [],
+        "iteration": 0,
+    }
+
+    final_state = await app.ainvoke(initial_state)
+    return final_state
+
+
 async def run_scan(
     session_id: str,
     target_url: str,
@@ -158,6 +266,8 @@ async def run_scan(
         "phase2_result": {},
         "phase3_result": {},
         "phase4_result": {},
+        "phase3_history": [],
+        "phase4_history": [],
         "iteration": 0,
     }
 

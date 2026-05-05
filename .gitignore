@@ -54,25 +54,25 @@ id_rsa*
 *.sqlite3
 *.db
 
-# Data (용량 큰 파일)
+# Data — 로컬 전용(대용량·합성 공격 데이터 등). README만 추적하려면 디렉터리를 열어줘야 함.
+data/**
+!data/**/
+!data/**/README.md
 *.jsonl
 models/
-data/attack_patterns/*.csv
-data/phase3_defenses/
-data/phase3_failures/
-data/defense_patterns/phase4_verified_*.json
-data/red_campaigns/
-!data/attack_patterns/README.md
-!data/defense_patterns/README.md
-!data/finetuning/README.md
 
 # Adapters (학습 결과)
+# 기본 3폴더(lora-red / lora-judge / lora-blue) 안의 가중치만 무시 — README·Modelfile 등은 커밋 가능
 adapters/lora-red/*.bin
 adapters/lora-red/*.safetensors
 adapters/lora-judge/*.bin
 adapters/lora-judge/*.safetensors
 adapters/lora-blue/*.bin
 adapters/lora-blue/*.safetensors
+# 실험·버전별 폴더 전체 (예: lora-blue-qwen35-2b-..., checkpoint-*, optimizer.pt 등)
+adapters/lora-red-*/
+adapters/lora-judge-*/
+adapters/lora-blue-*/
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
@@ -118,8 +118,14 @@ docker-compose.override.yml
 *.pid
 
 
+# HF merge / GGUF 변환 산출물 (용량 큼)
+exports/
+
 results/
-scripts/calibrate_result.txtsocket/.s.PGSQL.*
+
+# 로컬 스크립트 산출물·Postgres 소켓 잔재
+scripts/calibrate_result.txt
+**/.s.PGSQL.*
 
 nohup.out
 # Added by code-review-graph

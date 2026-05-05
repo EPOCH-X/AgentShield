@@ -2,13 +2,38 @@
 [R4] 파인튜닝 — QLoRA 학습 코드 (공용)
 
 기능별 파이프라인 섹션 8 참조.
-사용법: python train_lora.py --role red --data data/finetuning/red_train.jsonl --output adapters/lora-red
 
-학습 설정:
-  기반 모델: Gemma 4 E2B
-  양자화: QLoRA (4-bit NF4)
-  LoRA: r=16, lora_alpha=32, target_modules=[q/v/k/o_proj]
-  학습: batch=4, grad_accum=4, epochs=3, lr=2e-4, max_seq=2048
+사용 예:
+  Qwen3.5 2B (기본 HF 베이스: Qwen/Qwen3.5-2B, --model-id 생략 시 동일):
+    python backend/finetuning/train_lora.py --role blue --data data/finetuning/blue_train.jsonl \\
+      --output adapters/lora-blue-qwen --ollama-from qwen3.5:2b
+
+  Qwen3.5 4B 등 다른 HF 베이스:
+    python backend/finetuning/train_lora.py --role blue --data data/finetuning/blue_train.jsonl \\
+      --model-id Qwen/Qwen3.5-4B --output adapters/lora-blue-qwen4 --ollama-from qwen3.5:4b
+
+  Gemma 4 E2B:
+    python backend/finetuning/train_lora.py --role blue --data data/finetuning/blue_train.jsonl \\
+      --model-id google/gemma-4-E2B --ollama-from gemma4:e2b --output adapters/lora-blue
+
+  스모크:
+    ... --max-steps 4
+
+  merge → GGUF → Ollama (추론 속도·RAM 개선):
+    python scripts/merge_peft_export_gguf_ollama.py --help
+
+학습 설정 (개요):
+  베이스: --model-id (HF). 양자화: CUDA만 QLoRA 4-bit.
+  LoRA: Gemma4는 target linear; 그 외 q_proj,v_proj,k_proj,o_proj.
+  epochs=3, lr=2e-4, max_seq=2048 (SFTConfig)
+
+로더: AutoModelForCausalLM 을 먼저 시도하고, 실패 시에만 qwen3_5 에 대해 ImageTextToText 폴백.
+  텍스트 SFT에는 HF 텍스트 전용 Instruct/CausalLM 체크포인트를 쓰는 것이 가장 안전하다.
+
+데이터:
+  - 기본(JSONL instruction/input/output): TRL 대화형 prompt-completion — user 메시지 + assistant(JSON).
+    completion 구간에만 loss (completion_only_loss). Qwen3.5 챗 템플릿과 TRL assistant_mask 불일치를 피함.
+  - --dataset-format messages: 기존 `messages` 컬럼 + assistant_only_loss(가능 시).
 """
 
 # TODO: [R4] 구현
@@ -16,6 +41,7 @@
 # - argparse CLI
 
 import os
+import shutil
 import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, "../../"))
@@ -24,20 +50,125 @@ import torch
 import argparse
 import subprocess
 from transformers import (
-    AutoModelForCausalLM, 
-    AutoTokenizer, 
-    BitsAndBytesConfig, 
-    TrainingArguments
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BitsAndBytesConfig,
+    PreTrainedTokenizerBase,
 )
 from peft import (
     LoraConfig,
     get_peft_model,
     prepare_model_for_kbit_training
 )
-from trl import SFTTrainer
+from trl import SFTConfig, SFTTrainer
 from datasets import load_dataset
 
-from backend.config import settings
+# 기본 HF 베이스 (--model-id 생략 시). Gemma·4B 등은 CLI에서 --model-id 지정.
+DEFAULT_MODEL_ID = "Qwen/Qwen3.5-2B"
+
+# 스크립트 전용 — 기본 출력 폴더 (.env 미사용)
+LORA_DEFAULT_OUTPUT_BY_ROLE = {
+    "red": "./adapters/lora-red",
+    "judge": "./adapters/lora-judge",
+    "blue": "./adapters/lora-blue",
+}
+
+
+def _lora_config_for_gemma4() -> LoraConfig:
+    """
+    Gemma 4는 attention/MLP 프로젝션이 Gemma4ClippableLinear 래퍼이며,
+    PEFT는 nn.Linear가 아닌 모듈에 LoRA를 붙일 수 없다.
+    래퍼 내부의 실제 Linear(부모 속성명 보통 `linear`)만 타겟한다.
+    lm_head가 단독 Linear인 경우 이름이 `linear`가 아니라서 여기서는 걸리지 않는다.
+    """
+    return LoraConfig(
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.1,
+        target_modules=["linear"],
+        exclude_modules=["lm_head"],
+        task_type="CAUSAL_LM",
+        bias="none",
+    )
+
+
+def _default_lora_config() -> LoraConfig:
+    """일반 Llama/Gemma(구버전) 등 nn.Linear 프로젝션."""
+    return LoraConfig(
+        r=16,
+        lora_alpha=32,
+        lora_dropout=0.1,
+        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+        task_type="CAUSAL_LM",
+        bias="none",
+    )
+
+
+def _pick_lora_config(model) -> LoraConfig:
+    arch = getattr(model.config, "architectures", None) or []
+    mtype = str(getattr(model.config, "model_type", "") or "").lower()
+    if mtype == "gemma4" or any("Gemma4" in str(a) for a in arch):
+        print("[LoRA] Gemma 4 감지: target_modules=['linear'] (Gemma4ClippableLinear 내부 Linear)")
+        return _lora_config_for_gemma4()
+    print("[LoRA] 기본: target_modules=q_proj,v_proj,k_proj,o_proj")
+    return _default_lora_config()
+
+
+def _load_base_model(model_id: str, use_quantization: bool, device_type: str):
+    """
+    텍스트 SFT에는 CausalLM 로딩이 맞다. 실패 시에만 qwen3_5 에 한해 ImageTextToText 폴백.
+    """
+    _trust = {"trust_remote_code": True}
+    cfg = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+    mt = str(getattr(cfg, "model_type", "") or "").lower()
+
+    def _from_cls(ModelCls):
+        if use_quantization:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+            return ModelCls.from_pretrained(
+                model_id,
+                quantization_config=bnb_config,
+                device_map="auto",
+                **_trust,
+            )
+        model = ModelCls.from_pretrained(
+            model_id,
+            torch_dtype=torch.float16,
+            device_map="auto" if device_type == "cpu" else None,
+            **_trust,
+        )
+        if device_type == "mps":
+            model = model.to("mps")
+        return model
+
+    try:
+        print("[로드] AutoModelForCausalLM 시도 (텍스트 SFT 권장)")
+        return _from_cls(AutoModelForCausalLM)
+    except Exception as e:
+        print(f"[로드] CausalLM 실패: {type(e).__name__}: {e}")
+        if mt == "qwen3_5":
+            from transformers import AutoModelForImageTextToText
+
+            print("[로드] 폴백: AutoModelForImageTextToText (멀티모델 — 텍스트 전용 HF id 사용 권장)")
+            return _from_cls(AutoModelForImageTextToText)
+        raise
+
+
+def _trl_supports_assistant_only_loss(tokenizer) -> bool:
+    """TRL이 tokenizer.chat_template 에 assistant_mask 패치를 적용할 수 있는지 검사."""
+    try:
+        from trl.chat_template_utils import get_training_chat_template
+
+        get_training_chat_template(tokenizer)
+    except ValueError:
+        return False
+    return True
 
 
 def detect_device():
@@ -53,126 +184,224 @@ def detect_device():
         return "cpu"
 
 
-def train_role_adapter(role: str, train_file: str, output_dir: str):
+def _messages_from_row(instruction: str, input_text: str, output_text: str) -> list[dict]:
+    """JSONL 한 행 → TRL conversational (`messages`) 형식."""
+    user_content = f"{instruction}\n{input_text}".strip()
+    return [
+        {"role": "user", "content": user_content},
+        {"role": "assistant", "content": output_text},
+    ]
+
+
+def _prompt_completion_strings_from_row(
+    tokenizer: PreTrainedTokenizerBase,
+    instruction: str,
+    input_text: str,
+    output_text: str,
+) -> dict[str, str]:
     """
-    역할별 LoRA 어댑터 학습 및 Ollama 연동 자동화.
+    JSONL 한 행 → 문자열 prompt / completion.
+
+    chat_template 로 렌더한 전체 문자열에서, user-only(+generation prompt) 접두사와 나머지(assistant 구간)를 나눈다.
+    prompt + completion 이 한 번에 토크나이즈될 때와 문자열 합이 일치해 TRL completion_mask 와 맞추기 유리하다.
+    """
+    user_content = f"{instruction}\n{input_text}".strip()
+    messages_user = [{"role": "user", "content": user_content}]
+    messages_full = [
+        {"role": "user", "content": user_content},
+        {"role": "assistant", "content": output_text},
+    ]
+    prompt_text = tokenizer.apply_chat_template(
+        messages_user,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    full_text = tokenizer.apply_chat_template(
+        messages_full,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+    if not full_text.startswith(prompt_text):
+        raise ValueError(
+            "chat_template 렌더 결과가 접두사 불일치입니다. tokenizer/chat_template 버전을 확인하세요."
+        )
+    return {"prompt": prompt_text, "completion": full_text[len(prompt_text) :]}
+
+
+def _print_merge_gguf_hint(*, model_id: str, adapter_root: str) -> None:
+    """ollama create FROM+ADAPTER 실패 시 HF 병합 → GGUF 안내."""
+    print(
+        "\n[안내] FROM+ADAPTER 등록이 안 되는 경우(예: unsupported architecture):\n"
+        "  로컬에서 HF merge → llama.cpp GGUF → ollama create 가 안정적입니다.\n"
+        "  예시 (프로젝트 루트에서, llama.cpp 경로만 본인 환경에 맞게):\n"
+        f"  python scripts/merge_peft_export_gguf_ollama.py \\\n"
+        f"    --base-model {model_id} \\\n"
+        f"    --adapter {adapter_root} \\\n"
+        "    --merged-hf exports/merged-hf \\\n"
+        "    --llama-cpp /path/to/llama.cpp \\\n"
+        "    --gguf-out exports/model-f16.gguf \\\n"
+        "    --outtype f16 \\\n"
+        "    --ollama-model my-blue-merged\n",
+        flush=True,
+    )
+
+
+def train_role_adapter(
+    role: str,
+    train_file: str,
+    output_dir: str,
+    *,
+    model_id: str,
+    ollama_from: str | None = None,
+    max_steps: int | None = None,
+    assistant_only_loss: bool = True,
+    dataset_format: str = "prompt_completion",
+    completion_only_loss: bool = True,
+):
+    """
+    역할별 LoRA 어댑터 학습 및 (선택) Ollama Modelfile/등록.
     CUDA / MPS / CPU 환경을 자동 감지하여 설정을 분기한다.
+    max_steps > 0 이면 해당 스텝만 돌리고 종료(스모크/디버그용).
+    ollama_from 이 있으면 Modelfile의 FROM 및 ollama create 시도.
+    dataset_format prompt_completion: completion(JSON)에만 loss — Blue 목표에 맞춤.
+    dataset_format messages: assistant_only_loss 로 assistant 구간만 loss(템플릿 지원 시).
     """
     device_type = detect_device()
     use_quantization = (device_type == "cuda")  # QLoRA(bitsandbytes)는 CUDA 전용
 
     print(f"\n" + "="*50)
     print(f"[{role.upper()}] 파인튜닝 시작")
+    print(f" - HF 베이스: {model_id}")
     print(f" - 데이터: {train_file}")
     print(f" - 출력 경로: {output_dir}")
     print(f" - 감지된 디바이스: {device_type}")
     print(f" - QLoRA 4-bit 양자화: {'ON' if use_quantization else 'OFF (bitsandbytes는 CUDA 전용)'}")
+    if max_steps and max_steps > 0:
+        print(f" - max_steps: {max_steps} (스모크 모드)")
+    print(f" - dataset_format: {dataset_format}")
+    if dataset_format == "prompt_completion":
+        print(f" - completion_only_loss: {completion_only_loss} (True면 assistant JSON 구간만 loss)")
+    else:
+        print(f" - assistant_only_loss (요청): {assistant_only_loss}")
     print("="*50 + "\n")
 
-    # 모델 id 설정
-    model_id = "google/gemma-4-E2B"
+    model = _load_base_model(model_id, use_quantization, device_type)
 
-    # 기반 모델 로드 — CUDA는 QLoRA 4-bit, MPS/CPU는 float16 전체 로드
-    if use_quantization:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16
-        )
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=bnb_config,
-            device_map="auto"
-        )
-    else:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16,
-            device_map="auto" if device_type == "cpu" else None
-        )
-        if device_type == "mps":
-            model = model.to("mps")
-
-    # 토그나이저
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    _trust = {"trust_remote_code": True}
+    tokenizer = AutoTokenizer.from_pretrained(model_id, **_trust)
     if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.default_bos_token
+        if tokenizer.eos_token:
+            tokenizer.pad_token = tokenizer.eos_token
+        elif getattr(tokenizer, "unk_token", None):
+            tokenizer.pad_token = tokenizer.unk_token
     tokenizer.padding_side = "right"
 
-    # LoRA 설정
-    lora_config = LoraConfig(
-        r=16, 
-        lora_alpha=32, 
-        lora_dropout=0.1,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
-        task_type="CAUSAL_LM",
-        bias="none"
-    )
+    effective_assistant_only = False
+    if dataset_format == "messages":
+        effective_assistant_only = assistant_only_loss
+        if assistant_only_loss and not _trl_supports_assistant_only_loss(tokenizer):
+            print(
+                "[경고] TRL이 이 chat_template에 assistant_only(loss 마스크) 패치를 적용할 수 없습니다.\n"
+                "  → assistant_only_loss=False 로 전체 시퀀스 loss 로 진행합니다.\n"
+                "  Blue 에이전트는 --dataset-format prompt_completion 권장."
+            )
+            effective_assistant_only = False
+        print(f" - assistant_only_loss (실제): {effective_assistant_only}")
+
+    # LoRA 설정 (Gemma 4는 ClippableLinear 래퍼 → 내부 linear만 타겟)
+    lora_config = _pick_lora_config(model)
 
     if use_quantization:
         model = prepare_model_for_kbit_training(model)
     model = get_peft_model(model, lora_config)
     model.print_trainable_parameters()
 
-    # 데이터셋 로드
     dataset = load_dataset("json", data_files=train_file)
 
-    def formatting_prompts_func(example):
-        output_texts = []
-        for i in range(len(example['instruction'])):
-            # Gemma 전용 프롬프트 템플릿 적용 (2026년 기준 표준 가안)
-            text = f"<start_of_turn>user\n{example['instruction'][i]}\n{example['input'][i]}<end_of_turn>\n"
-            text += f"<start_of_turn>model\n{example['output'][i]}<end_of_turn>"
-            output_texts.append(text)
-        return output_texts
+    if dataset_format == "prompt_completion":
 
-    # 학습 설정 — 디바이스별 분기
-    if device_type == "cuda":
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=4,
-            gradient_accumulation_steps=4,
-            num_train_epochs=3,
-            learning_rate=2e-4,
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.03,
-            fp16=True,
-            optim="paged_adamw_32bit",
-            save_strategy="epoch",
-            logging_steps=10,
-            max_grad_norm=0.3,
-            gradient_checkpointing=True
+        def _batch_to_pc(batch: dict) -> dict:
+            prompts = []
+            completions = []
+            for i in range(len(batch["instruction"])):
+                row = _prompt_completion_strings_from_row(
+                    tokenizer,
+                    batch["instruction"][i],
+                    batch["input"][i],
+                    batch["output"][i],
+                )
+                prompts.append(row["prompt"])
+                completions.append(row["completion"])
+            return {"prompt": prompts, "completion": completions}
+
+        train_ds = dataset["train"].map(
+            _batch_to_pc,
+            batched=True,
+            remove_columns=dataset["train"].column_names,
         )
     else:
-        # MPS / CPU — fp16 OFF, 표준 optimizer, 배치 축소
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=2,
-            gradient_accumulation_steps=8,
-            num_train_epochs=3,
-            learning_rate=2e-4,
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.03,
-            fp16=False,
-            optim="adamw_torch",
-            save_strategy="epoch",
-            logging_steps=10,
-            max_grad_norm=0.3,
-            gradient_checkpointing=True,
-            use_mps_device=(device_type == "mps")
+
+        def _batch_to_messages(batch: dict) -> dict:
+            msgs = []
+            for i in range(len(batch["instruction"])):
+                msgs.append(
+                    _messages_from_row(
+                        batch["instruction"][i],
+                        batch["input"][i],
+                        batch["output"][i],
+                    )
+                )
+            return {"messages": msgs}
+
+        train_ds = dataset["train"].map(
+            _batch_to_messages,
+            batched=True,
+            remove_columns=dataset["train"].column_names,
         )
 
-    # SFTTrainer로 학습
+    # SFT 설정 — 디바이스별 분기
+    _completion_only = completion_only_loss if dataset_format == "prompt_completion" else False
+    sft_common = dict(
+        output_dir=output_dir,
+        num_train_epochs=3,
+        max_steps=max_steps if max_steps and max_steps > 0 else -1,
+        learning_rate=2e-4,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.03,
+        save_strategy="epoch",
+        logging_steps=10,
+        max_grad_norm=0.3,
+        gradient_checkpointing=True,
+        max_length=2048,
+        packing=False,
+        report_to="none",
+        bf16=False,
+        use_cpu=(device_type == "cpu"),
+        assistant_only_loss=effective_assistant_only,
+        completion_only_loss=_completion_only,
+    )
+    if device_type == "cuda":
+        sft_args = SFTConfig(
+            per_device_train_batch_size=4,
+            gradient_accumulation_steps=4,
+            fp16=True,
+            optim="paged_adamw_32bit",
+            **sft_common,
+        )
+    else:
+        sft_args = SFTConfig(
+            per_device_train_batch_size=2,
+            gradient_accumulation_steps=8,
+            fp16=False,
+            optim="adamw_torch",
+            **sft_common,
+        )
+
     trainer = SFTTrainer(
-        model=model, 
-        args=training_args,
-        train_dataset=dataset["train"],
-        dataset_text_field="text",   # JSONL 파일 내에서 학습할 텍스트가 있는 키 값 지정 필수
-        formatting_func=formatting_prompts_func,
-        tokenizer=tokenizer,
-        max_seq_length=2048,
-        packing=False
+        model=model,
+        args=sft_args,
+        train_dataset=train_ds,
+        processing_class=tokenizer,
     )
     trainer.train()
 
@@ -181,59 +410,113 @@ def train_role_adapter(role: str, train_file: str, output_dir: str):
     tokenizer.save_pretrained(output_dir)
     print(f"[{role.upper()}] 어댑터 저장 완료: {output_dir}")
 
-    # Ollama 자동 연동을 위한 Modelfile 생성
-    modelfile_path = os.path.join(output_dir, "Modelfile")
-    adapter_file = "adapter_model.safetensors" if os.path.exists(os.path.join(output_dir, "adapter_model.safetensors")) else "adapter_model.bin"
-    absolute_adapter_path = os.path.abspath(os.path.join(output_dir, adapter_file))
+    adapter_root = os.path.abspath(output_dir)
+    # 일부 Ollama 버전은 adapter_model.safetensors 대신 model*.safetensors 만 스캔함
+    _adapter_st = os.path.join(adapter_root, "adapter_model.safetensors")
+    _model_st = os.path.join(adapter_root, "model.safetensors")
+    if os.path.isfile(_adapter_st) and not os.path.isfile(_model_st):
+        shutil.copy2(_adapter_st, _model_st)
+        print(f"[Ollama 호환] model.safetensors 복사(동일 내용, adapter_model 복제)")
 
-    modelfile_content = f"FROM {settings.OLLAMA_MODEL}\nADAPTER {absolute_adapter_path}"
+    if ollama_from:
+        modelfile_path = os.path.join(adapter_root, "Modelfile")
+        modelfile_content = f"FROM {ollama_from}\nADAPTER ."
 
-    with open(modelfile_path, "w", encoding="utf-8") as f:
-        f.write(modelfile_content)
+        with open(modelfile_path, "w", encoding="utf-8") as f:
+            f.write(modelfile_content)
 
-    agent_name = f"agent-{role}"
-    print("=" * 50)
-    print(f"\n[Ollama {agent_name} 자동 저장 시작]\n")
-    try:
-        # subprocess.run을 사용해 터미널 명령어를 직접 실행합니다.
-        result = subprocess.run(
-            ["ollama", "create", agent_name, "-f", modelfile_path],
-            capture_output=True, # 실행 결과를 변수에 담음
-            text=True,           # 출력을 문자열로 처리
-            check=True           # 명령어 실패 시 예외 발생
+        agent_name = f"agent-{role}"
+        print("=" * 50)
+        print(f"\n[Ollama {agent_name} 자동 저장 시작] (FROM {ollama_from})\n")
+        try:
+            result = subprocess.run(
+                ["ollama", "create", agent_name, "-f", "Modelfile"],
+                cwd=adapter_root,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            print(f"[Ollama] 등록 성공: {result.stdout.strip()}")
+        except subprocess.CalledProcessError as e:
+            print(f"[Ollama] 등록 실패: {e.stderr}")
+            _print_merge_gguf_hint(model_id=model_id, adapter_root=adapter_root)
+        except FileNotFoundError:
+            print("[Ollama] 시스템에서 'ollama' 명령어를 찾을 수 없습니다. Ollama가 설치되어 있나요?")
+
+        print(f"\n[완료 {role.upper()}] 수동 등록이 필요하면 아래를 사용하세요.\n")
+
+        print("=" * 50)
+        print("\n[Ollama 연동 가이드 - 수동]\n")
+        print("어댑터 폴더로 이동한 뒤 Modelfile만 지정 (경로 공백 문제 방지):")
+        print(f"  cd {adapter_root}")
+        print("  ollama create <원하는모델이름> -f Modelfile\n")
+        print(
+            "위 방식이 unsupported architecture 등으로 실패하면 "
+            "아래 merge → GGUF 경로를 사용하세요 (scripts/merge_peft_export_gguf_ollama.py --help).\n"
         )
-        print(f"[Ollama] 등록 성공: {result.stdout.strip()}")
-    except subprocess.CalledProcessError as e:
-        print(f"[Ollama] 등록 실패: {e.stderr}")
-    except FileNotFoundError:
-        print("[Ollama] 시스템에서 'ollama' 명령어를 찾을 수 없습니다. Ollama가 설치되어 있나요?")
-        
-    print(f"\n[완료 {role.upper()}] 아래의 수동버전은 실행할 필요 없습니다.\n")
-
-    print("=" * 50)
-    print(f"\n[Ollama 연동 가이드 - 수동]\n")
-    print(f"다음 명령어를 터미널에 입력하여 '{role}' 에이전트를 Ollama에 등록하세요:")
-    print(f"ollama create agent-{role} -f {modelfile_path}\n")
+    else:
+        print("\n[Ollama] 생략 (--ollama-from 미지정). HF 어댑터만 저장되었습니다.\n")
   
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Role-based LoRA Fine-tuning")
     parser.add_argument("--role", choices=["red", "judge", "blue"], required=True, help="에이전트 역할")
     parser.add_argument("--data", required=True, help="학습용 JSONL 데이터 경로")
-    parser.add_argument("--output", default=None, help="어댑터 저장 경로 (입력하지 않으면 settings 기본 경로 사용)")
+    parser.add_argument(
+        "--model-id",
+        default=DEFAULT_MODEL_ID,
+        help=f"Hugging Face 베이스 모델 id (기본: {DEFAULT_MODEL_ID})",
+    )
+    parser.add_argument(
+        "--ollama-from",
+        default=None,
+        help="Ollama Modelfile의 FROM 태그 (예: qwen3.5:2b). 미지정 시 Modelfile/ollama create 생략",
+    )
+    parser.add_argument(
+        "--output",
+        default=None,
+        help="어댑터 저장 경로 (미지정 시 스크립트 상단 LORA_DEFAULT_OUTPUT_BY_ROLE)",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=None,
+        help="양수면 해당 optimizer step만 실행 후 종료 (스모크·파이프라인 검증용). 미지정이면 epoch 전체.",
+    )
+    parser.add_argument(
+        "--dataset-format",
+        choices=["prompt_completion", "messages"],
+        default="prompt_completion",
+        help="prompt_completion: user/assistant 분리 + completion에만 loss(기본). messages: 구형 messages 컬럼.",
+    )
+    parser.add_argument(
+        "--full-sequence-loss",
+        action="store_true",
+        help="prompt_completion 모드에서만: completion이 아닌 전체 시퀀스에 loss.",
+    )
+    parser.add_argument(
+        "--no-assistant-only-loss",
+        action="store_true",
+        help="dataset-format messages 일 때만: 전체 시퀀스 loss.",
+    )
     args = parser.parse_args()
-    
-    # 출력 경로 결정 (settings 기본값)
+
+    # 출력 경로 결정 (스크립트 내 기본값)
     if args.output:
         final_output = args.output
     else:
-        path_map = {
-            "red": settings.LORA_RED_PATH,
-            "judge": settings.LORA_JUDGE_PATH,
-            "blue": settings.LORA_BLUE_PATH
-        }
-        final_output = path_map[args.role]
+        final_output = LORA_DEFAULT_OUTPUT_BY_ROLE[args.role]
 
     print(f"최종 저장 경로가 '{final_output}'(으)로 설정되었습니다.")
 
     os.makedirs(final_output, exist_ok=True)
-    train_role_adapter(args.role, args.data, final_output)
+    train_role_adapter(
+        args.role,
+        args.data,
+        final_output,
+        model_id=args.model_id,
+        ollama_from=args.ollama_from,
+        max_steps=args.max_steps,
+        assistant_only_loss=not args.no_assistant_only_loss,
+        dataset_format=args.dataset_format,
+        completion_only_loss=not args.full_sequence_loss,
+    )
