@@ -62,22 +62,17 @@ data/phase3_defenses/
 data/phase3_failures/
 data/defense_patterns/phase4_verified_*.json
 data/red_campaigns/
-data/finetuning/
 !data/attack_patterns/README.md
 !data/defense_patterns/README.md
 !data/finetuning/README.md
 
-# Adapters (학습 결과 전체 — 재생성 가능)
-adapters/
-
-# Merged model (HF safetensors 병합본)
-merged/
-
-# GGUF 변환 결과
-gguf/
-
-# Fine-tuning venv (별도 환경)
-venv_finetune/
+# Adapters (학습 결과)
+adapters/lora-red/*.bin
+adapters/lora-red/*.safetensors
+adapters/lora-judge/*.bin
+adapters/lora-judge/*.safetensors
+adapters/lora-blue/*.bin
+adapters/lora-blue/*.safetensors
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
@@ -124,8 +119,7 @@ docker-compose.override.yml
 
 
 results/
-scripts/calibrate_result.txt
-socket/.s.PGSQL.*
+scripts/calibrate_result.txtsocket/.s.PGSQL.*
 
 nohup.out
 # Added by code-review-graph
@@ -135,8 +129,6 @@ nohup.out
 .mcp.json
 .opencode.json
 
-.claude/
-.code-review-graph/
-.cursor/
-.pycache_compile/
-.pycache_tmp/
+
+
+
