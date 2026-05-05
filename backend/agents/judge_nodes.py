@@ -561,13 +561,13 @@ def safe_truncate(text: str, max_chars: int = SAFE_CAP_CHARS) -> str:
 # =========================================================
 
 QWEN35_DEFAULT_OPTIONS = {
-    "temperature": 0.0,
+    "temperature": 0,
     "top_p": 0.1,
     "top_k": 1,
-    "repetition_penalty": 1.02,
+    "repeat_penalty": 1.03,
     "num_predict": 128,
     "num_ctx": 4096,
-    "stop": ["<|im_end|>"]
+    "stop": ["<|im_end|>", "<|im_start|>"]
 }
 
 async def call_ollama_judge(

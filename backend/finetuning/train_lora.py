@@ -159,7 +159,7 @@ def train_role_adapter(role, train_file, output_dir):
     dataset_size = len(dataset)
     batch = 1 if is_cuda else 1
     grad_accum = 16 if is_cuda else 16
-    epochs = 5
+    epochs = 1
 
     steps_per_epoch = math.ceil(dataset_size / (batch * grad_accum))
     total_steps = steps_per_epoch * epochs
@@ -243,22 +243,22 @@ def train_role_adapter(role, train_file, output_dir):
     if success:
         modelfile_path = os.path.join(output_dir, "Modelfile")
         modelfile_content = f'''
-        FROM ./{gguf_filename}
+FROM ./{gguf_filename}
 
-        PARAMETER temperature 0
-        PARAMETER top_p 0.1
-        PARAMETER top_k 1
-        PARAMETER num_ctx 4096
-        PARAMETER num_predict 128
-        PARAMETER stop "<|im_end|>"
+PARAMETER temperature 0
+PARAMETER top_p 0.1
+PARAMETER top_k 1
+PARAMETER repeat_penalty 1.03
+PARAMETER num_ctx 4096
+PARAMETER num_predict 128
+PARAMETER stop "<|im_end|>"
+PARAMETER stop "<|im_start|>"
 
-        TEMPLATE """{{{{- if .System }}}}<|im_start|>system
-        {{{{ .System }}}}<|im_end|>
-        {{{{ end }}}}{{{{- range .Messages }}}}<|im_start|>{{{{ .Role }}}}
-        {{{{ .Content }}}}<|im_end|>
-        {{{{ end }}}}<|im_start|>assistant
-        """
-        '''
+TEMPLATE """{{{{- range .Messages }}}}<|im_start|>{{{{ .Role }}}}
+{{{{ .Content }}}}<|im_end|>
+{{{{ end }}}}<|im_start|>assistant
+"""
+'''
 
         with open(modelfile_path, "w", encoding="utf-8") as f:
             f.write(modelfile_content)
