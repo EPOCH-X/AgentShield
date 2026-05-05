@@ -69,6 +69,7 @@ data/finetuning/
 
 # Adapters (학습 결과 전체 — 재생성 가능)
 adapters/
+final_adapter/
 
 # Merged model (HF safetensors 병합본)
 merged/
