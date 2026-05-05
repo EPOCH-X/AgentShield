@@ -105,11 +105,6 @@ def train_role_adapter(role, train_file, output_dir):
             quantization_config=bnb_config,
             device_map="auto"
         )
-    elif device_type == "mps":
-        model = AutoModelForCausalLM.from_pretrained(
-            _RED_MODEL_ID, dtype=torch.float16,
-        )
-        model = model.to("mps")
     else:
         model = AutoModelForCausalLM.from_pretrained(
             hf_model_id,
