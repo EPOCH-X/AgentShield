@@ -45,23 +45,25 @@ def _load_smoke(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _collect_safe_detail_rows(smoke: dict) -> dict[tuple[str, str], dict]:
-    """
-    (session_id, defense_id) -> phase4 detail row (마지막으로 등장한 safe가 유지되도록
-    phase4_history 순서대로 덮어씀).
-    """
-    session_id = str(smoke.get("session_id") or "")
-    out: dict[tuple[str, str], dict] = {}
+def _collect_last_phase4_detail_rows(smoke: dict) -> dict[str, dict]:
+    """defense_id -> 마지막 phase4 detail row (safe/unsafe 포함, 최종 상태 우선)."""
+    out: dict[str, dict] = {}
     for p4_entry in smoke.get("phase4_history") or []:
         for row in p4_entry.get("details") or []:
             if not isinstance(row, dict):
                 continue
-            if str(row.get("verdict") or "").strip().lower() != "safe":
-                continue
             did = str(row.get("defense_id") or "").strip()
             if not did:
                 continue
-            out[(session_id, did)] = row
+            out[did] = row
+    if not out:
+        p4 = smoke.get("phase4_result") or {}
+        for row in p4.get("details") or []:
+            if not isinstance(row, dict):
+                continue
+            did = str(row.get("defense_id") or "").strip()
+            if did:
+                out[did] = row
     return out
 
 
@@ -90,7 +92,13 @@ def _read_defense_json(project_root: Path, rel_path: str) -> dict[str, str] | No
     rat = raw.get("defense_rationale")
     if dr is None or rat is None:
         return None
-    return {"defended_response": str(dr), "defense_rationale": str(rat)}
+    defended_response = str(dr)
+    defense_rationale = str(rat)
+    return {
+        "defended_response": defended_response,
+        "defense_rationale": defense_rationale,
+        "blue_parse_failed": bool(raw.get("blue_parse_failed", False)),
+    }
 
 
 def _build_prompt_row(vuln: dict) -> str:
@@ -127,11 +135,13 @@ def export_jsonl(
 
     for smoke_path in smoke_paths:
         smoke = _load_smoke(smoke_path)
-        safe_map = _collect_safe_detail_rows(smoke)
+        last_detail_map = _collect_last_phase4_detail_rows(smoke)
         vuln_by_id = _collect_vuln_by_defense_id(smoke)
         session_id = str(smoke.get("session_id") or "")
 
-        for (sess, defense_id), detail in sorted(safe_map.items()):
+        for defense_id, detail in sorted(last_detail_map.items()):
+            if str(detail.get("verdict") or "").strip().lower() != "safe":
+                continue
             vuln = vuln_by_id.get(defense_id)
             if not vuln:
                 warnings.append(f"{smoke_path.name}: missing source_vulnerabilities for {defense_id}")
@@ -141,7 +151,20 @@ def export_jsonl(
             if not bundle:
                 warnings.append(f"{smoke_path.name}: cannot read defense JSON for {defense_id} ({rel})")
                 continue
-            prompt_text = _build_prompt_row(vuln)
+
+            # 규칙1) 파싱 실패/빈 응답은 학습셋에서 제외
+            if bool(bundle.get("blue_parse_failed", False)):
+                warnings.append(f"{smoke_path.name}: skip parse_failed defense for {defense_id}")
+                continue
+            if not str(bundle.get("defended_response") or "").strip():
+                warnings.append(f"{smoke_path.name}: skip empty defended_response for {defense_id}")
+                continue
+
+            # 실제 Phase3 실행과 일치: 저장된 최종 Blue 입력 프롬프트 원문을 우선 사용
+            prompt_text = str(vuln.get("blue_input_prompt") or "").strip()
+            if not prompt_text:
+                prompt_text = _build_prompt_row(vuln)
+                warnings.append(f"{smoke_path.name}: fallback prompt rebuild for {defense_id}")
             output_obj = {
                 "defended_response": bundle["defended_response"],
                 "defense_rationale": bundle["defense_rationale"],

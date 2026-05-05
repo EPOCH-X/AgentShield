@@ -86,3 +86,32 @@ def load_phase34_seed(path: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     """파일 경로에서 로드 후 synthetic phase1/phase2 결과를 반환한다."""
     patterns = load_patterns_json(path)
     return build_synthetic_phase_results(patterns)
+
+
+def truncate_phase34_seed(
+    phase1_result: dict[str, Any],
+    phase2_result: dict[str, Any],
+    max_cases: int | None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    스모크에서 --max-attacks 로 시드 건수를 맞출 때 사용한다.
+    Phase3와 동일하게 phase1 vulnerable_attacks 다음 phase2 results 순으로 자른다.
+    """
+    if max_cases is None or max_cases < 0:
+        return phase1_result, phase2_result
+
+    p1 = list(phase1_result.get("vulnerable_attacks") or [])
+    p2 = list((phase2_result or {}).get("results") or [])
+    take_p1 = min(len(p1), max_cases)
+    new_p1 = p1[:take_p1]
+    rest = max_cases - take_p1
+    new_p2 = p2[:rest] if rest > 0 else []
+
+    out1 = dict(phase1_result)
+    out1["vulnerable_attacks"] = new_p1
+    out1["total_scanned"] = len(new_p1)
+    out1["vulnerable_count"] = len(new_p1)
+
+    out2 = dict(phase2_result or {})
+    out2["results"] = new_p2
+    return out1, out2

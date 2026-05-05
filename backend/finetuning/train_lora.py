@@ -272,12 +272,13 @@ def _print_merge_gguf_hint(*, model_id: str, adapter_root: str) -> None:
     print(
         "\n[안내] FROM+ADAPTER 등록이 안 되는 경우(예: unsupported architecture):\n"
         "  로컬에서 HF merge → llama.cpp GGUF → ollama create 가 안정적입니다.\n"
-        "  예시 (프로젝트 루트에서, llama.cpp 경로만 본인 환경에 맞게):\n"
+        "  (llama.cpp 경로·이 Mac 고정값은 scripts/merge_peft_export_gguf_ollama.py 상단 [필독] 참고)\n"
+        "  예시 (프로젝트 루트에서, --llama-cpp 는 해당 파일의 절대 경로 사용):\n"
         f"  python scripts/merge_peft_export_gguf_ollama.py \\\n"
         f"    --base-model {model_id} \\\n"
         f"    --adapter {adapter_root} \\\n"
         "    --merged-hf exports/merged-hf \\\n"
-        "    --llama-cpp /path/to/llama.cpp \\\n"
+        "    --llama-cpp '/Users/parkjoyeong/Desktop/Park Joyeong/Class/Projects/3. final/llama.cpp' \\\n"
         "    --gguf-out exports/model-f16.gguf \\\n"
         "    --outtype f16 \\\n"
         "    --ollama-model my-blue-merged\n",

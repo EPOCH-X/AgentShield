@@ -40,7 +40,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from backend.core.phase34_seed import load_phase34_seed
+from backend.core.phase34_seed import load_phase34_seed, truncate_phase34_seed
 from backend.graph.llm_security_graph import run_scan, run_scan_phase34
 
 
@@ -543,6 +543,32 @@ def _last_phase4_verdict_by_defense_id(final_state: dict) -> dict[str, str]:
     return last
 
 
+def _last_phase4_detail_by_defense_id(final_state: dict) -> dict[str, dict]:
+    """phase4_history 순서대로 덮어써 defense_id별 최종 Phase4 detail(dict).
+
+    리뷰 MD의「방어 후 응답」은 라운드 1만 보면 빈 문자열인데 최종 라운드에는 채워진 경우가 있어,
+    최종 verdict와 동일하게 마지막 detail을 사용한다.
+    """
+    last: dict[str, dict] = {}
+    for entry in final_state.get("phase4_history") or []:
+        if not isinstance(entry, dict):
+            continue
+        for d in entry.get("details") or []:
+            if not isinstance(d, dict):
+                continue
+            did = str(d.get("defense_id") or "").strip()
+            if did:
+                last[did] = d
+    if not last:
+        p4 = final_state.get("phase4_result") or {}
+        for d in p4.get("details") or []:
+            if isinstance(d, dict):
+                did = str(d.get("defense_id") or "").strip()
+                if did:
+                    last[did] = d
+    return last
+
+
 def _short_summary(final_state: dict) -> dict:
     p1 = final_state.get("phase1_result", {}) or {}
     p2 = final_state.get("phase2_result", {}) or {}
@@ -674,7 +700,6 @@ def _write_review_log(final_state: dict, out_dir: Path, stem_suffix: str) -> Pat
     phase3 = final_state.get("phase3_result", {}) or {}
     phase4 = final_state.get("phase4_result", {}) or {}
     phase3_history = final_state.get("phase3_history") or []
-    phase4_history = final_state.get("phase4_history") or []
 
     source_rows: list[dict] = []
     defense_refs: list[tuple[int, str]] = []
@@ -707,24 +732,7 @@ def _write_review_log(final_state: dict, out_dir: Path, stem_suffix: str) -> Pat
         except Exception:
             continue
 
-    phase4_map: dict[tuple[int, str], dict] = {}
-    if phase4_history:
-        for idx, entry in enumerate(phase4_history, start=1):
-            if not isinstance(entry, dict):
-                continue
-            attempt = int(entry.get("attempt") or idx)
-            for d in entry.get("details") or []:
-                if not isinstance(d, dict):
-                    continue
-                defense_id = str(d.get("defense_id") or "")
-                if defense_id:
-                    phase4_map[(attempt, defense_id)] = d
-    else:
-        for d in phase4.get("details", []) or []:
-            if isinstance(d, dict):
-                defense_id = str(d.get("defense_id") or "")
-                if defense_id:
-                    phase4_map[(1, defense_id)] = d
+    phase4_last_by_defense_id = _last_phase4_detail_by_defense_id(final_state)
 
     lines: list[str] = []
     p1_seed = (final_state.get("phase1_result") or {}).get("seed_mode")
@@ -822,7 +830,7 @@ def _write_review_log(final_state: dict, out_dir: Path, stem_suffix: str) -> Pat
                 (attempt, defense_id),
                 defense_map_fallback.get(defense_id, {}),
             )
-            phase4_row = phase4_map.get((attempt, defense_id), {})
+            phase4_final = phase4_last_by_defense_id.get(defense_id, {})
 
             lines.append(f"## item {idx} (defense_id={defense_id}, attempt={attempt})")
             lines.append("")
@@ -869,13 +877,13 @@ def _write_review_log(final_state: dict, out_dir: Path, stem_suffix: str) -> Pat
                 lines.append("(방어코드 없음)")
             lines.append("")
             lines.append("### 4) 방어 후 응답 값")
-            after_resp = phase4_row.get("response_after_defense")
+            after_resp = phase4_final.get("response_after_defense")
             if after_resp in (None, ""):
                 lines.append("(방어 후 응답 없음)")
             else:
                 lines.append(_full_response_for_review(str(after_resp)))
             lines.append("")
-            benign_checks = phase4_row.get("benign_checks") or []
+            benign_checks = phase4_final.get("benign_checks") or []
             if benign_checks:
                 lines.append("### 5) Benign 테스트 로그")
                 for b_idx, check in enumerate(benign_checks, start=1):
@@ -991,6 +999,22 @@ async def _main(args: argparse.Namespace) -> int:
         if not seed_path.is_absolute():
             seed_path = PROJECT_ROOT / seed_path
         phase1_seed, phase2_seed = load_phase34_seed(seed_path)
+        if args.max_attacks is not None:
+            pre_n = len(phase1_seed.get("vulnerable_attacks") or []) + len(
+                (phase2_seed or {}).get("results") or []
+            )
+            phase1_seed, phase2_seed = truncate_phase34_seed(
+                phase1_seed, phase2_seed, args.max_attacks
+            )
+            post_n = len(phase1_seed.get("vulnerable_attacks") or []) + len(
+                (phase2_seed or {}).get("results") or []
+            )
+            print(
+                f"[INFO] [{_log_ts()}] phase34 seed capped by --max-attacks={args.max_attacks}: "
+                f"{pre_n} -> {post_n} cases (phase1={len(phase1_seed.get('vulnerable_attacks') or [])}, "
+                f"phase2={len((phase2_seed or {}).get('results') or [])})",
+                flush=True,
+            )
 
         with _patched_llm_runtime(args.llm_timeout, verbose=args.verbose_trace):
             final_state = await run_scan_phase34(
@@ -1103,7 +1127,8 @@ def parse_args() -> argparse.Namespace:
         "--max-attacks",
         type=int,
         default=None,
-        help="Phase1 공격 수 제한 (예: 20). 미지정 시 전체",
+        help="공격·시드 건수 상한: 일반 실행에서는 Phase1 로더 결과 길이, "
+        "--phase34-only에서는 시드의 phase1 vulnerable + phase2 결과 순으로 합산 후 자름. 미지정 시 전체",
     )
     parser.add_argument(
         "--phase2-rounds",

@@ -2,6 +2,13 @@
 """
 PEFT LoRA를 베이스에 merge → HF 폴더 저장 → (선택) llama.cpp로 GGUF → (선택) Ollama 등록.
 
+================================================================================
+[필독] llama.cpp 위치 (이 머신) — AgentShield 레포 내부에 클론하지 말 것.
+  --llama-cpp 는 항상 아래 경로(동일 수준 `3. final/llama.cpp`)를 쓴다.
+  /Users/parkjoyeong/Desktop/Park Joyeong/Class/Projects/3. final/llama.cpp
+  (과거에 AgentShield/.cache/llama.cpp 를 새로 클론해 쓰지 말 것. 혼동·해시 누락만 유발)
+================================================================================
+
 로컬 PEFT 추론(USE_LOCAL_PEFT=true)이 Mac에서 느리고 RAM을 많이 쓸 때,
 merge된 GGUF를 Ollama로 올리고 USE_LOCAL_PEFT=false + OLLAMA_BLUE_TARGET_MODEL 로 쓰는 용도.
 
@@ -12,13 +19,15 @@ GGUF 변환 실패 시 (BPE pre-tokenizer was not recognized / chkhsh):
   - 그래도 안 되면 저장소 안 `convert_hf_to_gguf_update.py` 실행 후 다시 변환 (HF 토큰 필요할 수 있음)
   - 참고: https://github.com/ggml-org/llama.cpp/issues/20116
 
-예시 (프로젝트 루트에서):
+예시 (프로젝트 루트에서, --llama-cpp 는 위 [필독] 절대 경로):
+  _LLC="/Users/parkjoyeong/Desktop/Park Joyeong/Class/Projects/3. final/llama.cpp"
+
   # Qwen3.5-4B 어댑터 (기본 출력 adapters/lora-blue-qwen 등)
   python scripts/merge_peft_export_gguf_ollama.py \\
     --base-model Qwen/Qwen3.5-4B \\
     --adapter adapters/lora-blue-qwen \\
     --merged-hf exports/qwen35-4b-blue-merged-hf \\
-    --llama-cpp ~/src/llama.cpp \\
+    --llama-cpp "$_LLC" \\
     --gguf-out exports/qwen35-4b-blue-f16.gguf \\
     --outtype f16 \\
     --ollama-model agentshield-blue-qwen35-4b
@@ -28,7 +37,7 @@ GGUF 변환 실패 시 (BPE pre-tokenizer was not recognized / chkhsh):
     --base-model Qwen/Qwen3.5-2B \\
     --adapter adapters/lora-blue \\
     --merged-hf exports/qwen35-2b-blue-merged-hf \\
-    --llama-cpp ~/src/llama.cpp \\
+    --llama-cpp "$_LLC" \\
     --gguf-out exports/qwen35-2b-blue-f16.gguf \\
     --outtype f16 \\
     --ollama-model agentshield-blue-qwen35-2b
@@ -42,7 +51,7 @@ GGUF 변환 실패 시 (BPE pre-tokenizer was not recognized / chkhsh):
   # GGUF만 이미 있으면 merge 생략
   python scripts/merge_peft_export_gguf_ollama.py --skip-merge \\
     --merged-hf exports/qwen35-2b-blue-merged-hf \\
-    --llama-cpp ~/src/llama.cpp \\
+    --llama-cpp "$_LLC" \\
     --gguf-out exports/qwen35-2b-blue-f16.gguf \\
     --ollama-model agentshield-blue-qwen35-2b
 """
@@ -283,7 +292,9 @@ def main() -> int:
         )
     else:
         print(
-            "\n[다음 단계] llama.cpp 가 있으면 (예: ~/src/llama.cpp):\n"
+            "\n[다음 단계] llama.cpp 가 있으면 --llama-cpp 로 넘기거나 수동 예:\n"
+            "  (이 Mac 고정 경로) "
+            "/Users/parkjoyeong/Desktop/Park Joyeong/Class/Projects/3. final/llama.cpp\n"
             f"  {args.python} <llama.cpp>/convert_hf_to_gguf.py \\\n"
             f"    {merged_hf} --outfile {gguf_out} --outtype {args.outtype}\n",
             flush=True,

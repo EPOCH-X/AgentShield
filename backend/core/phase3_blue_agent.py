@@ -4,6 +4,7 @@ Phase 3 — Blue Agent 방어 응답/코드 생성 오케스트레이션
 
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import logging
@@ -81,6 +82,10 @@ def _write_failure_raw_file(
     path = out_dir / f"blue_raw_{safe_id}.txt"
     path.write_text(raw, encoding="utf-8")
     return path
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -290,12 +295,45 @@ async def run_phase3(
             owasp_recommendation=owasp_recommendation,
             rag_defense_examples=rag_examples,
         )
+        prompt_sha256 = _sha256_text(prompt)
 
         try:
             # Blue 모델의 응답은 구조화(JSON)로 강제하고, 파싱 실패 시 해당 건만 실패 처리
             raw = await _maybe_await(llm.generate(prompt, role="blue"))
             bundle = parse_blue_response(raw)
+            blue_raw_failure_path = ""
+            if bundle.parse_failed and isinstance(raw, str) and raw.strip():
+                try:
+                    blue_raw_failure_path = str(
+                        _write_failure_raw_file(
+                            failure_raw_dir,
+                            defense_id=defense_id,
+                            raw=raw,
+                        ).relative_to(project_root)
+                    )
+                except Exception:
+                    blue_raw_failure_path = ""
             bundle.defended_response = mask_sensitive(bundle.defended_response)
+            defense_meta: dict[str, Any] = {
+                "subcategory": vuln.get("subcategory"),
+                "attack_prompt": attack_prompt,
+                "target_response": target_response,
+                "judge_reason": judge_detail,
+                "failure_mode": failure_mode,
+                "mitre_technique_id": mitre_technique_id,
+                # 학습/리플레이 일치성을 위해, 실제 llm.generate() 입력 원문을 그대로 저장한다.
+                "blue_input_prompt": prompt,
+                "blue_input_prompt_sha256": prompt_sha256,
+                "blue_input_prompt_parts": {
+                    "judge_detail": judge_detail,
+                    "owasp_recommendation": owasp_recommendation,
+                    "rag_defense_examples": rag_examples,
+                },
+            }
+            if bundle.parse_failed:
+                defense_meta["blue_parse_failed"] = True
+            if blue_raw_failure_path:
+                defense_meta["blue_raw_response_file"] = blue_raw_failure_path
             written = _write_defense_json_file(
                 defense_out_dir,
                 defense_id=defense_id,
@@ -304,14 +342,7 @@ async def run_phase3(
                 severity=vuln.get("severity"),
                 phase=vuln.get("phase"),
                 bundle=bundle,
-                metadata={
-                    "subcategory": vuln.get("subcategory"),
-                    "attack_prompt": attack_prompt,
-                    "target_response": target_response,
-                    "judge_reason": judge_detail,
-                    "failure_mode": failure_mode,
-                    "mitre_technique_id": mitre_technique_id,
-                },
+                metadata=defense_meta,
             )
             json_files.append(str(written.relative_to(project_root)))
 
@@ -353,6 +384,13 @@ async def run_phase3(
                     "judgment_confidence": vuln.get("judgment_confidence"),
                     "failure_mode": failure_mode,
                     "mitre_technique_id": mitre_technique_id,
+                    "blue_input_prompt": prompt,
+                    "blue_input_prompt_sha256": prompt_sha256,
+                    "blue_input_prompt_parts": {
+                        "judge_detail": judge_detail,
+                        "owasp_recommendation": owasp_recommendation,
+                        "rag_defense_examples": rag_examples,
+                    },
                 }
             )
             generated += 1
@@ -387,6 +425,13 @@ async def run_phase3(
                     "defense_id": defense_id,
                     "category": category or "",
                     "error": str(e),
+                    "blue_input_prompt": prompt,
+                    "blue_input_prompt_sha256": prompt_sha256,
+                    "blue_input_prompt_parts": {
+                        "judge_detail": judge_detail,
+                        "owasp_recommendation": owasp_recommendation,
+                        "rag_defense_examples": rag_examples,
+                    },
                     "raw_response_file": raw_failure_path,
                     "raw_response_preview": raw_preview,
                 }

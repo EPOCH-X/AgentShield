@@ -184,6 +184,7 @@ class BlueDefenseBundle:
 
     defended_response: str
     defense_rationale: str
+    parse_failed: bool = False
 
     def to_json_str(self) -> str:
         return json.dumps(
@@ -199,6 +200,7 @@ def _default_blue_bundle(reason: str = "") -> BlueDefenseBundle:
     return BlueDefenseBundle(
         defended_response="",
         defense_rationale=f"Blue parser fallback used. {reason}".strip(),
+        parse_failed=True,
     )
 
 
