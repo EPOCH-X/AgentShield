@@ -115,12 +115,37 @@ def _pick_lora_config(model) -> LoraConfig:
     return _default_lora_config()
 
 
+def _unsupported_qwen35_transformers_hint(model_id: str, cause: BaseException) -> RuntimeError:
+    """구버전 transformers가 qwen3_5 를 CONFIG_MAPPING 에 등록하지 않을 때 안내."""
+    try:
+        import transformers as _tf
+
+        ver = getattr(_tf, "__version__", "?")
+    except Exception:
+        ver = "?"
+    return RuntimeError(
+        f"모델 `{model_id}` 는 architecture `qwen3_5` 를 씁니다. "
+        f"현재 transformers({ver}) 가 이 타입을 인식하지 못합니다.\n\n"
+        "Colab 등에서는 다음으로 업그레이드하세요:\n"
+        "  pip install -U 'transformers>=5.3.0'\n"
+        "최신 릴리스로도 안 되면 소스 설치:\n"
+        "  pip install -U git+https://github.com/huggingface/transformers.git\n\n"
+        f"(원인: {cause})"
+    ) from cause
+
+
 def _load_base_model(model_id: str, use_quantization: bool, device_type: str):
     """
     텍스트 SFT에는 CausalLM 로딩이 맞다. 실패 시에만 qwen3_5 에 한해 ImageTextToText 폴백.
     """
     _trust = {"trust_remote_code": True}
-    cfg = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+    try:
+        cfg = AutoConfig.from_pretrained(model_id, trust_remote_code=True)
+    except (ValueError, KeyError) as e:
+        msg = str(e).lower()
+        if "qwen3_5" in msg or "does not recognize" in msg:
+            raise _unsupported_qwen35_transformers_hint(model_id, e) from e
+        raise
     mt = str(getattr(cfg, "model_type", "") or "").lower()
 
     def _from_cls(ModelCls):
@@ -182,6 +207,20 @@ def detect_device():
         return "mps"
     else:
         return "cpu"
+
+
+def _cuda_use_bf16_training() -> bool:
+    """
+    A100 등 Ampere+ 에서 bf16 권장. fp16+GradScaler 경로와 QLoRA/bnb 쪽 bf16 그래디언트가 겹치면
+    unscale 단계에서 NotImplementedError 가 날 수 있음 → bf16=True, fp16=False 로 통일.
+    Turing(T4) 등은 보통 False → 기존처럼 fp16.
+    """
+    if not torch.cuda.is_available():
+        return False
+    try:
+        return bool(torch.cuda.is_bf16_supported())
+    except Exception:
+        return False
 
 
 def _messages_from_row(instruction: str, input_text: str, output_text: str) -> list[dict]:
@@ -276,6 +315,11 @@ def train_role_adapter(
     print(f" - 출력 경로: {output_dir}")
     print(f" - 감지된 디바이스: {device_type}")
     print(f" - QLoRA 4-bit 양자화: {'ON' if use_quantization else 'OFF (bitsandbytes는 CUDA 전용)'}")
+    _cuda_bf16 = device_type == "cuda" and _cuda_use_bf16_training()
+    if device_type == "cuda":
+        print(
+            f" - mixed precision: {'bf16 (GradScaler 없음)' if _cuda_bf16 else 'fp16'}"
+        )
     if max_steps and max_steps > 0:
         print(f" - max_steps: {max_steps} (스모크 모드)")
     print(f" - dataset_format: {dataset_format}")
@@ -375,7 +419,6 @@ def train_role_adapter(
         max_length=2048,
         packing=False,
         report_to="none",
-        bf16=False,
         use_cpu=(device_type == "cpu"),
         assistant_only_loss=effective_assistant_only,
         completion_only_loss=_completion_only,
@@ -384,7 +427,8 @@ def train_role_adapter(
         sft_args = SFTConfig(
             per_device_train_batch_size=4,
             gradient_accumulation_steps=4,
-            fp16=True,
+            fp16=not _cuda_bf16,
+            bf16=_cuda_bf16,
             optim="paged_adamw_32bit",
             **sft_common,
         )
@@ -393,6 +437,7 @@ def train_role_adapter(
             per_device_train_batch_size=2,
             gradient_accumulation_steps=8,
             fp16=False,
+            bf16=False,
             optim="adamw_torch",
             **sft_common,
         )
