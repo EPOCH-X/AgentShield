@@ -124,7 +124,8 @@ scripts/calibrate_result.txtsocket/.s.PGSQL.*
 nohup.out
 # Added by code-review-graph
 .code-review-graph/
-.claude
+.claude/
+.claude/worktrees/
 .cursor
 .mcp.json
 .opencode.json
