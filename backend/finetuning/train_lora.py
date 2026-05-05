@@ -40,6 +40,7 @@ TRL 1.3.0 기준: SFTConfig + SFTTrainer(peft_config=) API 사용
 import os
 import shutil
 import sys
+import time
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.abspath(os.path.join(current_dir, "../../"))
 sys.path.append(project_root)
@@ -52,6 +53,9 @@ from transformers import (
     AutoTokenizer,
     BitsAndBytesConfig,
     PreTrainedTokenizerBase,
+    TrainerCallback,
+    TrainerControl,
+    TrainerState,
 )
 from peft import (
     LoraConfig,
