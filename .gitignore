@@ -125,3 +125,8 @@ nohup.out
 .mcp.json
 .opencode.json
 
+.claude/
+.code-review-graph/
+.cursor/
+.pycache_compile/
+.pycache_tmp/
