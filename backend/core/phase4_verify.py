@@ -97,6 +97,7 @@ def _register_defense_patterns_via_ingest(
             attack_prompt = str(payload.get("attack_prompt") or "").strip() or fallback_attack
             target_response = str(payload.get("target_response") or "").strip() or fallback_target
             failure_mode = str(payload.get("failure_mode") or "").strip() or fallback_failure_mode
+            defended_response = str(payload.get("defended_response") or "")
             judge_reason = str(
                 payload.get("judge_reason")
                 or payload.get("detail")
@@ -111,18 +112,18 @@ def _register_defense_patterns_via_ingest(
                         f"verify_result=safe; "
                         f"failure_mode={failure_mode}; "
                         f"judge_reason={judge_reason[:220]}; "
-                        f"defense_summary={str(payload.get('defended_response') or '')[:260]}"
+                        f"defense_summary={defended_response[:260]}"
                     ),
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
-                    "defended_response": str(payload.get("defended_response") or ""),
+                    "defended_response": defended_response,
                     "defense_rationale": str(payload.get("defense_rationale") or ""),
                     "judge_reason": judge_reason,
                     "failure_mode": failure_mode,
                     "verify_result": "safe",
                     "defense_code": json.dumps(
                         {
-                            "defended_response": str(payload.get("defended_response") or ""),
+                            "defended_response": defended_response,
                             "defense_rationale": str(payload.get("defense_rationale") or ""),
                         },
                         ensure_ascii=False,
@@ -257,7 +258,7 @@ async def _run_phase4(
     db_updated, db_failed_ids = await _persist_verify_results(details)
     chroma_saved = 0
     chroma_failed_ids: list[str] = []
-    if passed_threshold:
+    if safe_count > 0:
         chroma_saved, chroma_failed_ids = _register_defense_patterns_via_ingest(
             session_id=session_id,
             payload_rows=payload_rows,
@@ -267,7 +268,6 @@ async def _run_phase4(
 
     return {
         "session_id": session_id,
-        "mode": "defended_response_only",
         "total_tested": total_tested,
         "safe": safe_count,
         "unsafe": unsafe_count,
