@@ -61,10 +61,8 @@ data/**
 *.jsonl
 models/
 
-# Adapters — LoRA/PEFT 산출물·체크포인트는 로컬·코랩·드라이브에만 둠(용량·바이너리)
-adapters/**
-!adapters/**/
-!adapters/**/README.md
+# Adapters — LoRA/PEFT 산출물 전부 무시(README 예외 없음 → git status 에 안 뜸)
+adapters/
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
