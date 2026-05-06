@@ -207,17 +207,31 @@ def hf_generate(
 
     model.eval()
 
+    gen_cfg = getattr(model, "generation_config", None)
+    eos_for_gen = getattr(gen_cfg, "eos_token_id", None) if gen_cfg is not None else None
+    if eos_for_gen is None:
+        eos_for_gen = tok.eos_token_id
+
     with torch.no_grad():
         out = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
             do_sample=False,
             pad_token_id=tok.pad_token_id,
-            eos_token_id=tok.eos_token_id,
+            eos_token_id=eos_for_gen,
         )
 
     gen_ids = out[0, input_len:]
-    return tok.decode(gen_ids, skip_special_tokens=True)
+    text = tok.decode(gen_ids, skip_special_tokens=True)
+    if not text.strip():
+        raw_no_skip = tok.decode(gen_ids, skip_special_tokens=False)
+        print(
+            "  [hf-debug] empty decode after skip_special_tokens — "
+            f"new_token_count={int(gen_ids.numel())}, "
+            f"first_ids={gen_ids[:24].tolist() if gen_ids.numel() else []}"
+        )
+        print(f"  [hf-debug] decode(skip_special_tokens=False)[:300]={raw_no_skip[:300]!r}")
+    return text
 
 
 def print_stage_header(name: str) -> None:
