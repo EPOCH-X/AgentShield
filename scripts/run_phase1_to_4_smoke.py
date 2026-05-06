@@ -416,6 +416,7 @@ def _patched_phase1_loader(
 ):
     """phase1_scanner의 공격 로더를 테스트 옵션에 맞게 임시 패치."""
     from backend.core import phase1_scanner
+    from backend.config import settings
 
     original_loader = phase1_scanner._load_attacks
 
@@ -423,7 +424,16 @@ def _patched_phase1_loader(
         requested_category: str | None = None, max_attacks_inner: int | None = None
     ) -> list[dict]:
         selected_category = category if category is not None else requested_category
-        attacks = await original_loader(selected_category, max_attacks_inner)
+        forced_file_mode = bool(getattr(settings, "ATTACK_PATTERN_PATH", "").strip())
+        if forced_file_mode:
+            # 스모크 실행에서 ATTACK_PATTERN_PATH가 있으면 DB를 완전히 우회한다.
+            attacks = await phase1_scanner._load_attack_patterns_from_file(
+                selected_category, max_attacks_inner
+            )
+            source = "file-only(forced)"
+        else:
+            attacks = await original_loader(selected_category, max_attacks_inner)
+            source = "file/db(auto)"
         if shuffle:
             rng = random.Random(seed)
             rng.shuffle(attacks)
@@ -431,7 +441,7 @@ def _patched_phase1_loader(
         if effective_max is not None and effective_max >= 0:
             attacks = attacks[:effective_max]
         print(
-            f"[INFO] [{_log_ts()}] phase1 attack file/db load done: {len(attacks)} items",
+            f"[INFO] [{_log_ts()}] phase1 attack {source} load done: {len(attacks)} items",
             flush=True,
         )
         return attacks
