@@ -281,6 +281,21 @@ def _messages_from_row(instruction: str, input_text: str, output_text: str) -> l
     ]
 
 
+def _chat_text_from_row(
+    tokenizer: PreTrainedTokenizerBase,
+    instruction: str,
+    input_text: str,
+    output_text: str,
+) -> str:
+    """JSONL 한 행 -> chat_template 렌더 문자열(text)."""
+    messages = _messages_from_row(instruction, input_text, output_text)
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False,
+    )
+
+
 def _prompt_completion_strings_from_row(
     tokenizer: PreTrainedTokenizerBase,
     instruction: str,
@@ -353,7 +368,8 @@ def train_role_adapter(
     max_steps > 0 이면 해당 스텝만 돌리고 종료(스모크/디버그용).
     ollama_from 이 있으면 Modelfile의 FROM 및 ollama create 시도.
     dataset_format prompt_completion: completion(JSON)에만 loss — Blue 목표에 맞춤.
-    dataset_format messages: assistant_only_loss 로 assistant 구간만 loss(템플릿 지원 시).
+    dataset_format chat_text: messages를 chat_template 문자열(text)로 렌더해 학습.
+    dataset_format messages: 구형 messages 컬럼(assistant_only_loss 템플릿 지원 시 사용).
     """
     device_type = detect_device()
     use_quantization = device_type == "cuda"
@@ -431,6 +447,26 @@ def train_role_adapter(
 
         train_ds = dataset["train"].map(
             _batch_to_pc,
+            batched=True,
+            remove_columns=dataset["train"].column_names,
+        )
+    elif dataset_format == "chat_text":
+
+        def _batch_to_text(batch: dict) -> dict:
+            texts = []
+            for i in range(len(batch["instruction"])):
+                texts.append(
+                    _chat_text_from_row(
+                        tokenizer,
+                        batch["instruction"][i],
+                        batch["input"][i],
+                        batch["output"][i],
+                    )
+                )
+            return {"text": texts}
+
+        train_ds = dataset["train"].map(
+            _batch_to_text,
             batched=True,
             remove_columns=dataset["train"].column_names,
         )
@@ -579,9 +615,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--dataset-format",
-        choices=["prompt_completion", "messages"],
+        choices=["prompt_completion", "chat_text", "messages"],
         default="prompt_completion",
-        help="prompt_completion: user/assistant 분리 + completion에만 loss(기본). messages: 구형 messages 컬럼.",
+        help="prompt_completion: completion-only(기본), chat_text: apply_chat_template 문자열, messages: 구형 messages 컬럼.",
     )
     parser.add_argument(
         "--full-sequence-loss",

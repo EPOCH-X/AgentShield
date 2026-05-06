@@ -169,10 +169,27 @@ def _run_gguf_convert(
     print(f"[gguf] 완료: {gguf_out}", flush=True)
 
 
-def _write_modelfile(gguf_out: Path, modelfile: Path) -> None:
+def _write_modelfile(gguf_out: Path, modelfile: Path, template_mode: str = "auto") -> None:
     # Modelfile은 GGUF와 같은 디렉터리에 두고 상대 경로로 FROM (ollama create cwd 기준)
     name = gguf_out.name
-    modelfile.write_text(f"FROM ./{name}\n", encoding="utf-8")
+    base = f"FROM ./{name}\n"
+    mode = (template_mode or "auto").strip().lower()
+    if mode == "auto":
+        mode = "qwen_chatml" if "qwen" in name.lower() else "none"
+
+    if mode == "qwen_chatml":
+        base += (
+            "\n"
+            "PARAMETER stop \"<|im_end|>\"\n"
+            "PARAMETER stop \"<|im_start|>\"\n"
+            "\n"
+            "TEMPLATE \"\"\"{{- range .Messages }}<|im_start|>{{ .Role }}\n"
+            "{{ .Content }}<|im_end|>\n"
+            "{{ end }}<|im_start|>assistant\n"
+            "\"\"\"\n"
+        )
+
+    modelfile.write_text(base, encoding="utf-8")
 
 
 def _run_ollama_create(*, ollama_model: str, modelfile_dir: Path) -> None:
@@ -234,12 +251,18 @@ def main() -> int:
         default=sys.executable,
         help="convert_hf_to_gguf.py 실행에 쓸 Python (llama.cpp 권장: 같은 venv 또는 시스템 python3)",
     )
+    ap.add_argument(
+        "--modelfile-template",
+        choices=["auto", "none", "qwen_chatml"],
+        default="auto",
+        help="ollama create 시 Modelfile TEMPLATE/stop 삽입 방식",
+    )
     args = ap.parse_args()
 
-    # convert subprocess cwd=llama.cpp 이므로 상대 경로 python 은 프로젝트 루트 기준으로 절대화
+    # convert subprocess cwd=llama.cpp 이므로 상대 python 경로를 절대 경로로 보존(심볼릭 링크 해제 금지)
     _py = Path(args.python).expanduser()
     if not _py.is_absolute():
-        _py = (root / _py).resolve()
+        _py = (root / _py).absolute()
     args.python = str(_py)
 
     adapter_dir = (root / args.adapter).resolve()
@@ -310,7 +333,7 @@ def main() -> int:
             return 1
         mf_dir = gguf_out.parent
         mf_path = mf_dir / "Modelfile"
-        _write_modelfile(gguf_out, mf_path)
+        _write_modelfile(gguf_out, mf_path, args.modelfile_template)
         print(f"[ollama] Modelfile 작성: {mf_path}", flush=True)
         _run_ollama_create(ollama_model=args.ollama_model, modelfile_dir=mf_dir)
 
