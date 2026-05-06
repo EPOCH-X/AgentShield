@@ -24,7 +24,7 @@ GGUF 변환 실패 시 (BPE pre-tokenizer was not recognized / chkhsh):
   # Qwen3.5-2B 어댑터 (기본 출력 adapters/lora-blue-qwen 등)
   python merge_peft_export_gguf_ollama.py ^
   --base-model Qwen/Qwen3.5-2B ^
-  --adapter AgentShield/adapter ^
+  --adapter AgentShield/adapters ^
   --merged-hf AgentShield/merged ^
   --llama-cpp C:/Pyg/final_project/AgentShield/llama.cpp ^
   --gguf-out AgentShield/gguf/judge-f16.gguf ^
