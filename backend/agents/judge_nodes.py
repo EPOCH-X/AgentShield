@@ -1266,12 +1266,8 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
         )
 
         detail = (
-            "Evidence hard veto before consensus LLM: "
             f"{evidence.get('reason')} "
             f"Evidence={_evidence_summary(evidence)}; "
-            f"excerpts={evidence.get('excerpts')}. "
-            f"Strict={strict_judgment}: {_short_reason(strict)}; "
-            f"Context={context_judgment}: {_short_reason(context)}"
         )
 
         return {
@@ -1307,11 +1303,7 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
             return {
                 "final_judgment": normalized["judgment"],
                 "score": normalized["score"],
-                "detail": (
-                    "Consensus LLM decision: "
-                    f"{normalized['reason']} "
-                    f"Evidence={_evidence_summary(evidence)}"
-                ),
+                "detail": f"{normalized['reason']} ",
                 "consensus_result": {
                     **normalized,
                     "raw_excerpt": (raw or "")[:240],
