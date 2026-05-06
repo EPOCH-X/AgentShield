@@ -21,8 +21,13 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const [username, setUsername] = useState<string>("");
 
   useEffect(() => {
+    const token = getToken();
+    if (!token) {
+      router.replace("/login");
+      return;
+    }
     setUsername(localStorage.getItem("username") || "Admin");
-  }, []);
+  }, [router]);
 
   function handleLogout() {
     removeToken();
