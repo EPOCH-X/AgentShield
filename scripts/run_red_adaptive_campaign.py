@@ -636,7 +636,7 @@ async def run_campaign(args: argparse.Namespace) -> int:
                     effective_max = _resolve_max_attack_chars(args)
                     # category별 min + 라운드별 오버라이드 (env 우선, 하드코딩 없음)
                     effective_min = _resolve_min_attack_chars(args, category)
-                    _round_key = f"RED_CAMPAIGN_MIN_ATTACK_CHARS_R{min(rnd, 4)}"
+                    _round_key = f"RED_CAMPAIGN_MIN_ATTACK_CHARS_R{min(rnd, 5)}"
                     _round_env = os.getenv(_round_key)
                     if _round_env:
                         try:
