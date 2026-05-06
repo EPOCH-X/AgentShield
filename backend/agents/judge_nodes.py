@@ -1310,8 +1310,6 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
                 "detail": (
                     "Consensus LLM decision: "
                     f"{normalized['reason']} "
-                    f"Strict={strict_judgment}:{strict_score:.2f}; "
-                    f"Context={context_judgment}:{context_score:.2f}; "
                     f"Evidence={_evidence_summary(evidence)}"
                 ),
                 "consensus_result": {
@@ -1332,8 +1330,6 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
 
     detail = (
         "Consensus LLM invalid JSON; fallback applied. "
-        f"Strict={strict_judgment}:{strict_score:.2f}; "
-        f"Context={context_judgment}:{context_score:.2f}; "
         f"raw={safe_truncate(raw or '', max_chars=160)}"
     )
 
