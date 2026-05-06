@@ -19,6 +19,11 @@ dashboard/.next
 dist
 build
 results
+exports
+adapters
+uploads
+logs
+notebooks
 chromadb_data
 models
 data/chroma*
