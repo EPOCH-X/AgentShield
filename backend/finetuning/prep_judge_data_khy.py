@@ -599,50 +599,35 @@ class SFTProcessor:
             print(f"{key}: {value}")
 
         # -----------------------------
-        # 데이터 밸런싱
+        # 데이터 병합
+        # - 작은 데이터셋이므로 강제 밸런싱하지 않음
+        # - vulnerable / safe 샘플을 모두 사용
         # -----------------------------
         counts = {
             label: len(items)
             for label, items in grouped_samples.items()
-            if items
         }
 
-        if not counts:
+        print("\n[라벨 분포]")
+        print(f"vulnerable: {counts.get('vulnerable', 0)}")
+        print(f"safe: {counts.get('safe', 0)}")
+
+        all_rows = (
+            grouped_samples["vulnerable"]
+            + grouped_samples["safe"]
+        )
+
+        if not all_rows:
             print("유효 데이터 없음")
             return ""
 
-        if "vulnerable" not in counts or "safe" not in counts:
-            print("[경고] vulnerable/safe 중 한쪽 데이터가 부족합니다.")
+        random.shuffle(all_rows)
 
-            all_rows = grouped_samples["vulnerable"] + grouped_samples["safe"]
-            random.shuffle(all_rows)
-
-            print(f"[최종 학습 샘플 수] {len(all_rows)}")
-
-            return "\n".join(
-                json.dumps(row, ensure_ascii=False)
-                for row in all_rows
-            )
-
-        min_count = min(counts.values())
-
-        print(f"\n[밸런싱] 각 라벨 {min_count}개")
-        print(f"vulnerable: {len(grouped_samples['vulnerable'])} → {min_count}")
-        print(f"safe: {len(grouped_samples['safe'])} → {min_count}")
-
-        balanced = []
-
-        for label, items in grouped_samples.items():
-            sampled = random.sample(items, min_count)
-            balanced.extend(sampled)
-
-        random.shuffle(balanced)
-
-        print(f"[최종 학습 샘플 수] {len(balanced)}")
+        print(f"[최종 학습 샘플 수] {len(all_rows)}")
 
         return "\n".join(
             json.dumps(row, ensure_ascii=False)
-            for row in balanced
+            for row in all_rows
         )
 
 
