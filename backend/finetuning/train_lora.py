@@ -26,7 +26,7 @@ TRL 1.3.0 기준: SFTConfig + SFTTrainer(peft_config=) API 사용
 학습 설정 (개요):
   베이스: --model-id (HF). 양자화: CUDA만 QLoRA 4-bit.
   LoRA: Gemma4는 target linear; 그 외 q_proj,v_proj,k_proj,o_proj.
-  epochs=3, lr=2e-4, max_seq=2048 (SFTConfig)
+  epochs=5, lr=2e-4, max_seq=2048 (SFTConfig)
 
 로더: AutoModelForCausalLM 을 먼저 시도하고, 실패 시에만 qwen3_5 에 대해 ImageTextToText 폴백.
   텍스트 SFT에는 HF 텍스트 전용 Instruct/CausalLM 체크포인트를 쓰는 것이 가장 안전하다.
@@ -494,7 +494,7 @@ def train_role_adapter(
     _completion_only = completion_only_loss if dataset_format == "prompt_completion" else False
     sft_common = dict(
         output_dir=output_dir,
-        num_train_epochs=3,
+        num_train_epochs=5,
         max_steps=max_steps if max_steps and max_steps > 0 else -1,
         learning_rate=2e-4,
         lr_scheduler_type="cosine",
