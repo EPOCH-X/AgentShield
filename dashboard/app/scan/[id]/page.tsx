@@ -77,14 +77,16 @@ function ResultCard({ result, index }: { result: ScanResult; index: number }) {
       </div>
 
       <div className="p-5 space-y-3">
-        {/* Step 1: 공격 프롬프트 */}
+        {/* Step 1: 판정 이유 */}
         <div className="flex gap-3">
           <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-error/10 border border-error/20 flex items-center justify-center mt-0.5">
-            <span className="text-[10px]">🗡</span>
+            <span className="material-symbols-outlined text-[12px] text-error/70" style={{ fontVariationSettings: "'FILL' 1" }}>psychology</span>
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[9px] font-black text-error/60 uppercase tracking-widest mb-1">공격 프롬프트</p>
-            <p className="text-xs font-mono text-on-surface/80 leading-relaxed line-clamp-2">{result.attack_prompt}</p>
+            <p className="text-[9px] font-black text-error/60 uppercase tracking-widest mb-1">판정 에이전트 · 위험 판단 이유</p>
+            <p className="text-xs text-on-surface/80 leading-relaxed line-clamp-2" style={{ whiteSpace: "pre-line" }}>
+              {(result.summary || `${result.category} 카테고리 취약점이 탐지되었습니다.`).replace(/\. /g, ".\n")}
+            </p>
           </div>
         </div>
 
@@ -212,11 +214,16 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
   const fetchStatus = useCallback(async () => {
     try {
+      const isMock = sessionId === "mock-session-demo";
       let s: ScanStatus;
-      try {
-        s = await getScanStatus(sessionId);
-      } catch {
+      if (isMock) {
         s = { ...MOCK_SCAN_STATUS, session_id: sessionId };
+      } else {
+        try {
+          s = await getScanStatus(sessionId);
+        } catch {
+          s = { ...MOCK_SCAN_STATUS, session_id: sessionId };
+        }
       }
       setStatus(s);
       elapsedRef.current = s.elapsed_seconds || elapsedRef.current;
@@ -229,46 +236,46 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
         } else {
           addLog("SCAN", `${phaseLabel} 실행 중... (${s.completed_tests}/${s.total_tests})`);
         }
-        // 스캔 중에도 부분 결과 폴링
-        try {
-          const partial = await getScanResults(sessionId);
-          enqueueNewResults(partial);
-          const last = partial.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
-          if (last) setLatestAttackPrompt(last);
-        } catch {
-          // 백엔드 없으면 일부 mock 결과를 서서히 노출
-          const mockPartial = MOCK_SCAN_RESULTS.slice(0, Math.min(
-            Math.ceil((s.completed_tests / s.total_tests) * MOCK_SCAN_RESULTS.length),
-            MOCK_SCAN_RESULTS.length
-          )).map((r) => ({ ...r, session_id: sessionId }));
-          enqueueNewResults(mockPartial);
+        if (!isMock) {
+          try {
+            const partial = await getScanResults(sessionId);
+            enqueueNewResults(partial);
+            const last = partial.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
+            if (last) setLatestAttackPrompt(last);
+          } catch {
+            const mockPartial = MOCK_SCAN_RESULTS.slice(0, Math.min(
+              Math.ceil((s.completed_tests / s.total_tests) * MOCK_SCAN_RESULTS.length),
+              MOCK_SCAN_RESULTS.length
+            )).map((r) => ({ ...r, session_id: sessionId }));
+            enqueueNewResults(mockPartial);
+          }
         }
       }
 
       if (s.status === "completed") {
         addLog("DONE", "스캔 완료. 최종 결과를 불러오는 중...");
         let r: ScanResult[];
-        try {
-          r = await getScanResults(sessionId);
-          if (r.length === 0 && (s.vulnerable_count > 0 || s.safe_count > 0)) {
-            // 결과가 비어있지만 카운트는 있음 → 재시도
-            await new Promise((res) => setTimeout(res, 1500));
-            r = await getScanResults(sessionId);
-          }
-        } catch {
-          r = [];
-        }
-        if (r.length === 0) {
+        if (isMock) {
           r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
+        } else {
+          try {
+            r = await getScanResults(sessionId);
+            if (r.length === 0 && (s.vulnerable_count > 0 || s.safe_count > 0)) {
+              await new Promise((res) => setTimeout(res, 1500));
+              r = await getScanResults(sessionId);
+            }
+          } catch {
+            r = [];
+          }
+          if (r.length === 0) {
+            r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
+          }
         }
-        // 완료된 스캔은 드립 없이 한 번에 전부 표시
         const fresh = r.filter((x) => !seenIds.current.has(x.id));
         fresh.forEach((x) => seenIds.current.add(x.id));
         if (fresh.length > 0) {
           setDisplayedResults(fresh.slice().reverse());
         }
-        const lastAttack = r.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
-        if (lastAttack) setLatestAttackPrompt(lastAttack);
         if (pollRef.current) clearInterval(pollRef.current);
       } else if (s.status === "failed") {
         addLog("ERROR", "스캔 중 오류가 발생했습니다.");
@@ -373,9 +380,18 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
             {isDone ? (
               <button
                 onClick={() => router.push(`/report/${sessionId}`)}
-                className="h-12 px-5 rounded-xl bg-tertiary/10 text-tertiary flex items-center gap-2 hover:bg-tertiary/20 transition-all border border-tertiary/20 font-bold text-sm"
+                className="h-12 px-6 rounded-xl flex items-center gap-2 font-black text-sm transition-all"
+                style={{
+                  background: "linear-gradient(135deg, #0ea5a5 0%, #14b8a6 100%)",
+                  color: "#fff",
+                  boxShadow: "0 0 20px rgba(14,165,165,0.5), 0 4px 12px rgba(0,0,0,0.3)",
+                  border: "1px solid rgba(14,165,165,0.6)",
+                  letterSpacing: "0.05em",
+                }}
+                onMouseEnter={e => (e.currentTarget.style.boxShadow = "0 0 32px rgba(14,165,165,0.75), 0 4px 16px rgba(0,0,0,0.4)")}
+                onMouseLeave={e => (e.currentTarget.style.boxShadow = "0 0 20px rgba(14,165,165,0.5), 0 4px 12px rgba(0,0,0,0.3)")}
               >
-                <span className="material-symbols-outlined text-sm">picture_as_pdf</span>보고서
+                <span className="material-symbols-outlined text-base" style={{ fontVariationSettings: "'FILL' 1" }}>picture_as_pdf</span>보고서 보기
               </button>
             ) : (
               <button

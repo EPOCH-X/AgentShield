@@ -3,6 +3,7 @@ AgentShield_R5_Codex_작업가이드.md
 /monitoring_proxy/docs
 # Python
 __pycache__/
+.pycache_*/
 *.py[cod]
 *.egg-info/
 dist/
@@ -60,9 +61,25 @@ data/**
 !data/**/README.md
 *.jsonl
 models/
+<<<<<<< HEAD
 
 # Adapters — LoRA/PEFT 산출물 전부 무시(README 예외 없음 → git status 에 안 뜸)
 adapters/
+=======
+data/attack_patterns/*.csv
+data/phase3_defenses/
+data/phase3_failures/
+data/defense_patterns/phase4_verified_*.json
+data/red_campaigns/
+!data/attack_patterns/README.md
+!data/defense_patterns/README.md
+!data/finetuning/README.md
+
+# Model artifacts (학습/변환 결과)
+adapters/
+merged/
+gguf/
+>>>>>>> origin/develop
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
@@ -112,21 +129,23 @@ docker-compose.override.yml
 exports/
 
 results/
+<<<<<<< HEAD
 
 # 로컬 스크립트 산출물·Postgres 소켓 잔재
 scripts/calibrate_result.txt
 **/.s.PGSQL.*
+=======
+scripts/calibrate_result.txtsocket/.s.PGSQL.*
+>>>>>>> origin/develop
 
 nohup.out
 # Added by code-review-graph
 .code-review-graph/
-.claude
+.claude/
+.claude/worktrees/
 .cursor
 .mcp.json
 .opencode.json
 
-.claude/
-.code-review-graph/
-.cursor/
-.pycache_compile/
-.pycache_tmp/
+
+
