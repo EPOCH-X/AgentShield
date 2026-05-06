@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
+import ChatbotTestModal from "../../components/ChatbotTestModal";
 import { startScan } from "../../lib/api";
 import { MOCK_RECENT_SCANS } from "../../lib/mockClientData";
 
@@ -65,6 +66,7 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
+  const [chatbotTestOpen, setChatbotTestOpen] = useState(false);
 
   useEffect(() => {
     try {
@@ -278,6 +280,31 @@ export default function ScanPage() {
                   </div>
                 )}
               </div>
+
+              {/* 챗봇 테스트 */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-primary/15 bg-primary/5 px-5 py-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-primary text-xl">forum</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-extrabold text-on-surface font-headline">
+                      테스트베드 챗봇 직접 호출
+                    </p>
+                    <p className="mt-1 text-xs text-on-surface-variant/70">
+                      한 문장 프롬프트를 보내 실제 타겟 응답과 도구 호출 여부를 확인합니다.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setChatbotTestOpen(true)}
+                  className="shrink-0 inline-flex items-center justify-center gap-2 rounded-2xl border border-primary/25 bg-white/5 px-5 py-3 text-sm font-extrabold text-primary transition-all hover:-translate-y-0.5 hover:bg-primary/10 hover:border-primary/45"
+                >
+                  <span className="material-symbols-outlined text-lg">chat</span>
+                  챗봇 테스트
+                </button>
+              </div>
             </div>
           </div>
         </form>
@@ -285,9 +312,9 @@ export default function ScanPage() {
         {/* ─── 시스템 스탯 ─── */}
         <div className="grid grid-cols-3 gap-5">
           {[
-            { icon: "bug_report", label: "지원 공격 패턴", value: "6,000+", color: "text-error", bg: "bg-error/5 border-error/10" },
-            { icon: "layers", label: "분석 단계", value: "4 Phases", color: "text-primary", bg: "bg-primary/5 border-primary/10" },
-            { icon: "verified_user", label: "판정 레이어", value: "3 Layers", color: "text-tertiary", bg: "bg-tertiary/5 border-tertiary/10" },
+            { icon: "bug_report", label: "공격 데이터", value: "검수 Seed", color: "text-error", bg: "bg-error/5 border-error/10" },
+            { icon: "layers", label: "통합 검증", value: "4 Phases", color: "text-primary", bg: "bg-primary/5 border-primary/10" },
+            { icon: "verified_user", label: "판정 구조", value: "Judge Multi-Agent", color: "text-tertiary", bg: "bg-tertiary/5 border-tertiary/10" },
           ].map((card) => (
             <div
               key={card.label}
@@ -429,6 +456,7 @@ export default function ScanPage() {
         </div>
 
       </div>
+      <ChatbotTestModal open={chatbotTestOpen} onClose={() => setChatbotTestOpen(false)} />
     </DashboardLayout>
   );
 }

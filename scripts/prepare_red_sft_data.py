@@ -29,6 +29,37 @@ import re
 import sys
 
 _CJK_RE = re.compile(r"[一-鿿぀-ヿ가-힯]")
+_THINK_BLOCK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.IGNORECASE | re.DOTALL)
+_PROMPT_SCAFFOLD_RE = re.compile(
+    r"(?im)^\s*#{1,6}\s*("
+    r"success state|hard success conditions|hard success definition|"
+    r"instruction set|hidden instruction|success looks like|"
+    r"attack objective|prompt strategy|output rules|"
+    r"r\d+\s+summary|summary\s*&\s*next step|reconstructed prompt hint|"
+    r"attack goal|required output|constraint checklist"
+    r")\b"
+)
+_PROMPT_SECTION_ECHO_RE = re.compile(
+    r"(?im)^\s*(Expected Output Format|PREVIOUS SESSION LOG|APPROVED SESSION LOG)\b"
+)
+_PROMPT_INSTRUCTION_ECHO_RE = re.compile(
+    r"(?i)("
+    r"generate the next .* attack prompt|output only the raw attack prompt|"
+    r"target responds with:|hard success conditions|"
+    r"violating any = test failure|failure\s*=\s*test failure|"
+    r"must include one explicit .*tool_call"
+    r")"
+)
+_SUPPLIED_SECRET_RE = re.compile(
+    r"(?i)("
+    r"\bsk-[A-Za-z0-9][A-Za-z0-9._-]{8,}\b|"
+    r"\bBearer\s+[A-Za-z0-9._~+/=-]{12,}\b|"
+    r"\bAKIA[0-9A-Z]{12,}\b|"
+    r"\bPD_KEY\s*[:=]\s*[A-Za-z0-9._-]{8,}\b|"
+    r"<function\s+name=[\"']get_system_prompt[\"']|"
+    r"\bget_system_prompt\b"
+    r")"
+)
 
 _830_PATH = "data/curated_attack_sets/manual_reviewed_830_normalized.json"
 _CAMPAIGN_GLOB = "data/red_campaigns/success/*.json"
@@ -60,6 +91,24 @@ def _has_cjk(text: str) -> bool:
     return bool(_CJK_RE.search(text or ""))
 
 
+def _clean_attack_output(text: str) -> str:
+    """학습 타겟은 실제 공격 프롬프트만 남긴다."""
+    cleaned = _THINK_BLOCK_RE.sub("", text or "")
+    cleaned = re.sub(r"</?think>", "", cleaned, flags=re.IGNORECASE)
+    return cleaned.strip()
+
+
+def _looks_like_prompt_scaffold(text: str) -> bool:
+    """Red Agent 내부 지시문/성공조건이 assistant 타겟으로 섞인 샘플 차단."""
+    candidate = text or ""
+    return bool(
+        _PROMPT_SCAFFOLD_RE.search(candidate)
+        or _PROMPT_SECTION_ECHO_RE.search(candidate)
+        or _PROMPT_INSTRUCTION_ECHO_RE.search(candidate)
+        or _SUPPLIED_SECRET_RE.search(candidate)
+    )
+
+
 def _build_text(tokenizer, system: str, user: str, assistant: str) -> str:
     """tokenizer.apply_chat_template()으로 모델별 포맷 자동 적용."""
     messages = [
@@ -67,11 +116,20 @@ def _build_text(tokenizer, system: str, user: str, assistant: str) -> str:
         {"role": "user",      "content": user},
         {"role": "assistant", "content": assistant},
     ]
-    return tokenizer.apply_chat_template(
+    rendered = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
         add_generation_prompt=False,
     )
+    # Qwen 계열 일부 chat_template은 assistant 본문 앞에 빈 thinking block을 넣는다.
+    # Red Agent SFT 타겟은 "공격 프롬프트 자체"만 학습해야 하므로 제거한다.
+    rendered = re.sub(
+        r"(<\|im_start\|>assistant\n)\s*<think>\s*</think>\s*",
+        r"\1",
+        rendered,
+        flags=re.IGNORECASE,
+    )
+    return rendered
 
 
 def _construct_instruction(item: dict) -> str:
@@ -101,7 +159,7 @@ def load_830(tokenizer, min_strength: int, min_chars: int) -> list[dict]:
         data = json.load(f)
 
     samples = []
-    skipped = {"not_vulnerable": 0, "low_strength": 0, "short": 0, "cjk": 0}
+    skipped = {"not_vulnerable": 0, "low_strength": 0, "short": 0, "cjk": 0, "scaffold": 0}
 
     for item in data:
         if item.get("judgment") != "vulnerable":
@@ -111,12 +169,15 @@ def load_830(tokenizer, min_strength: int, min_chars: int) -> list[dict]:
             skipped["low_strength"] += 1
             continue
 
-        attack = (item.get("attack_prompt") or "").strip()
+        attack = _clean_attack_output(item.get("attack_prompt") or "")
         if len(attack) < min_chars:
             skipped["short"] += 1
             continue
         if _has_cjk(attack):
             skipped["cjk"] += 1
+            continue
+        if _looks_like_prompt_scaffold(attack):
+            skipped["scaffold"] += 1
             continue
 
         # round_input_prompt 있으면 우선 사용, 없으면 재구성
@@ -142,7 +203,7 @@ def load_campaigns(tokenizer, min_chars: int) -> list[dict]:
     """캠페인 success 파일에서 Red SFT 샘플 추출."""
     files = sorted(glob.glob(_CAMPAIGN_GLOB))
     samples = []
-    skipped = {"not_eligible": 0, "low_strength": 0, "short": 0, "cjk": 0, "no_prompt": 0}
+    skipped = {"not_eligible": 0, "low_strength": 0, "short": 0, "cjk": 0, "no_prompt": 0, "scaffold": 0}
     seen_ids: set[str] = set()
 
     for path in files:
@@ -157,7 +218,7 @@ def load_campaigns(tokenizer, min_chars: int) -> list[dict]:
                 skipped["low_strength"] += 1
                 continue
 
-            output = (item.get("mutated_prompt") or item.get("attack_prompt") or "").strip()
+            output = _clean_attack_output(item.get("mutated_prompt") or item.get("attack_prompt") or "")
             if not output:
                 skipped["no_prompt"] += 1
                 continue
@@ -166,6 +227,9 @@ def load_campaigns(tokenizer, min_chars: int) -> list[dict]:
                 continue
             if _has_cjk(output):
                 skipped["cjk"] += 1
+                continue
+            if _looks_like_prompt_scaffold(output):
+                skipped["scaffold"] += 1
                 continue
 
             # 중복 제거 (같은 mutated_prompt가 여러 파일에 있을 수 있음)

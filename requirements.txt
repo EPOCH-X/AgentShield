@@ -35,3 +35,4 @@ pyprojroot>=0.0.0
 
 # ── Testbed ──
 psycopg2-binary>=2.9.0
+deep-translator>=1.11.4
