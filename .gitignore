@@ -3,6 +3,7 @@ AgentShield_R5_Codex_작업가이드.md
 /monitoring_proxy/docs
 # Python
 __pycache__/
+.pycache_*/
 *.py[cod]
 *.egg-info/
 dist/
@@ -66,13 +67,10 @@ data/red_campaigns/
 !data/defense_patterns/README.md
 !data/finetuning/README.md
 
-# Adapters (학습 결과)
-adapters/lora-red/*.bin
-adapters/lora-red/*.safetensors
-adapters/lora-judge/*.bin
-adapters/lora-judge/*.safetensors
-adapters/lora-blue/*.bin
-adapters/lora-blue/*.safetensors
+# Model artifacts (학습/변환 결과)
+adapters/
+merged/
+gguf/
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
@@ -129,7 +127,6 @@ nohup.out
 .cursor
 .mcp.json
 .opencode.json
-
 
 
 
