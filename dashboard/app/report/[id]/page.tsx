@@ -31,6 +31,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const [status,  setStatus]  = useState<typeof MOCK_SCAN_STATUS | null>(null);
   const [results, setResults] = useState<ScanResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [openSet, setOpenSet] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     async function load() {
@@ -53,6 +54,15 @@ export default function ReportPage({ params }: { params: { id: string } }) {
     }
     load();
   }, [sessionId]);
+
+  function toggleCard(id: number) {
+    setOpenSet((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   const total      = results.length;
   const vulnerable = results.filter((r) => r.judgment === "vulnerable").length;
@@ -108,10 +118,15 @@ export default function ReportPage({ params }: { params: { id: string } }) {
           70%  { transform: scale(1.04); }
           100% { opacity: 1; transform: scale(1); }
         }
+        @keyframes expandDown {
+          from { opacity: 0; transform: translateY(-8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
         .anim-fade-up   { animation: fadeSlideUp 0.55s cubic-bezier(0.22,1,0.36,1) both; }
         .anim-left      { animation: slideInLeft 0.45s cubic-bezier(0.22,1,0.36,1) both; }
         .anim-right     { animation: slideInRight 0.45s cubic-bezier(0.22,1,0.36,1) both; }
         .anim-pop       { animation: popIn 0.5s cubic-bezier(0.22,1,0.36,1) both; }
+        .anim-expand    { animation: expandDown 0.35s cubic-bezier(0.22,1,0.36,1) both; }
         .danger-pulse   { animation: dangerPulse 2.4s ease-in-out infinite; }
         .safe-pulse     { animation: safePulse 2.4s ease-in-out infinite; }
         .verdict-glow   { animation: verdictGlow 2s ease-in-out infinite; }
@@ -121,6 +136,10 @@ export default function ReportPage({ params }: { params: { id: string } }) {
           background-size: 200% 100%;
           animation: scanLine 3s linear infinite;
         }
+        .banner-btn { cursor: pointer; transition: filter 0.2s; }
+        .banner-btn:hover { filter: brightness(1.08); }
+        .chevron-icon { transition: transform 0.3s cubic-bezier(0.22,1,0.36,1); }
+        .chevron-open { transform: rotate(180deg); }
       `}</style>
 
       <div className="p-8 max-w-[1300px] mx-auto w-full space-y-10">
@@ -166,166 +185,177 @@ export default function ReportPage({ params }: { params: { id: string } }) {
         {results.length === 0 ? (
           <div className="glass-panel rounded-2xl py-20 text-center text-on-surface-variant/40 text-sm">결과 없음</div>
         ) : (
-          <div className="space-y-14">
+          <div className="space-y-6">
             {results.map((r, i) => {
               const sev     = SEVERITY_CFG[r.severity as keyof typeof SEVERITY_CFG] ?? SEVERITY_CFG.medium;
               const catMeta = CATEGORY_META[r.category];
               const isVuln  = r.judgment === "vulnerable";
               const delay   = (i * 180 + 120) + "ms";
+              const isOpen  = openSet.has(r.id);
 
               return (
                 <div key={r.id} className="anim-fade-up" style={{ animationDelay: delay }}>
 
                   {/* 카드 번호 구분선 */}
-                  <div className="flex items-center gap-4 mb-4">
+                  <div className="flex items-center gap-4 mb-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-black border"
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-black border"
                         style={{ background: sev.bg, borderColor: sev.border, color: sev.color }}>
                         {i + 1}
                       </div>
-                      <span className="text-sm font-black tracking-widest uppercase" style={{ color: sev.color }}>
+                      <span className="text-xs font-black tracking-widest uppercase" style={{ color: sev.color }}>
                         취약점 {String(i + 1).padStart(2, "0")}
                       </span>
-                      <span className="text-xs text-white/25 font-mono">/ {results.length}</span>
+                      <span className="text-xs text-white/20 font-mono">/ {results.length}</span>
                     </div>
-                    <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${sev.color}40, transparent)` }} />
+                    <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${sev.color}35, transparent)` }} />
                   </div>
 
-                <div
-                  className="rounded-2xl overflow-hidden border"
-                  style={{ borderColor: sev.border, boxShadow: sev.glow }}>
+                  <div className="rounded-2xl overflow-hidden border"
+                    style={{ borderColor: sev.border, boxShadow: sev.glow }}>
 
-                  {/* ━━━ ① 배너 ━━━ */}
-                  <div className="px-7 py-5 flex items-center gap-5 relative overflow-hidden"
-                    style={{ background: `linear-gradient(to right, ${sev.color}1a, transparent)`, borderBottom: `1px solid ${sev.border}` }}>
-                    {/* 배너 스캔라인 */}
-                    <div className="scan-shimmer absolute inset-0 pointer-events-none" />
+                    {/* ━━━ 배너 (클릭 토글) ━━━ */}
+                    <button
+                      className="banner-btn w-full px-7 py-5 flex items-center gap-5 relative overflow-hidden text-left"
+                      style={{ background: `linear-gradient(to right, ${sev.color}1a, transparent)` }}
+                      onClick={() => toggleCard(r.id)}
+                    >
+                      <div className="scan-shimmer absolute inset-0 pointer-events-none" />
 
-                    <div className="anim-pop shrink-0" style={{ animationDelay: `calc(${delay} + 200ms)` }}>
-                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                        style={{ background: sev.bg, border: `2px solid ${sev.border}` }}>
-                        <span className="material-symbols-outlined text-3xl verdict-glow"
-                          style={{ color: sev.color, fontVariationSettings: "'FILL' 1" }}>
-                          {isVuln ? "gpp_bad" : "verified_user"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex-1 min-w-0 space-y-1.5 relative">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-black uppercase tracking-widest px-2 py-0.5 rounded-md"
-                          style={{ color: sev.color, background: sev.bg }}>{sev.label}</span>
-                        {catMeta && (
-                          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md"
-                            style={{ background: `${catMeta.color}15` }}>
-                            <span className="material-symbols-outlined text-xs" style={{ color: catMeta.color, fontVariationSettings: "'FILL' 1" }}>{catMeta.icon}</span>
-                            <span className="text-xs font-bold" style={{ color: catMeta.color }}>{r.category} · {catMeta.name}</span>
-                          </div>
-                        )}
-                        <span className="text-xs text-white/30 font-medium">Phase {r.phase}</span>
-                        <span className="ml-auto font-mono text-xs text-white/20">#{String(i + 1).padStart(3, "0")}</span>
-                      </div>
-                      {r.summary && (
-                        <p className="text-xl font-extrabold text-white leading-snug">{r.summary}</p>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* ━━━ ② 공격 프롬프트 ━━━ */}
-                  <div className="px-7 py-4" style={{ background: "rgba(0,0,0,0.22)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-                    <p className="text-xs font-bold uppercase tracking-widest mb-2" style={{ color: `${sev.color}99` }}>공격 프롬프트</p>
-                    <p className="font-mono text-xs text-white/45 leading-relaxed line-clamp-2 whitespace-pre-wrap break-words">
-                      {r.attack_prompt}
-                    </p>
-                  </div>
-
-                  {/* ━━━ ③ 연결선 (애니메이션) ━━━ */}
-                  <div className="relative h-7 pointer-events-none select-none" style={{ background: "rgba(0,0,0,0.15)" }}>
-                    <div className="line-grow absolute left-1/2 top-0 w-px h-3 -translate-x-px"
-                      style={{ background: "rgba(255,255,255,0.12)", animationDelay: `calc(${delay} + 300ms)` }} />
-                    <div className="line-grow absolute top-3 h-px"
-                      style={{ left: "25%", right: "25%", background: "rgba(255,255,255,0.12)", animationDelay: `calc(${delay} + 380ms)`, transformOrigin: "left" }} />
-                    <div className="line-grow absolute top-3 w-px h-4"
-                      style={{ left: "25%", background: "rgba(255,255,255,0.12)", animationDelay: `calc(${delay} + 440ms)` }} />
-                    <div className="line-grow absolute top-3 w-px h-4"
-                      style={{ right: "25%", background: "rgba(255,255,255,0.12)", animationDelay: `calc(${delay} + 440ms)` }} />
-                  </div>
-
-                  {/* ━━━ ④ BEFORE / AFTER ━━━ */}
-
-                  {/* 비교 배너 */}
-                  <div className="anim-fade-up flex items-center gap-3 px-6 py-2.5"
-                    style={{ background: "rgba(255,255,255,0.025)", borderBottom: "1px solid rgba(255,255,255,0.06)", animationDelay: `calc(${delay} + 200ms)` }}>
-                    <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, transparent, rgba(239,68,68,0.5))" }} />
-                    <div className="flex items-center gap-3">
-                      <span className="material-symbols-outlined text-base" style={{ color: "rgba(239,68,68,0.75)" }}>warning</span>
-                      <span className="text-base font-black tracking-[0.25em] uppercase" style={{ color: "rgba(255,255,255,0.75)" }}>비교</span>
-                      <span className="material-symbols-outlined text-base" style={{ color: "rgba(14,165,165,0.75)" }}>shield</span>
-                    </div>
-                    <div className="flex-1 h-px" style={{ background: "linear-gradient(to left, transparent, rgba(14,165,165,0.5))" }} />
-                  </div>
-
-                  <div className="grid grid-cols-2">
-
-                    {/* ── BEFORE ── */}
-                    <div className="anim-left" style={{ borderRight: "1px solid rgba(255,255,255,0.07)", animationDelay: `calc(${delay} + 250ms)` }}>
-                      <div className="flex items-center gap-2.5 px-6 py-3.5"
-                        style={{ background: "rgba(239,68,68,0.13)", borderBottom: "1px solid rgba(239,68,68,0.2)" }}>
-                        <span className="material-symbols-outlined text-lg text-error" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
-                        <span className="text-sm font-black text-error tracking-wide">BEFORE · 방어 전 응답</span>
-                      </div>
-
-                      <div className="p-6 space-y-4">
-                        {r.danger_highlight && (
-                          <div className="rounded-xl p-4 danger-pulse"
-                            style={{ background: "rgba(239,68,68,0.09)", border: "1.5px solid rgba(239,68,68,0.3)" }}>
-                            <p className="text-[11px] font-black text-error uppercase tracking-widest mb-2.5">⚠ 핵심 위협 내용</p>
-                            <pre className="font-mono text-sm font-semibold text-error/90 leading-relaxed whitespace-pre-wrap break-words">
-                              {r.danger_highlight}
-                            </pre>
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-1.5">AI 응답 전문</p>
-                          <p className="font-mono text-xs text-white/40 leading-relaxed whitespace-pre-wrap break-words line-clamp-5">
-                            {r.target_response}
-                          </p>
+                      <div className="shrink-0">
+                        <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                          style={{ background: sev.bg, border: `2px solid ${sev.border}` }}>
+                          <span className="material-symbols-outlined text-3xl verdict-glow"
+                            style={{ color: sev.color, fontVariationSettings: "'FILL' 1" }}>
+                            {isVuln ? "gpp_bad" : "verified_user"}
+                          </span>
                         </div>
                       </div>
-                    </div>
 
-                    {/* ── AFTER ── */}
-                    <div className="anim-right" style={{ animationDelay: `calc(${delay} + 250ms)` }}>
-                      <div className="flex items-center gap-2.5 px-6 py-3.5"
-                        style={{ background: "rgba(14,165,165,0.13)", borderBottom: "1px solid rgba(14,165,165,0.2)" }}>
-                        <span className="material-symbols-outlined text-lg text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>shield</span>
-                        <span className="text-sm font-black text-primary tracking-wide">AFTER · 방어 후 응답</span>
-                      </div>
-
-                      <div className="p-6 space-y-4">
-                        <div className="rounded-xl p-4 safe-pulse"
-                          style={{ background: "rgba(14,165,165,0.09)", border: "1.5px solid rgba(14,165,165,0.3)" }}>
-                          <p className="text-[11px] font-black text-primary uppercase tracking-widest mb-2.5">✓ 방어 결과</p>
-                          <p className="text-sm font-semibold text-primary/85 leading-snug">
-                            {isVuln ? "방어 코드 적용 시 아래 응답으로 대체됩니다" : "공격이 차단되었습니다"}
-                          </p>
-                        </div>
-                        {r.defense_code ? (
-                          <div>
-                            <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-1.5">방어 응답 전문</p>
-                            <p className="text-xs leading-relaxed whitespace-pre-wrap break-words line-clamp-5"
-                              style={{ color: "#5eead4bb" }}>
-                              {r.defense_code}
+                      <div className="flex-1 min-w-0 space-y-2 relative">
+                        {/* 메인 제목: 카테고리 */}
+                        {catMeta ? (
+                          <div className="flex items-center gap-3">
+                            <span className="material-symbols-outlined text-2xl"
+                              style={{ color: catMeta.color, fontVariationSettings: "'FILL' 1" }}>{catMeta.icon}</span>
+                            <p className="text-xl font-extrabold text-white leading-snug">
+                              <span style={{ color: catMeta.color }}>{r.category}</span>
+                              <span className="text-white/50 mx-2">·</span>
+                              {catMeta.name}
                             </p>
                           </div>
                         ) : (
-                          <p className="text-xs text-white/20 italic">방어 응답 미생성</p>
+                          <p className="text-xl font-extrabold text-white">{r.category}</p>
                         )}
+                        {/* 서브 메타 */}
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-black uppercase tracking-widest px-2 py-0.5 rounded-md"
+                            style={{ color: sev.color, background: sev.bg }}>{sev.label}</span>
+                          <span className="text-xs text-white/30 font-medium">Phase {r.phase}</span>
+                          <span className="ml-auto font-mono text-xs text-white/20">#{String(i + 1).padStart(3, "0")}</span>
+                        </div>
                       </div>
-                    </div>
+
+                      {/* 토글 chevron */}
+                      <div className="shrink-0 ml-2 flex flex-col items-center gap-1">
+                        <span
+                          className={`material-symbols-outlined text-2xl chevron-icon ${isOpen ? "chevron-open" : ""}`}
+                          style={{ color: sev.color + "99" }}
+                        >
+                          expand_more
+                        </span>
+                        <span className="text-[9px] font-bold tracking-widest uppercase" style={{ color: sev.color + "60" }}>
+                          {isOpen ? "접기" : "펼치기"}
+                        </span>
+                      </div>
+                    </button>
+
+                    {/* ━━━ 상세 내용 (토글) ━━━ */}
+                    {isOpen && (
+                      <div className="anim-expand" style={{ borderTop: `1px solid ${sev.border}` }}>
+
+                        {/* ② 판정 이유 */}
+                        {r.summary && (
+                          <div className="px-7 py-4" style={{ background: "rgba(0,0,0,0.22)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
+                            <div className="flex items-center gap-2 mb-2">
+                              <span className="material-symbols-outlined text-sm" style={{ color: sev.color, fontVariationSettings: "'FILL' 1" }}>psychology</span>
+                              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: `${sev.color}99` }}>판정 에이전트 · 위험 판단 이유</p>
+                            </div>
+                            <p className="text-sm text-white/70 leading-relaxed font-medium" style={{ whiteSpace: "pre-line" }}>
+                              {r.summary.replace(/\. /g, ".\n")}
+                            </p>
+                          </div>
+                        )}
+
+                        {/* ④ 비교 배너 */}
+                        <div className="flex items-center gap-3 px-6 py-2.5"
+                          style={{ background: "rgba(255,255,255,0.025)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+                          <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, transparent, rgba(239,68,68,0.5))" }} />
+                          <div className="flex items-center gap-3">
+                            <span className="material-symbols-outlined text-base" style={{ color: "rgba(239,68,68,0.75)" }}>warning</span>
+                            <span className="text-base font-black tracking-[0.25em] uppercase" style={{ color: "rgba(255,255,255,0.75)" }}>비교</span>
+                            <span className="material-symbols-outlined text-base" style={{ color: "rgba(14,165,165,0.75)" }}>shield</span>
+                          </div>
+                          <div className="flex-1 h-px" style={{ background: "linear-gradient(to left, transparent, rgba(14,165,165,0.5))" }} />
+                        </div>
+
+                        {/* ⑤ BEFORE / AFTER */}
+                        <div className="grid grid-cols-2">
+
+                          {/* BEFORE */}
+                          <div style={{ borderRight: "1px solid rgba(255,255,255,0.07)" }}>
+                            <div className="flex items-center gap-2.5 px-6 py-3.5"
+                              style={{ background: "rgba(239,68,68,0.13)", borderBottom: "1px solid rgba(239,68,68,0.2)" }}>
+                              <span className="material-symbols-outlined text-lg text-error" style={{ fontVariationSettings: "'FILL' 1" }}>warning</span>
+                              <span className="text-sm font-black text-error tracking-wide">BEFORE · 방어 전 응답</span>
+                            </div>
+                            <div className="p-6 space-y-4">
+                              {r.danger_highlight && (
+                                <div className="rounded-xl p-4 danger-pulse"
+                                  style={{ background: "rgba(239,68,68,0.09)", border: "1.5px solid rgba(239,68,68,0.3)" }}>
+                                  <p className="text-[11px] font-black text-error uppercase tracking-widest mb-2.5">⚠ 핵심 위협 내용</p>
+                                  <pre className="font-mono text-sm font-semibold text-error/90 leading-relaxed whitespace-pre-wrap break-words overflow-y-auto" style={{ maxHeight: "160px" }}>
+                                    {r.danger_highlight}
+                                  </pre>
+                                </div>
+                              )}
+                              <div>
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-1.5">AI 응답 전문</p>
+                                <p className="font-mono text-xs text-white/40 leading-relaxed whitespace-pre-wrap break-words line-clamp-5">
+                                  {r.target_response}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* AFTER */}
+                          <div>
+                            <div className="flex items-center gap-2.5 px-6 py-3.5"
+                              style={{ background: "rgba(14,165,165,0.13)", borderBottom: "1px solid rgba(14,165,165,0.2)" }}>
+                              <span className="material-symbols-outlined text-lg text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>shield</span>
+                              <span className="text-sm font-black text-primary tracking-wide">AFTER · 방어 후 응답</span>
+                            </div>
+                            <div className="p-6">
+                              {r.defense_code ? (
+                                <div className="rounded-xl p-4 safe-pulse"
+                                  style={{ background: "rgba(14,165,165,0.09)", border: "1.5px solid rgba(14,165,165,0.3)" }}>
+                                  <p className="text-[11px] font-black text-primary uppercase tracking-widest mb-2.5">✓ 방어 결과</p>
+                                  <p className="text-xs leading-relaxed whitespace-pre-wrap break-words overflow-y-auto"
+                                    style={{ color: "#5eead4cc", maxHeight: "160px" }}>
+                                    {r.defense_code}
+                                  </p>
+                                </div>
+                              ) : (
+                                <p className="text-xs text-white/20 italic">방어 응답 미생성</p>
+                              )}
+                            </div>
+                          </div>
+
+                        </div>
+                      </div>
+                    )}
 
                   </div>
-                </div>
                 </div>
               );
             })}
