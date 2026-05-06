@@ -2,12 +2,18 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { getToken } from "../lib/api";
 
 export default function Home() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/scan");
+    const token = getToken();
+    if (token) {
+      router.replace("/scan");
+    } else {
+      router.replace("/login");
+    }
   }, [router]);
 
   return (
