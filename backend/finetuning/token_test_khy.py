@@ -12,7 +12,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 BASE_MODEL_ID = "Qwen/Qwen3.5-2B"
 DATA_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train.jsonl"
-MAX_LENGTH = 2048
+MAX_LENGTH = 2576
 
 tokenizer = AutoTokenizer.from_pretrained(
     BASE_MODEL_ID,
