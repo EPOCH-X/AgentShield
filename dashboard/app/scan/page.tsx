@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
+import ChatbotTestModal from "../../components/ChatbotTestModal";
 import { startScan } from "../../lib/api";
+import { MOCK_RECENT_SCANS } from "../../lib/mockClientData";
 
 const MOCK_SESSION_ID = "mock-session-demo";
 
@@ -20,6 +22,8 @@ interface RecentScan {
   project_name: string;
   target_api_url: string;
   status: string;
+  vulnerable_count?: number;
+  safe_count?: number;
   created_at: string;
 }
 
@@ -62,13 +66,19 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
+  const [chatbotTestOpen, setChatbotTestOpen] = useState(false);
 
   useEffect(() => {
     try {
       const stored = localStorage.getItem("recent_scans");
-      if (stored) setRecentScans(JSON.parse(stored));
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setRecentScans(parsed.length > 0 ? parsed : MOCK_RECENT_SCANS);
+      } else {
+        setRecentScans(MOCK_RECENT_SCANS);
+      }
     } catch {
-      // ignore
+      setRecentScans(MOCK_RECENT_SCANS);
     }
   }, []);
 
@@ -270,6 +280,31 @@ export default function ScanPage() {
                   </div>
                 )}
               </div>
+
+              {/* 챗봇 테스트 */}
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-primary/15 bg-primary/5 px-5 py-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-primary text-xl">forum</span>
+                  </div>
+                  <div>
+                    <p className="text-sm font-extrabold text-on-surface font-headline">
+                      테스트베드 챗봇 직접 호출
+                    </p>
+                    <p className="mt-1 text-xs text-on-surface-variant/70">
+                      한 문장 프롬프트를 보내 실제 타겟 응답과 도구 호출 여부를 확인합니다.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setChatbotTestOpen(true)}
+                  className="shrink-0 inline-flex items-center justify-center gap-2 rounded-2xl border border-primary/25 bg-white/5 px-5 py-3 text-sm font-extrabold text-primary transition-all hover:-translate-y-0.5 hover:bg-primary/10 hover:border-primary/45"
+                >
+                  <span className="material-symbols-outlined text-lg">chat</span>
+                  챗봇 테스트
+                </button>
+              </div>
             </div>
           </div>
         </form>
@@ -277,9 +312,9 @@ export default function ScanPage() {
         {/* ─── 시스템 스탯 ─── */}
         <div className="grid grid-cols-3 gap-5">
           {[
-            { icon: "bug_report", label: "지원 공격 패턴", value: "6,000+", color: "text-error", bg: "bg-error/5 border-error/10" },
-            { icon: "layers", label: "분석 단계", value: "4 Phases", color: "text-primary", bg: "bg-primary/5 border-primary/10" },
-            { icon: "verified_user", label: "판정 레이어", value: "3 Layers", color: "text-tertiary", bg: "bg-tertiary/5 border-tertiary/10" },
+            { icon: "bug_report", label: "공격 데이터", value: "검수 Seed", color: "text-error", bg: "bg-error/5 border-error/10" },
+            { icon: "layers", label: "통합 검증", value: "4 Phases", color: "text-primary", bg: "bg-primary/5 border-primary/10" },
+            { icon: "verified_user", label: "판정 구조", value: "Judge Multi-Agent", color: "text-tertiary", bg: "bg-tertiary/5 border-tertiary/10" },
           ].map((card) => (
             <div
               key={card.label}
@@ -361,6 +396,24 @@ export default function ScanPage() {
                       </span>
                     </div>
 
+                    {/* 취약점 카운트 */}
+                    {(scan.vulnerable_count !== undefined || scan.safe_count !== undefined) && (
+                      <div className="flex items-center gap-3">
+                        {scan.vulnerable_count !== undefined && (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-error/10 border border-error/20">
+                            <span className="material-symbols-outlined text-error text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>gpp_bad</span>
+                            <span className="text-xs font-black text-error">{scan.vulnerable_count} 취약</span>
+                          </div>
+                        )}
+                        {scan.safe_count !== undefined && (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-tertiary/10 border border-tertiary/20">
+                            <span className="material-symbols-outlined text-tertiary text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>verified_user</span>
+                            <span className="text-xs font-black text-tertiary">{scan.safe_count} 안전</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {/* 카드 하단 메타 */}
                     <div className="flex items-center justify-between pt-4 border-t border-white/5">
                       <div className="flex items-center gap-2 text-[11px] text-on-surface-variant/60 font-mono">
@@ -403,6 +456,7 @@ export default function ScanPage() {
         </div>
 
       </div>
+      <ChatbotTestModal open={chatbotTestOpen} onClose={() => setChatbotTestOpen(false)} />
     </DashboardLayout>
   );
 }

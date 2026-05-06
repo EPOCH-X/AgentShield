@@ -133,20 +133,18 @@ export default function AdminPage() {
         </section>
 
         {/* 메인 그리드 */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           {/* 보안 규칙 테이블 */}
-          <div className="lg:col-span-2">
+          <div className="lg:col-span-8">
             <div className="glass-panel rounded-2xl overflow-hidden shadow-2xl">
-              <div className="px-8 py-6 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
+              <div className="px-6 py-5 border-b border-white/5 flex justify-between items-center bg-white/[0.02]">
                 <h3 className="font-headline font-bold text-xl flex items-center gap-3 text-white">
                   <span className="material-symbols-outlined text-primary text-2xl">gpp_maybe</span>
                   활성 보안 규칙
                 </h3>
-                <div className="flex items-center gap-4">
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg shadow-inner">
-                    Active: {activePolicies} Rules
-                  </span>
-                </div>
+                <span className="text-[10px] font-bold uppercase tracking-widest text-primary bg-primary/10 border border-primary/20 px-3 py-1.5 rounded-lg">
+                  Active: {activePolicies} Rules
+                </span>
               </div>
 
               {loading ? (
@@ -162,12 +160,12 @@ export default function AdminPage() {
                   <table className="w-full text-left">
                     <thead className="bg-black/20 text-on-surface-variant text-[10px] uppercase tracking-widest font-extrabold">
                       <tr>
-                        <th className="px-8 py-5 border-b border-white/5">Rule ID</th>
-                        <th className="px-8 py-5 border-b border-white/5">정책 명칭</th>
-                        <th className="px-8 py-5 border-b border-white/5">탐지 패턴</th>
-                        <th className="px-8 py-5 border-b border-white/5">심각도</th>
-                        <th className="px-8 py-5 border-b border-white/5">상태</th>
-                        <th className="px-8 py-5 border-b border-white/5 text-right">관리</th>
+                        <th className="px-5 py-4 border-b border-white/5 whitespace-nowrap">Rule ID</th>
+                        <th className="px-5 py-4 border-b border-white/5 whitespace-nowrap">정책 명칭</th>
+                        <th className="px-5 py-4 border-b border-white/5 whitespace-nowrap">탐지 패턴</th>
+                        <th className="px-5 py-4 border-b border-white/5 whitespace-nowrap">심각도</th>
+                        <th className="px-5 py-4 border-b border-white/5 whitespace-nowrap">상태</th>
+                        <th className="px-5 py-4 border-b border-white/5 text-right whitespace-nowrap">관리</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -175,39 +173,37 @@ export default function AdminPage() {
                         const sev = SEVERITY_CONFIG[policy.severity] || SEVERITY_CONFIG.medium;
                         return (
                           <tr key={policy.id} className="row-glow transition-all duration-300 group">
-                            <td className="px-8 py-6">
+                            <td className="px-5 py-4 whitespace-nowrap">
                               <span className="font-mono text-[10px] text-primary/60 bg-primary/5 px-2 py-1 rounded">
                                 POL-{String(policy.id).padStart(3, "0")}
                               </span>
                             </td>
-                            <td className="px-8 py-6">
+                            <td className="px-5 py-4 min-w-[160px]">
                               <div className="flex flex-col">
-                                <span className="font-bold text-white group-hover:text-primary transition-colors">
+                                <span className="font-bold text-sm text-white group-hover:text-primary transition-colors whitespace-nowrap">
                                   {policy.rule_name}
                                 </span>
-                                <span className="text-[10px] text-on-surface-variant mt-1">
+                                <span className="text-[10px] text-on-surface-variant mt-0.5 whitespace-nowrap">
                                   {ACTION_LABEL[policy.action] || policy.action} · {policy.rule_type}
                                 </span>
                               </div>
                             </td>
-                            <td className="px-8 py-6">
-                              <code className="text-[10px] bg-black/40 px-3 py-1.5 rounded-lg border border-white/5 text-on-surface-variant font-mono">
-                                {policy.pattern.length > 30
-                                  ? policy.pattern.slice(0, 30) + "..."
+                            <td className="px-5 py-4">
+                              <code className="text-[10px] bg-black/40 px-3 py-1.5 rounded-lg border border-white/5 text-on-surface-variant font-mono whitespace-nowrap">
+                                {policy.pattern.length > 28
+                                  ? policy.pattern.slice(0, 28) + "..."
                                   : policy.pattern}
                               </code>
                             </td>
-                            <td className="px-8 py-6">
-                              <span
-                                className={`${sev.glowCls} border ${sev.cls} px-3 py-1.5 rounded-full flex items-center gap-2 w-fit`}
-                              >
+                            <td className="px-5 py-4 whitespace-nowrap">
+                              <span className={`${sev.glowCls} border ${sev.cls} px-3 py-1.5 rounded-full inline-flex items-center gap-2`}>
                                 <span className={`w-1.5 h-1.5 rounded-full ${sev.dotCls}`} />
                                 <span className="text-[10px] font-black uppercase tracking-wider">
                                   {SEV_LABEL[policy.severity] || policy.severity}
                                 </span>
                               </span>
                             </td>
-                            <td className="px-8 py-6">
+                            <td className="px-5 py-4 whitespace-nowrap">
                               <div
                                 className={`w-11 h-6 rounded-full border relative p-1 cursor-default ${
                                   policy.is_active
@@ -222,8 +218,8 @@ export default function AdminPage() {
                                 />
                               </div>
                             </td>
-                            <td className="px-8 py-6 text-right">
-                              <div className="flex justify-end gap-2">
+                            <td className="px-5 py-4 text-right whitespace-nowrap">
+                              <div className="flex justify-end gap-1">
                                 <button className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-primary/20 text-on-surface-variant hover:text-primary transition-all">
                                   <span className="material-symbols-outlined text-lg">edit</span>
                                 </button>
@@ -243,7 +239,7 @@ export default function AdminPage() {
           </div>
 
           {/* 사이드 패널 */}
-          <div className="space-y-8">
+          <div className="lg:col-span-4 space-y-8">
             {/* 직원 관리 */}
             <div className="glass-panel-elevated rounded-2xl p-8 border-t-2 border-primary shadow-2xl">
               <div className="flex justify-between items-center mb-8">
@@ -255,7 +251,7 @@ export default function AdminPage() {
                   View All
                 </button>
               </div>
-              <div className="space-y-4">
+              <div className="space-y-4 overflow-y-auto pr-1" style={{ maxHeight: "260px" }}>
                 {loading ? (
                   <div className="flex justify-center py-8">
                     <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
@@ -263,7 +259,7 @@ export default function AdminPage() {
                 ) : employees.length === 0 ? (
                   <p className="text-xs text-on-surface-variant text-center py-8">직원 데이터 없음</p>
                 ) : (
-                  employees.slice(0, 4).map((emp) => (
+                  employees.map((emp) => (
                     <div
                       key={emp.id}
                       className="group/emp bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 p-4 rounded-2xl flex items-center justify-between transition-all duration-300"
