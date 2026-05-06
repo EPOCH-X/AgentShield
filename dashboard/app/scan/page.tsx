@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
 import { startScan } from "../../lib/api";
+import { MOCK_RECENT_SCANS } from "../../lib/mockClientData";
 
 const MOCK_SESSION_ID = "mock-session-demo";
 
@@ -20,6 +21,8 @@ interface RecentScan {
   project_name: string;
   target_api_url: string;
   status: string;
+  vulnerable_count?: number;
+  safe_count?: number;
   created_at: string;
 }
 
@@ -66,9 +69,14 @@ export default function ScanPage() {
   useEffect(() => {
     try {
       const stored = localStorage.getItem("recent_scans");
-      if (stored) setRecentScans(JSON.parse(stored));
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setRecentScans(parsed.length > 0 ? parsed : MOCK_RECENT_SCANS);
+      } else {
+        setRecentScans(MOCK_RECENT_SCANS);
+      }
     } catch {
-      // ignore
+      setRecentScans(MOCK_RECENT_SCANS);
     }
   }, []);
 
@@ -360,6 +368,24 @@ export default function ScanPage() {
                         {meta.label}
                       </span>
                     </div>
+
+                    {/* 취약점 카운트 */}
+                    {(scan.vulnerable_count !== undefined || scan.safe_count !== undefined) && (
+                      <div className="flex items-center gap-3">
+                        {scan.vulnerable_count !== undefined && (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-error/10 border border-error/20">
+                            <span className="material-symbols-outlined text-error text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>gpp_bad</span>
+                            <span className="text-xs font-black text-error">{scan.vulnerable_count} 취약</span>
+                          </div>
+                        )}
+                        {scan.safe_count !== undefined && (
+                          <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-tertiary/10 border border-tertiary/20">
+                            <span className="material-symbols-outlined text-tertiary text-sm" style={{ fontVariationSettings: "'FILL' 1" }}>verified_user</span>
+                            <span className="text-xs font-black text-tertiary">{scan.safe_count} 안전</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* 카드 하단 메타 */}
                     <div className="flex items-center justify-between pt-4 border-t border-white/5">

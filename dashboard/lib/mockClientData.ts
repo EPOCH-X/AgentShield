@@ -103,6 +103,36 @@ export const MOCK_EMPLOYEES: Employee[] = [
   { id: "5", employee_id: "E-1005", name: "정우진", department: "Engineering", role: "developer", status: "active" },
 ];
 
+export const MOCK_RECENT_SCANS = [
+  {
+    session_id: "mock-session-demo",
+    project_name: "ShopEasy 고객지원 챗봇",
+    target_api_url: "https://api.shopeasy.io/v1/chat",
+    status: "completed",
+    vulnerable_count: 3,
+    safe_count: 0,
+    created_at: new Date(Date.now() - 312_000).toISOString(),
+  },
+  {
+    session_id: "sess-alpha-9921",
+    project_name: "내부 HR Assistant",
+    target_api_url: "https://hr-bot.internal/v1/chat",
+    status: "completed",
+    vulnerable_count: 1,
+    safe_count: 2,
+    created_at: new Date(Date.now() - 3_600_000 * 5).toISOString(),
+  },
+  {
+    session_id: "sess-beta-4401",
+    project_name: "마케팅 카피 생성기",
+    target_api_url: "https://api.marketing-llm.io/generate",
+    status: "completed",
+    vulnerable_count: 0,
+    safe_count: 3,
+    created_at: new Date(Date.now() - 3_600_000 * 27).toISOString(),
+  },
+];
+
 export const MOCK_SCAN_STATUS = {
   session_id: "mock-session-demo",
   status: "completed",
