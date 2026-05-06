@@ -20,13 +20,12 @@ GGUF 변환 실패 시 (BPE pre-tokenizer was not recognized / chkhsh):
   - 참고: https://github.com/ggml-org/llama.cpp/issues/20116
 
 예시 (프로젝트 루트에서, --llama-cpp 는 위 [필독] 절대 경로):
-  _LLC="C:\\Pyg\\final_project\\AgentShield\\llama.cpp"
 
   # Qwen3.5-2B 어댑터 (기본 출력 adapters/lora-blue-qwen 등)
   python merge_peft_export_gguf_ollama.py ^
   --base-model Qwen/Qwen3.5-2B ^
-  --adapter AgentShield/judge_adapter ^
-  --merged-hf AgentShield/merged-hf ^
+  --adapter AgentShield/adapter ^
+  --merged-hf AgentShield/merged ^
   --llama-cpp C:/Pyg/final_project/AgentShield/llama.cpp ^
   --gguf-out AgentShield/gguf/judge-f16.gguf ^
   --outtype f16
