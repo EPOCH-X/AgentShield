@@ -71,6 +71,7 @@ data/red_campaigns/
 adapters/
 merged/
 gguf/
+best_weights/
 
 # 분석·연구 문서 (개인 작업용, 커밋 불필요)
 gemma4_26b_baseline_분석.md
