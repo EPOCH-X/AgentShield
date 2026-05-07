@@ -1,7 +1,6 @@
 import json
 import asyncio
 import sys
-import os
 import random
 from datetime import datetime
 from pathlib import Path
@@ -19,37 +18,63 @@ if str(project_root) not in sys.path:
 from backend.core.judge import full_judge
 
 # 설정
-JUDGE_MODEL = os.getenv("OLLAMA_JUDGE_MODEL", "unknown_model")
 DATA_PATH = project_root / "data" / "검수완료(830개).json"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_PATH = project_root / "data" / f"benchmark_result_en_{TIMESTAMP}.json"
+OUTPUT_PATH = project_root / "data" / f"benchmark_result_probability_{TIMESTAMP}.json"
 
 
-def save_checkpoint(output_path: Path, metrics: dict, results_log: list, is_final: bool = False):
+def _safe_float(value, default: float = 0.5) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def save_checkpoint(
+    output_path: Path,
+    metrics: dict,
+    results_log: list,
+    is_final: bool = False,
+):
     if not results_log:
         return
 
-    accuracy = (metrics["TP"] + metrics["TN"]) / len(results_log)
+    evaluated = metrics["TP"] + metrics["TN"] + metrics["FP"] + metrics["FN"]
+    total = len(results_log)
+
+    accuracy = (
+        (metrics["TP"] + metrics["TN"]) / evaluated
+        if evaluated > 0
+        else 0.0
+    )
+
+    ambiguous_rate = metrics["AMB"] / total if total > 0 else 0.0
 
     report = {
         "metadata": {
-            "model_used": JUDGE_MODEL,
-            "total_samples_tested": len(results_log),
+            "total_samples_tested": total,
+            "evaluated_samples": evaluated,
+            "ambiguous_samples": metrics["AMB"],
             "status": "completed" if is_final else "in_progress",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         },
         "performance_summary": {
-            "accuracy": f"{accuracy:.2%}",
-            "confusion_matrix": metrics
+            "accuracy_excluding_ambiguous": f"{accuracy:.2%}",
+            "ambiguous_rate": f"{ambiguous_rate:.2%}",
+            "confusion_matrix": metrics,
         },
-        "detailed_results": results_log
+        "detailed_results": results_log,
     }
 
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
 
-async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_class: int = 75):
+async def benchmark_judge(
+    dataset_path: Path,
+    output_path: Path,
+    target_per_class: int = 75,
+):
     if not dataset_path.exists():
         print(f"파일 미존재: {dataset_path}")
         return
@@ -57,92 +82,175 @@ async def benchmark_judge(dataset_path: Path, output_path: Path, target_per_clas
     with open(dataset_path, "r", encoding="utf-8") as f:
         dataset = json.load(f)
 
-    # binary만 유지
-    safe_data = [d for d in dataset if d.get("judgment") == "safe"]
-    vuln_data = [d for d in dataset if d.get("judgment") == "vulnerable"]
+    safe_data = [
+        item for item in dataset
+        if str(item.get("judgment", "")).strip().lower() == "safe"
+    ]
 
-    sampled_safe = random.sample(safe_data, min(target_per_class, len(safe_data)))
-    sampled_vuln = random.sample(vuln_data, min(target_per_class, len(vuln_data)))
+    vuln_data = [
+        item for item in dataset
+        if str(item.get("judgment", "")).strip().lower() == "vulnerable"
+    ]
+
+    sampled_safe = random.sample(
+        safe_data,
+        min(target_per_class, len(safe_data)),
+    )
+
+    sampled_vuln = random.sample(
+        vuln_data,
+        min(target_per_class, len(vuln_data)),
+    )
 
     test_samples = sampled_safe + sampled_vuln
     random.shuffle(test_samples)
 
-    metrics = {"TP": 0, "FP": 0, "TN": 0, "FN": 0, "AMB": 0}
-    results_log = []
+    metrics = {
+        "TP": 0,
+        "FP": 0,
+        "TN": 0,
+        "FN": 0,
+        "AMB": 0,
+    }
 
+    results_log = []
     total_samples = len(test_samples)
 
-    print(f"\n[{JUDGE_MODEL}] 벤치마크 시작 (총 {total_samples}개)")
+    print(f"\n[Probability Judge Benchmark] 시작 (총 {total_samples}개)")
+    print(f"- safe samples: {len(sampled_safe)}")
+    print(f"- vulnerable samples: {len(sampled_vuln)}")
 
     try:
         for i, item in enumerate(test_samples):
             category = item.get("category", "LLM01")
-
             attack_prompt = item.get("mutated_prompt", "")
             target_response = item.get("target_response", "")
-            expected = item.get("judgment", "safe")
+            expected = str(item.get("judgment", "safe")).strip().lower()
 
-            # full_judge 내부에서 messages 생성하므로 여기서 만들 필요 없음
             result = await full_judge(
                 category=category,
                 attack_prompt=attack_prompt,
-                response=target_response
+                response=target_response,
             )
 
-            raw_predicted = result.get("judgment", "ambiguous")
-            predicted = raw_predicted if raw_predicted in {"safe", "vulnerable"} else "safe"
-            
-            if raw_predicted not in {"safe", "vulnerable"}:
+            predicted = str(
+                result.get("judgment", "ambiguous")
+            ).strip().lower()
+
+            p_vulnerable = _safe_float(
+                result.get("p_vulnerable"),
+                default=0.5,
+            )
+
+            p_safe = _safe_float(
+                result.get("p_safe"),
+                default=0.5,
+            )
+
+            is_ambiguous = predicted not in {"safe", "vulnerable"}
+
+            if is_ambiguous:
                 metrics["AMB"] += 1
+                is_correct = False
 
-            is_correct = (expected == predicted)
-
-            if expected == "vulnerable":
-                metrics["TP" if is_correct else "FN"] += 1
             else:
-                metrics["TN" if is_correct else "FP"] += 1
+                is_correct = expected == predicted
+
+                if expected == "vulnerable":
+                    metrics["TP" if is_correct else "FN"] += 1
+                else:
+                    metrics["TN" if is_correct else "FP"] += 1
 
             log_entry = {
                 "sample_id": i + 1,
                 "category": category,
                 "evaluation": {
                     "is_correct": is_correct,
+                    "is_ambiguous": is_ambiguous,
                     "expected_judgment": expected,
                     "predicted_judgment": predicted,
-                    "raw_predicted_judgment": raw_predicted,
-                    "score": result.get("score", result.get("confidence", 0.0))
+                    "p_vulnerable": p_vulnerable,
+                    "p_safe": p_safe,
                 },
                 "original_en": {
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
-                    "consensus_detail": result.get("detail", ""),
-                    "agent_debug_nodes": result.get("debug_nodes", {})
-                }
+                },
+                "judge_output": {
+                    "detail": result.get("detail", ""),
+                    "probability_process": result.get(
+                        "probability_process",
+                        [],
+                    ),
+                    "evidence_scan_result": result.get(
+                        "evidence_scan_result",
+                        {},
+                    ),
+                    "mitre_technique_id": result.get(
+                        "mitre_technique_id",
+                        "",
+                    ),
+                },
+                "debug_nodes": result.get("debug_nodes", {}),
             }
 
             results_log.append(log_entry)
 
-            status = "[PASS]" if is_correct else "[FAIL]"
-            print(f"▶ [{i+1}/{total_samples}] {status} | GT: {expected.upper()} → PRED: {predicted.upper()}")
+            status = (
+                "[AMB]"
+                if is_ambiguous
+                else "[PASS]"
+                if is_correct
+                else "[FAIL]"
+            )
+
+            print(
+                f"▶ [{i + 1}/{total_samples}] {status} | "
+                f"GT: {expected.upper()} → "
+                f"PRED: {predicted.upper()} | "
+                f"p_vuln={p_vulnerable:.4f}, "
+                f"p_safe={p_safe:.4f}"
+            )
 
             await asyncio.sleep(0.2)
 
-            # checkpoint
             if (i + 1) % 10 == 0:
-                save_checkpoint(output_path, metrics, results_log, is_final=False)
+                save_checkpoint(
+                    output_path,
+                    metrics,
+                    results_log,
+                    is_final=False,
+                )
 
     except KeyboardInterrupt:
         print("\n중단됨 - 저장 진행")
+
     except Exception as e:
         print(f"\n오류: {e}")
+
     finally:
         if results_log:
-            save_checkpoint(output_path, metrics, results_log, is_final=True)
+            save_checkpoint(
+                output_path,
+                metrics,
+                results_log,
+                is_final=True,
+            )
+
             print(f"\n최종 저장 완료: {output_path.name}")
+            print(f"경로: {output_path}")
 
 
 if __name__ == "__main__":
     if sys.platform == "win32":
-        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+        asyncio.set_event_loop_policy(
+            asyncio.WindowsSelectorEventLoopPolicy()
+        )
 
-    asyncio.run(benchmark_judge(DATA_PATH, OUTPUT_PATH, target_per_class=5))
+    asyncio.run(
+        benchmark_judge(
+            DATA_PATH,
+            OUTPUT_PATH,
+            target_per_class=5,
+        )
+    )
