@@ -580,6 +580,10 @@ def train_role_adapter(
         use_cpu=(device_type == "cpu"),
         assistant_only_loss=effective_assistant_only,
         completion_only_loss=_completion_only,
+        # eval 시 기본 배치(라이브러리 디폴트)가 크게 잡히면 OOM이 쉽게 난다.
+        # val을 쓰는 경우 eval 배치를 1로 고정해 메모리 피크를 낮춘다.
+        per_device_eval_batch_size=1 if eval_ds is not None else 8,
+        eval_accumulation_steps=8 if eval_ds is not None else None,
     )
     if device_type == "cuda":
         sft_args = SFTConfig(
