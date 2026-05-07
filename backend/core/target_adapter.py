@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import ipaddress
+import json
+import os
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
@@ -20,6 +22,8 @@ TargetProvider = Literal[
     "ollama",
     "ollama_chat",
     "ollama_generate",
+    "easemate_stream",
+    "wooriai_web",
 ]
 
 
@@ -31,7 +35,7 @@ class TargetAdapterConfig:
     model: Optional[str] = None
 
     @property
-    def resolved_provider(self) -> Literal["generic", "docker_chatbot", "openai_chat", "ollama_chat", "ollama_generate"]:
+    def resolved_provider(self) -> Literal["generic", "docker_chatbot", "openai_chat", "ollama_chat", "ollama_generate", "easemate_stream", "wooriai_web"]:
         return detect_target_provider(self.target_url, self.provider)
 
     @classmethod
@@ -53,6 +57,8 @@ class TargetAdapterConfig:
             "ollama",
             "ollama_chat",
             "ollama_generate",
+            "easemate_stream",
+            "wooriai_web",
         }:
             normalized_provider = "auto"
         resolved_model = model or settings.TARGET_MODEL or None
@@ -70,7 +76,7 @@ class TargetAdapterConfig:
 def detect_target_provider(
     target_url: str,
     explicit_provider: TargetProvider = "auto",
-) -> Literal["generic", "docker_chatbot", "openai_chat", "ollama_chat", "ollama_generate"]:
+) -> Literal["generic", "docker_chatbot", "openai_chat", "ollama_chat", "ollama_generate", "easemate_stream", "wooriai_web"]:
     if explicit_provider != "auto":
         if explicit_provider == "openai":
             return "openai_chat"
@@ -82,6 +88,10 @@ def detect_target_provider(
     path = (parsed.path or "").lower()
     host = (parsed.netloc or "").lower()
 
+    if "api.easemate.ai" in host and path.endswith("/api2/stream/exec_operati"):
+        return "easemate_stream"
+    if "wooriaiadmin.use.go.kr" in host and path.startswith("/web"):
+        return "wooriai_web"
     if path.endswith("/api/generate"):
         return "ollama_generate"
     if path.endswith("/api/chat") or "ollama" in host:
@@ -117,9 +127,39 @@ def validate_target_environment(config: TargetAdapterConfig) -> None:
 
 def build_target_headers(config: TargetAdapterConfig) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
+    if config.resolved_provider in {"easemate_stream", "wooriai_web"}:
+        headers["Accept"] = "text/event-stream, application/json, text/plain, */*"
+    if config.resolved_provider == "wooriai_web":
+        headers["Origin"] = os.getenv("WOORIAI_ORIGIN", "https://wooriaiadmin.use.go.kr")
+        headers["Referer"] = os.getenv(
+            "WOORIAI_REFERER",
+            "https://wooriaiadmin.use.go.kr/chatbot-screen/1beffae3-668f-484e-8e81-f501eaadc9a5?show_exit=y",
+        )
+        headers["User-Agent"] = os.getenv(
+            "WOORIAI_USER_AGENT",
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+        )
+        cookie = os.getenv("WOORIAI_COOKIE", "").strip()
+        if cookie:
+            headers["Cookie"] = cookie
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
     return headers
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name)
+    try:
+        return int(str(raw).strip()) if raw not in {None, ""} else default
+    except ValueError:
+        return default
+
+
+def _easemate_parameters() -> str:
+    return os.getenv("EASEMATE_PARAMETERS") or json.dumps(
+        {"webSearch": False, "isThinking": False},
+        separators=(",", ":"),
+    )
 
 
 def build_target_payload(
@@ -150,6 +190,35 @@ def build_target_payload(
         return {
             "model": config.model or settings.TARGET_ADAPTER_OPENAI_MODEL,
             "messages": messages,
+        }
+    if provider == "easemate_stream":
+        return {
+            "model_id": _env_int("EASEMATE_MODEL_ID", 3),
+            "operation_info": {
+                "operation": _latest_message_content(messages),
+                "id": _env_int("EASEMATE_OPERATION_ID", 10000),
+            },
+            "parameters": _easemate_parameters(),
+            "session_id": _env_int("EASEMATE_SESSION_ID", 1000422050),
+        }
+    if provider == "wooriai_web":
+        return {
+            "session_id": os.getenv("WOORIAI_SESSION_ID", ""),
+            "lang": os.getenv("WOORIAI_LANG", "ko"),
+            "q": _latest_message_content(messages),
+            "ai_response_enable": os.getenv("WOORIAI_AI_RESPONSE_ENABLE", "true").lower() == "true",
+            "ai_response_option": os.getenv("WOORIAI_AI_RESPONSE_OPTION", "hybrid"),
+            "ai_response_platform": os.getenv("WOORIAI_AI_RESPONSE_PLATFORM", "gpt-5.1"),
+            "ai_response_simple": os.getenv("WOORIAI_AI_RESPONSE_SIMPLE", "false").lower() == "true",
+            "code": os.getenv("WOORIAI_CODE", ""),
+            "live": os.getenv("WOORIAI_LIVE", "true").lower() == "true",
+            "multiTurn": os.getenv("WOORIAI_MULTITURN", "true").lower() == "true",
+            "platform": os.getenv("WOORIAI_PLATFORM", "standard"),
+            "recommend_enabled": _env_int("WOORIAI_RECOMMEND_ENABLED", 0),
+            "req_ai_response": os.getenv("WOORIAI_REQ_AI_RESPONSE", "false").lower() == "true",
+            "threshold": float(os.getenv("WOORIAI_THRESHOLD", "0.4")),
+            "trans_out": os.getenv("WOORIAI_TRANS_OUT", ""),
+            "user_parameters": os.getenv("WOORIAI_USER_PARAMETERS", "{}"),
         }
     return {"messages": messages}
 
@@ -191,6 +260,57 @@ def build_target_payload_candidates(
     return candidates
 
 
+def _extract_text_from_any(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        return "\n".join(part for part in (_extract_text_from_any(item) for item in value) if part).strip()
+    if not isinstance(value, dict):
+        return str(value).strip()
+
+    direct_keys = (
+        "content",
+        "response",
+        "answer",
+        "text",
+        "message",
+        "output",
+        "result",
+        "data",
+        "delta",
+        "choices",
+    )
+    for key in direct_keys:
+        if key not in value:
+            continue
+        found = _extract_text_from_any(value.get(key))
+        if found:
+            return found
+    return ""
+
+
+def _extract_sse_text(raw_text: str) -> str:
+    chunks: list[str] = []
+    for line in (raw_text or "").splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        data = line[len("data:") :].strip()
+        if not data or data == "[DONE]":
+            continue
+        try:
+            parsed = json.loads(data)
+        except ValueError:
+            chunks.append(data)
+            continue
+        extracted = _extract_text_from_any(parsed)
+        if extracted:
+            chunks.append(extracted)
+    return "".join(chunks).strip()
+
+
 def extract_target_content(
     config: TargetAdapterConfig,
     response_json: Any,
@@ -216,6 +336,13 @@ def extract_target_content(
                 if first.get("text") is not None:
                     return str(first["text"])
         return fallback_text
+
+    if provider in {"easemate_stream", "wooriai_web"}:
+        extracted = _extract_text_from_any(response_json)
+        if extracted:
+            return extracted
+        sse_text = _extract_sse_text(fallback_text)
+        return sse_text or fallback_text
 
     if isinstance(response_json, dict):
         if response_json.get("content") is not None:
@@ -267,7 +394,7 @@ async def send_messages_to_target(
         try:
             response_json = response.json()
         except ValueError:
-            return response.text
+            return extract_target_content(config, None, response.text)
         return extract_target_content(config, response_json, response.text)
 
     if last_exc is not None:
@@ -327,7 +454,7 @@ def send_messages_to_target_sync(
         try:
             response_json = response.json()
         except ValueError:
-            return response.text
+            return extract_target_content(config, None, response.text)
         return extract_target_content(config, response_json, response.text)
 
     if last_exc is not None:
