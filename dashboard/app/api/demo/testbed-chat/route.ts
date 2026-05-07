@@ -32,17 +32,31 @@ export async function POST(req: NextRequest) {
 
     const text = await upstream.text();
     const contentType = upstream.headers.get("content-type") || "application/json";
-    if (!upstream.ok || !contentType.includes("application/json")) {
+
+    if (!contentType.includes("application/json")) {
       return new NextResponse(text, {
         status: upstream.status,
         headers: { "Content-Type": contentType },
       });
     }
 
-    return NextResponse.json(JSON.parse(text), { status: upstream.status });
+    const data = JSON.parse(text);
+    const content = String(data.content || data.response || text || "").trim();
+
+    return NextResponse.json(
+      {
+        ok: upstream.ok,
+        status: upstream.status,
+        target: testbedChatUrl(),
+        raw: data,
+        content,
+      },
+      { status: upstream.ok ? 200 : upstream.status }
+    );
   } catch (error) {
     return NextResponse.json(
       {
+        ok: false,
         detail: "테스트베드 챗봇에 연결할 수 없습니다.",
         target: testbedChatUrl(),
         error: error instanceof Error ? error.message : String(error),
