@@ -39,11 +39,14 @@ services:
     environment:
       - IS_PERSISTENT=TRUE
       - ALLOW_RESET=TRUE
+<<<<<<< HEAD
     healthcheck:
       test: ["CMD-SHELL", "chroma --help >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
+=======
+>>>>>>> origin/develop
 
   # ── Mailpit (이메일 샌드박스) ────────────────────────────────────────────────
   mailpit:
@@ -82,14 +85,18 @@ services:
       postgres_testbed:
         condition: service_healthy
       chromadb_testbed:
-        condition: service_healthy
+        condition: service_started
       mailpit:
         condition: service_healthy
     volumes:
       - ./data/testbed_kb:/app/data/testbed_kb:ro
     command: uvicorn testbed.tool_gateway.app:app --host 0.0.0.0 --port 8020 --reload
     healthcheck:
+<<<<<<< HEAD
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8020/health', timeout=3)\" || exit 1"]
+=======
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8020/health', timeout=5).read()\""]
+>>>>>>> origin/develop
       interval: 5s
       timeout: 5s
       retries: 10
@@ -104,9 +111,15 @@ services:
     ports:
       - "8010:8010"
     environment:
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
-      OLLAMA_MODEL: gemma4:e2b
-      TESTBED_SECURITY_MODE: weak
+      OLLAMA_BASE_URL: ${TESTBED_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      TESTBED_SECURITY_MODE: ${TESTBED_SECURITY_MODE:-strict}
+      TESTBED_OLLAMA_TIMEOUT: ${TESTBED_OLLAMA_TIMEOUT:-180}
+      TESTBED_OLLAMA_MAX_RETRIES: ${TESTBED_OLLAMA_MAX_RETRIES:-5}
+      TESTBED_OLLAMA_TEMPERATURE: ${TESTBED_OLLAMA_TEMPERATURE:-0.2}
+      TESTBED_OLLAMA_NUM_CTX: ${TESTBED_OLLAMA_NUM_CTX:-4096}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30s}
+      LLM_DEFAULT_NUM_PREDICT: ${LLM_DEFAULT_NUM_PREDICT:-1024}
       TOOL_GATEWAY_URL: http://tool_gateway:8020
       TESTBED_PORT: 8010
     depends_on:
@@ -114,7 +127,11 @@ services:
         condition: service_healthy
     command: uvicorn testbed.target_chatbot.app:app --host 0.0.0.0 --port 8010 --reload
     healthcheck:
+<<<<<<< HEAD
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=3)\" || exit 1"]
+=======
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=5).read()\""]
+>>>>>>> origin/develop
       interval: 5s
       timeout: 5s
       retries: 10
@@ -145,7 +162,7 @@ services:
       TESTBED_CHROMADB_PORT: 8000
     depends_on:
       chromadb_testbed:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - ./data/testbed_kb:/app/data/testbed_kb:ro
     command: python scripts/ingest_testbed_kb.py

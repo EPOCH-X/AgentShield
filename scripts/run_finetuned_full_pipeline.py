@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 load_dotenv(PROJECT_ROOT / ".env")
 
 from backend.graph.llm_security_graph import run_scan  # noqa: E402
+from backend.core.target_adapter import TargetAdapterConfig  # noqa: E402
 from scripts.run_phase1_to_4_smoke import (  # noqa: E402
     _ensure_test_session,
     _log_ts,
@@ -95,22 +97,38 @@ async def _ollama_model_status(base_url: str, models: list[str]) -> dict[str, bo
             for row in (resp.json().get("models") or [])
             if row.get("name")
         }
-    return {model: model in installed for model in models if model}
+    return {
+        model: model in installed or (":" not in model and f"{model}:latest" in installed)
+        for model in models
+        if model
+    }
 
 
-async def _target_health(target_url: str) -> str:
-    health_url = target_url.rstrip("/")
-    if health_url.endswith("/chat"):
-        health_url = health_url[: -len("/chat")] + "/health"
-    else:
-        health_url = health_url + "/health"
+async def _target_health(target_url: str, health_url: str | None = None) -> str:
+    health_url = (health_url or "").strip() or target_url.rstrip("/")
+    if not health_url.startswith(("http://", "https://")):
+        raise ValueError("target health URL must start with http:// or https://")
+    if not (health_url or "").strip():
+        health_url = target_url.rstrip("/")
+    if health_url == target_url.rstrip("/"):
+        if health_url.endswith("/chat"):
+            health_url = health_url[: -len("/chat")] + "/health"
+        else:
+            health_url = health_url + "/health"
     async with httpx.AsyncClient(timeout=20.0) as client:
         resp = await client.get(health_url)
         resp.raise_for_status()
         return resp.text[:500]
 
 
-def _write_integrated_report(final_state: dict[str, Any], out_dir: Path, ts: str) -> Path:
+def _write_integrated_report(
+    final_state: dict[str, Any],
+    out_dir: Path,
+    ts: str,
+    *,
+    target_url: str,
+    target_provider: str,
+) -> Path:
     """Write a compact machine-readable + human-readable integration report."""
     summary = _short_summary(final_state)
     p1 = final_state.get("phase1_result", {}) or {}
@@ -131,7 +149,9 @@ def _write_integrated_report(final_state: dict[str, Any], out_dir: Path, ts: str
         f"- red: {os.getenv('OLLAMA_RED_MODEL', '')}",
         f"- judge: {os.getenv('OLLAMA_JUDGE_MODEL', '')}",
         f"- blue: {os.getenv('OLLAMA_BLUE_MODEL', '')}",
-        f"- target: {os.getenv('OLLAMA_MODEL', '')}",
+        f"- target_url: {target_url}",
+        f"- target_provider: {target_provider}",
+        f"- target_model: {os.getenv('OLLAMA_MODEL', '') if target_provider in {'ollama_chat', 'ollama_generate'} else 'external adapter; OLLAMA_MODEL unused'}",
         "",
         "## artifacts",
         f"- phase1_total_scanned: {p1.get('total_scanned')}",
@@ -159,6 +179,17 @@ async def _main(args: argparse.Namespace) -> int:
         return 2
 
     model_map = _apply_env_model_routing(args)
+    adapter_config = TargetAdapterConfig.from_input(
+        target_url=args.target_url,
+        api_key=args.target_api_key,
+        provider=args.target_provider,
+        model=args.target_model,
+    )
+    target_model_label = (
+        model_map["target"]
+        if adapter_config.resolved_provider in {"ollama_chat", "ollama_generate"}
+        else f"external adapter ({adapter_config.resolved_provider}); OLLAMA_MODEL unused"
+    )
 
     print("=" * 72)
     print("  AgentShield Fine-tuned Integrated Pipeline")
@@ -167,19 +198,22 @@ async def _main(args: argparse.Namespace) -> int:
     print(f"  red:        {model_map['red']}")
     print(f"  judge:      {model_map['judge']}")
     print(f"  blue:       {model_map['blue']}")
-    print(f"  target:     {model_map['target']}")
+    print(f"  target:     {target_model_label}")
     print(f"  ollama:     {model_map['ollama_base_url']}")
     print(f"  category:   {args.category or 'ALL'}")
     print(f"  max_attacks:{args.max_attacks if args.max_attacks is not None else 'ALL'}")
     print(f"  p2_rounds:  {args.phase2_rounds if args.phase2_rounds is not None else 'DEFAULT'}")
     print()
 
-    try:
-        health = await _target_health(args.target_url)
-        print(f"[target] health ok: {health}")
-    except Exception as exc:
-        print(f"[ERROR] target health failed: {exc}")
-        return 2
+    if args.skip_target_health:
+        print("[target] health skipped")
+    else:
+        try:
+            health = await _target_health(args.target_url, args.target_health_url)
+            print(f"[target] health ok: {health}")
+        except Exception as exc:
+            print(f"[ERROR] target health failed: {exc}")
+            return 2
 
     if args.check_models:
         status = await _ollama_model_status(
@@ -192,7 +226,7 @@ async def _main(args: argparse.Namespace) -> int:
             print(f"[ERROR] missing Ollama models: {missing}")
             return 2
 
-    session_id = args.session_id or f"finetuned-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+    session_id = args.session_id or str(uuid.uuid4())
     print(f"[INFO] [{_log_ts()}] session_id={session_id}")
     print("[INFO] Phase1 -> Phase2 -> Phase3 -> Phase4 start")
 
@@ -228,7 +262,13 @@ async def _main(args: argparse.Namespace) -> int:
     state_path = out_dir / f"finetuned_integrated_state_{ts}.json"
     state_path.write_text(json.dumps(final_state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     review_path = _write_review_log(final_state, out_dir, ts)
-    report_path = _write_integrated_report(final_state, out_dir, ts)
+    report_path = _write_integrated_report(
+        final_state,
+        out_dir,
+        ts,
+        target_url=args.target_url,
+        target_provider=adapter_config.resolved_provider,
+    )
 
     print(f"[saved] state:  {state_path}")
     print(f"[saved] review: {review_path}")
@@ -239,7 +279,12 @@ async def _main(args: argparse.Namespace) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the full fine-tuned AgentShield pipeline against local testbed.")
-    parser.add_argument("--target-url", default="http://localhost:8010/chat")
+    parser.add_argument(
+        "--target-url",
+        default=os.getenv("RED_CAMPAIGN_TARGET_URL") or os.getenv("TARGET_URL") or "http://localhost:8010/chat",
+    )
+    parser.add_argument("--target-health-url", default=os.getenv("TARGET_HEALTH_URL") or None)
+    parser.add_argument("--skip-target-health", action="store_true")
     parser.add_argument("--target-provider", default=None)
     parser.add_argument(
         "--target-model",

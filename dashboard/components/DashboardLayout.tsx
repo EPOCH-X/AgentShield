@@ -11,6 +11,7 @@ interface DashboardLayoutProps {
 
 const navItems = [
   { icon: "security", label: "LLM 보안 스캔", href: "/scan" },
+  { icon: "science", label: "시연", href: "/demo" },
   { icon: "visibility", label: "모니터링 및 위반", href: "/monitoring" },
   { icon: "admin_panel_settings", label: "관리자", href: "/monitoring/admin" },
 ];
@@ -36,6 +37,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
 
   function isActive(href: string): boolean {
     if (href === "/scan") return pathname === "/scan" || pathname.startsWith("/scan/");
+    if (href === "/demo") return pathname === "/demo";
     if (href === "/monitoring") return pathname === "/monitoring";
     if (href === "/monitoring/admin") {
       return pathname === "/monitoring/admin" || pathname.startsWith("/monitoring/admin/");

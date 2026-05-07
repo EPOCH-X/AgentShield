@@ -184,6 +184,18 @@ class AgentShieldLLM:
         thinking = str(resp_json.get("thinking") or "").strip()
         return response or thinking
 
+    @staticmethod
+    def _chatml_prompt(system_prompt: str, user_prompt: str) -> str:
+        return (
+            "<|im_start|>system\n"
+            f"{system_prompt.strip()}\n"
+            "<|im_end|>\n"
+            "<|im_start|>user\n"
+            f"{user_prompt.strip()}\n"
+            "<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+
     async def _call_ollama_with_retries(
         self,
         role: str,
@@ -229,7 +241,10 @@ class AgentShieldLLM:
                         from backend.agents.red_agent import get_system_prompt
                         sys_prompt = get_system_prompt()
                         if sys_prompt:
-                            effective_prompt = f"{sys_prompt}\n\n[USER TASK]\n{prompt}"
+                            if os.getenv("OLLAMA_RED_PROMPT_FORMAT", "").strip().lower() == "chatml":
+                                effective_prompt = self._chatml_prompt(sys_prompt, prompt)
+                            else:
+                                effective_prompt = f"{sys_prompt}\n\n[USER TASK]\n{prompt}"
                     payload = {
                         "model": self.active_ollama_model,
                         "prompt": effective_prompt,
