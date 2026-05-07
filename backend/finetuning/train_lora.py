@@ -467,6 +467,25 @@ def train_role_adapter(
             return {"text": texts}
 
         train_ds = dataset["train"].map(
+            _batch_to_text,
+            batched=True,
+            remove_columns=dataset["train"].column_names,
+        )
+    else:
+
+        def _batch_to_messages(batch: dict) -> dict:
+            msgs = []
+            for i in range(len(batch["instruction"])):
+                msgs.append(
+                    _messages_from_row(
+                        batch["instruction"][i],
+                        batch["input"][i],
+                        batch["output"][i],
+                    )
+                )
+            return {"messages": msgs}
+
+        train_ds = dataset["train"].map(
             _batch_to_messages,
             batched=True,
             remove_columns=dataset["train"].column_names,
@@ -499,6 +518,38 @@ def train_role_adapter(
                     batched=True,
                     remove_columns=val_dataset["train"].column_names,
                 )
+
+                # completion_only_loss에서 supervised token이 0개인 샘플은
+                # eval_loss를 NaN으로 만들 수 있어 사전에 제외한다.
+                if completion_only_loss:
+                    before_n = len(eval_ds)
+
+                    def _has_supervised_tokens(row: dict) -> bool:
+                        prompt = str(row.get("prompt") or "")
+                        completion = str(row.get("completion") or "")
+                        if not completion.strip():
+                            return False
+                        prompt_ids = tokenizer(
+                            prompt,
+                            add_special_tokens=False,
+                            truncation=True,
+                            max_length=2048,
+                        )["input_ids"]
+                        full_ids = tokenizer(
+                            prompt + completion,
+                            add_special_tokens=False,
+                            truncation=True,
+                            max_length=2048,
+                        )["input_ids"]
+                        return len(full_ids) > len(prompt_ids)
+
+                    eval_ds = eval_ds.filter(_has_supervised_tokens)
+                    dropped_n = before_n - len(eval_ds)
+                    if dropped_n > 0:
+                        print(
+                            f"  [val filter] supervised token 0개 샘플 {dropped_n}건 제외 "
+                            f"(remaining={len(eval_ds)})"
+                        )
             elif dataset_format == "chat_text":
 
                 def _batch_to_text_eval(batch: dict) -> dict:
@@ -541,25 +592,6 @@ def train_role_adapter(
         except Exception as e:
             print(f"[경고] val_file 로드/전처리 실패 → train-only로 진행합니다: {e}")
             eval_ds = None
-    else:
-
-        def _batch_to_messages(batch: dict) -> dict:
-            msgs = []
-            for i in range(len(batch["instruction"])):
-                msgs.append(
-                    _messages_from_row(
-                        batch["instruction"][i],
-                        batch["input"][i],
-                        batch["output"][i],
-                    )
-                )
-            return {"messages": msgs}
-
-        train_ds = dataset["train"].map(
-            _batch_to_messages,
-            batched=True,
-            remove_columns=dataset["train"].column_names,
-        )
 
     # SFT 설정 — 디바이스별 분기
     _completion_only = completion_only_loss if dataset_format == "prompt_completion" else False
