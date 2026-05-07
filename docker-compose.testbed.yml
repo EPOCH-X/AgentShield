@@ -39,14 +39,11 @@ services:
     environment:
       - IS_PERSISTENT=TRUE
       - ALLOW_RESET=TRUE
-<<<<<<< HEAD
     healthcheck:
       test: ["CMD-SHELL", "chroma --help >/dev/null 2>&1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10
-=======
->>>>>>> origin/develop
 
   # ── Mailpit (이메일 샌드박스) ────────────────────────────────────────────────
   mailpit:
@@ -92,11 +89,7 @@ services:
       - ./data/testbed_kb:/app/data/testbed_kb:ro
     command: uvicorn testbed.tool_gateway.app:app --host 0.0.0.0 --port 8020 --reload
     healthcheck:
-<<<<<<< HEAD
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8020/health', timeout=3)\" || exit 1"]
-=======
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8020/health', timeout=5).read()\""]
->>>>>>> origin/develop
       interval: 5s
       timeout: 5s
       retries: 10
@@ -127,11 +120,7 @@ services:
         condition: service_healthy
     command: uvicorn testbed.target_chatbot.app:app --host 0.0.0.0 --port 8010 --reload
     healthcheck:
-<<<<<<< HEAD
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=3)\" || exit 1"]
-=======
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=5).read()\""]
->>>>>>> origin/develop
       interval: 5s
       timeout: 5s
       retries: 10
