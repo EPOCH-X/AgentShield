@@ -361,6 +361,7 @@ def train_role_adapter(
     assistant_only_loss: bool = True,
     dataset_format: str = "prompt_completion",
     completion_only_loss: bool = True,
+    val_file: str | None = None,
 ):
     """
     역할별 LoRA 어댑터 학습 및 (선택) Ollama Modelfile/등록.
@@ -466,6 +467,80 @@ def train_role_adapter(
             return {"text": texts}
 
         train_ds = dataset["train"].map(
+            _batch_to_messages,
+            batched=True,
+            remove_columns=dataset["train"].column_names,
+        )
+
+    # ── validation 데이터셋 (선택) ───────────────────────────────────────────────
+    eval_ds = None
+    if val_file:
+        try:
+            val_dataset = load_dataset("json", data_files=val_file)
+            print(f"  검증 샘플 수: {len(val_dataset['train'])}")
+            if dataset_format == "prompt_completion":
+
+                def _batch_to_pc_eval(batch: dict) -> dict:
+                    prompts = []
+                    completions = []
+                    for i in range(len(batch["instruction"])):
+                        row = _prompt_completion_strings_from_row(
+                            tokenizer,
+                            batch["instruction"][i],
+                            batch["input"][i],
+                            batch["output"][i],
+                        )
+                        prompts.append(row["prompt"])
+                        completions.append(row["completion"])
+                    return {"prompt": prompts, "completion": completions}
+
+                eval_ds = val_dataset["train"].map(
+                    _batch_to_pc_eval,
+                    batched=True,
+                    remove_columns=val_dataset["train"].column_names,
+                )
+            elif dataset_format == "chat_text":
+
+                def _batch_to_text_eval(batch: dict) -> dict:
+                    texts = []
+                    for i in range(len(batch["instruction"])):
+                        texts.append(
+                            _chat_text_from_row(
+                                tokenizer,
+                                batch["instruction"][i],
+                                batch["input"][i],
+                                batch["output"][i],
+                            )
+                        )
+                    return {"text": texts}
+
+                eval_ds = val_dataset["train"].map(
+                    _batch_to_text_eval,
+                    batched=True,
+                    remove_columns=val_dataset["train"].column_names,
+                )
+            else:
+
+                def _batch_to_messages_eval(batch: dict) -> dict:
+                    msgs = []
+                    for i in range(len(batch["instruction"])):
+                        msgs.append(
+                            _messages_from_row(
+                                batch["instruction"][i],
+                                batch["input"][i],
+                                batch["output"][i],
+                            )
+                        )
+                    return {"messages": msgs}
+
+                eval_ds = val_dataset["train"].map(
+                    _batch_to_messages_eval,
+                    batched=True,
+                    remove_columns=val_dataset["train"].column_names,
+                )
+        except Exception as e:
+            print(f"[경고] val_file 로드/전처리 실패 → train-only로 진행합니다: {e}")
+            eval_ds = None
             _batch_to_text,
             batched=True,
             remove_columns=dataset["train"].column_names,
@@ -517,6 +592,8 @@ def train_role_adapter(
             fp16=not _cuda_bf16,
             bf16=_cuda_bf16,
             optim="paged_adamw_32bit",
+            evaluation_strategy="epoch" if eval_ds is not None else "no",
+            eval_steps=None,
             **sft_common,
         )
     else:
@@ -526,6 +603,8 @@ def train_role_adapter(
             fp16=False,
             bf16=False,
             optim="adamw_torch",
+            evaluation_strategy="epoch" if eval_ds is not None else "no",
+            eval_steps=None,
             **sft_common,
         )
 
@@ -533,6 +612,7 @@ def train_role_adapter(
         model=model,
         args=sft_args,
         train_dataset=train_ds,
+        eval_dataset=eval_ds,
         processing_class=tokenizer,
     )
     trainer.train()
@@ -629,6 +709,11 @@ if __name__ == "__main__":
         action="store_true",
         help="dataset-format messages 일 때만: 전체 시퀀스 loss.",
     )
+    parser.add_argument(
+        "--val-data",
+        default=None,
+        help="검증용 JSONL 데이터 경로 (예: data/finetuning/blue_val.jsonl). 미지정 시 train-only.",
+    )
     args = parser.parse_args()
 
     # 출력 경로 결정 (스크립트 내 기본값)
@@ -654,4 +739,5 @@ if __name__ == "__main__":
         assistant_only_loss=not args.no_assistant_only_loss,
         dataset_format=args.dataset_format,
         completion_only_loss=not args.full_sequence_loss,
+        val_file=args.val_data,
     )
