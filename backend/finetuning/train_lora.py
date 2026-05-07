@@ -541,10 +541,6 @@ def train_role_adapter(
         except Exception as e:
             print(f"[경고] val_file 로드/전처리 실패 → train-only로 진행합니다: {e}")
             eval_ds = None
-            _batch_to_text,
-            batched=True,
-            remove_columns=dataset["train"].column_names,
-        )
     else:
 
         def _batch_to_messages(batch: dict) -> dict:
