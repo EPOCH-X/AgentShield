@@ -1,239 +1,263 @@
 """
-[R4] 파인튜닝 — QLoRA 학습 코드 (공용)
+[R4] Red Agent QLoRA SFT — Qwen3.5-2B Abliterated
+TRL 1.3.0 기준: SFTConfig + SFTTrainer(peft_config=) API 사용
 
-기능별 파이프라인 섹션 8 참조.
-사용법: python train_lora.py --role red --data data/finetuning/red_train.jsonl --output adapters/lora-red
+사용법:
+  python backend/finetuning/train_lora.py \
+    --role red \
+    --data data/finetuning/red_train_qwen35_2b_4096_compressed.jsonl \
+    --output adapters/lora-red-qwen35-2b-abliterated
 
-학습 설정:
-  기반 모델: Gemma 4 E2B
-  양자화: QLoRA (4-bit NF4)
-  LoRA: r=16, lora_alpha=32, target_modules=[q/v/k/o_proj]
-  학습: batch=4, grad_accum=4, epochs=3, lr=2e-4, max_seq=2048
+환경변수:
+  RED_SFT_BASE_MODEL   로컬 경로 또는 HF 모델 ID
+                       (기본: /Users/parkyeonggon/.cache/huggingface/qwen3.5-2b-abliterated)
+  LORA_RED_PATH        --output 미지정 시 저장 경로
+
+데이터 포맷:
+  {"text": "<|im_start|>system\\n...<|im_end|>\\n<|im_start|>user\\n...<|im_end|>\\n<|im_start|>assistant\\n...<|im_end|>\\n"}
+  → scripts/prepare_red_sft_data.py --model <경로> 로 생성
 """
 
-# TODO: [R4] 구현
-# - train_role_adapter(role, train_file, output_dir)
-# - argparse CLI
-
 import os
-import sys
-current_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.abspath(os.path.join(current_dir, "../../"))
-sys.path.append(project_root)
+import time
 import torch
 import argparse
 import subprocess
-from transformers import (
-    AutoModelForCausalLM, 
-    AutoTokenizer, 
-    BitsAndBytesConfig, 
-    TrainingArguments
-)
-from peft import (
-    LoraConfig,
-    get_peft_model,
-    prepare_model_for_kbit_training
-)
-from trl import SFTTrainer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback, TrainerState, TrainerControl
+from peft import LoraConfig
+from trl import SFTTrainer, SFTConfig
 from datasets import load_dataset
 
-from backend.config import settings
+
+_RED_MODEL_ID = os.getenv(
+    "RED_SFT_BASE_MODEL",
+    "/Users/parkyeonggon/.cache/huggingface/qwen3.5-2b-abliterated",
+)
+
+# Qwen 계열 표준 LoRA 타겟 (Qwen2/3 공통, wrapper 없이 직접 nn.Linear)
+_QWEN_LORA_MODULES = [
+    "q_proj", "k_proj", "v_proj", "o_proj",
+    "gate_proj", "up_proj", "down_proj",
+]
+
+_CHATML_MARKERS = ("<|im_start|>", "<|im_end|>")
 
 
-def detect_device():
-    """
-    학습 환경 자동 감지.
-    CUDA(NVIDIA GPU) > MPS(Apple Silicon) > CPU 순으로 우선 선택.
-    """
+class _ProgressCallback(TrainerCallback):
+
+    def __init__(self):
+        self._t0 = time.time()
+        self._last_loss: float | None = None
+
+    def on_train_begin(self, args, state: TrainerState, control: TrainerControl, **_):
+        print(f"\n{'─'*55}")
+        print(f"  학습 시작 | 총 {state.max_steps} steps | {args.num_train_epochs} epochs")
+        print(f"  배치={args.per_device_train_batch_size} | grad_accum={args.gradient_accumulation_steps} | lr={args.learning_rate}")
+        print(f"{'─'*55}")
+        return control
+
+    def on_log(self, args, state: TrainerState, control: TrainerControl, logs=None, **_):
+        loss = (logs or {}).get("loss")
+        if loss is None:
+            return control
+        elapsed = time.time() - self._t0
+        step = state.global_step
+        total = state.max_steps or 1
+        pct = step / total * 100
+        eta_s = elapsed / step * (total - step) if step > 0 else 0
+        eta = f"{int(eta_s // 60)}m{int(eta_s % 60)}s"
+        lr = logs.get("learning_rate", 0)
+        gn = logs.get("grad_norm", 0)
+        epoch = logs.get("epoch", 0)
+        trend = ""
+        if self._last_loss is not None:
+            trend = "↓" if loss < self._last_loss else ("↑" if loss > self._last_loss else "→")
+        self._last_loss = loss
+        print(
+            f"  [{pct:5.1f}%] step={step}/{total} | epoch={epoch:.2f} | "
+            f"loss={loss:.4f}{trend} | grad={gn:.3f} | lr={lr:.2e} | ETA={eta}"
+        )
+        return control
+
+    def on_epoch_end(self, _args, state: TrainerState, control: TrainerControl, **_kw):
+        elapsed = time.time() - self._t0
+        loss_str = f"{self._last_loss:.4f}" if self._last_loss else "?"
+        print(f"\n  ✓ Epoch {int(round(state.epoch or 0))} 완료 | loss={loss_str} | 경과={int(elapsed // 60)}m{int(elapsed % 60)}s\n")
+        return control
+
+    def on_train_end(self, _args, _state: TrainerState, control: TrainerControl, **_kw):
+        elapsed = time.time() - self._t0
+        print(f"\n{'─'*55}")
+        if self._last_loss:
+            print(f"  학습 완료 | 총 {int(elapsed // 60)}m{int(elapsed % 60)}s | 최종 loss={self._last_loss:.4f}")
+        else:
+            print("  학습 완료")
+        print(f"{'─'*55}\n")
+        return control
+
+
+def detect_device() -> str:
     if torch.cuda.is_available():
         return "cuda"
     elif torch.backends.mps.is_available():
         return "mps"
-    else:
-        return "cpu"
+    return "cpu"
 
 
-def train_role_adapter(role: str, train_file: str, output_dir: str):
-    """
-    역할별 LoRA 어댑터 학습 및 Ollama 연동 자동화.
-    CUDA / MPS / CPU 환경을 자동 감지하여 설정을 분기한다.
-    """
+def _verify_data_format(train_file: str) -> None:
+    with open(train_file, encoding="utf-8") as f:
+        first_line = f.readline()
+    if not any(m in first_line for m in _CHATML_MARKERS):
+        raise ValueError(
+            f"\n[데이터 포맷 오류] {train_file} 이 ChatML(<|im_start|>) 포맷이 아닙니다.\n"
+            "먼저 실행하세요:\n"
+            "  python scripts/prepare_red_sft_data.py "
+            f"--model {_RED_MODEL_ID} --output <출력경로>"
+        )
+
+
+def train_role_adapter(role: str, train_file: str, output_dir: str) -> None:
     device_type = detect_device()
-    use_quantization = (device_type == "cuda")  # QLoRA(bitsandbytes)는 CUDA 전용
+    use_quantization = device_type == "cuda"
 
-    print(f"\n" + "="*50)
-    print(f"[{role.upper()}] 파인튜닝 시작")
-    print(f" - 데이터: {train_file}")
-    print(f" - 출력 경로: {output_dir}")
-    print(f" - 감지된 디바이스: {device_type}")
-    print(f" - QLoRA 4-bit 양자화: {'ON' if use_quantization else 'OFF (bitsandbytes는 CUDA 전용)'}")
-    print("="*50 + "\n")
+    print(f"\n{'='*55}")
+    print(f"[{role.upper()}] Red Agent SFT (Qwen3.5-2B, TRL 1.3.0)")
+    print(f"  모델    : {_RED_MODEL_ID}")
+    print(f"  데이터  : {train_file}")
+    print(f"  출력    : {output_dir}")
+    print(f"  디바이스: {device_type} | QLoRA: {'ON' if use_quantization else 'OFF'}")
+    print(f"{'='*55}\n")
 
-    # 모델 id 설정
-    model_id = "google/gemma-4-E2B"
+    _verify_data_format(train_file)
 
-    # 기반 모델 로드 — CUDA는 QLoRA 4-bit, MPS/CPU는 float16 전체 로드
+    # ── 모델 로드 ──────────────────────────────────────────────
     if use_quantization:
+        from transformers import BitsAndBytesConfig
         bnb_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16
+            bnb_4bit_compute_dtype=torch.bfloat16,
         )
         model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            quantization_config=bnb_config,
-            device_map="auto"
+            _RED_MODEL_ID, quantization_config=bnb_config, device_map="auto",
         )
+    elif device_type == "mps":
+        model = AutoModelForCausalLM.from_pretrained(
+            _RED_MODEL_ID, dtype=torch.float16,
+        )
+        model = model.to("mps")
     else:
         model = AutoModelForCausalLM.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16,
-            device_map="auto" if device_type == "cpu" else None
+            _RED_MODEL_ID, dtype=torch.float16,
         )
-        if device_type == "mps":
-            model = model.to("mps")
 
-    # 토그나이저
-    tokenizer = AutoTokenizer.from_pretrained(model_id)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"  모델 파라미터: {total_params/1e9:.2f}B")
+
+    # ── 토크나이저 ─────────────────────────────────────────────
+    tokenizer = AutoTokenizer.from_pretrained(_RED_MODEL_ID)
     if tokenizer.pad_token_id is None:
-        tokenizer.pad_token = tokenizer.default_bos_token
+        tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.pad_token_id = tokenizer.eos_token_id
     tokenizer.padding_side = "right"
 
-    # LoRA 설정
+    # ── LoRA 설정 ──────────────────────────────────────────────
     lora_config = LoraConfig(
-        r=16, 
-        lora_alpha=32, 
-        lora_dropout=0.1,
-        target_modules=["q_proj", "v_proj", "k_proj", "o_proj"],
+        r=64,
+        lora_alpha=128,
+        lora_dropout=0.05,
+        target_modules=_QWEN_LORA_MODULES,
         task_type="CAUSAL_LM",
-        bias="none"
+        bias="none",
     )
 
-    if use_quantization:
-        model = prepare_model_for_kbit_training(model)
-    model = get_peft_model(model, lora_config)
-    model.print_trainable_parameters()
-
-    # 데이터셋 로드
+    # ── 데이터셋 로드 ──────────────────────────────────────────
     dataset = load_dataset("json", data_files=train_file)
+    print(f"  학습 샘플 수: {len(dataset['train'])}")
 
-    def formatting_prompts_func(example):
-        output_texts = []
-        for i in range(len(example['instruction'])):
-            # Gemma 전용 프롬프트 템플릿 적용 (2026년 기준 표준 가안)
-            text = f"<start_of_turn>user\n{example['instruction'][i]}\n{example['input'][i]}<end_of_turn>\n"
-            text += f"<start_of_turn>model\n{example['output'][i]}<end_of_turn>"
-            output_texts.append(text)
-        return output_texts
+    # ── SFTConfig ─────────────────────────────────────────────
+    sft_common = dict(
+        output_dir=output_dir,
+        dataset_text_field="text",
+        max_length=4096,
+        packing=False,
+        num_train_epochs=3,
+        learning_rate=2e-4,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.03,
+        save_strategy="epoch",
+        logging_steps=5,
+        max_grad_norm=0.3,
+        gradient_checkpointing=True,
+        report_to="none",
+        remove_unused_columns=False,
+    )
 
-    # 학습 설정 — 디바이스별 분기
     if device_type == "cuda":
-        training_args = TrainingArguments(
-            output_dir=output_dir,
+        sft_args = SFTConfig(
+            **sft_common,
             per_device_train_batch_size=4,
             gradient_accumulation_steps=4,
-            num_train_epochs=3,
-            learning_rate=2e-4,
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.03,
-            fp16=True,
+            bf16=True,
             optim="paged_adamw_32bit",
-            save_strategy="epoch",
-            logging_steps=10,
-            max_grad_norm=0.3,
-            gradient_checkpointing=True
         )
     else:
-        # MPS / CPU — fp16 OFF, 표준 optimizer, 배치 축소
-        training_args = TrainingArguments(
-            output_dir=output_dir,
-            per_device_train_batch_size=2,
-            gradient_accumulation_steps=8,
-            num_train_epochs=3,
-            learning_rate=2e-4,
-            lr_scheduler_type="cosine",
-            warmup_ratio=0.03,
+        sft_args = SFTConfig(
+            **sft_common,
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=16,
             fp16=False,
+            bf16=False,
             optim="adamw_torch",
-            save_strategy="epoch",
-            logging_steps=10,
-            max_grad_norm=0.3,
-            gradient_checkpointing=True,
-            use_mps_device=(device_type == "mps")
         )
 
-    # SFTTrainer로 학습
+    # ── SFTTrainer ─────────────────────────────────────────────
     trainer = SFTTrainer(
-        model=model, 
-        args=training_args,
+        model=model,
+        args=sft_args,
         train_dataset=dataset["train"],
-        dataset_text_field="text",   # JSONL 파일 내에서 학습할 텍스트가 있는 키 값 지정 필수
-        formatting_func=formatting_prompts_func,
-        tokenizer=tokenizer,
-        max_seq_length=2048,
-        packing=False
+        processing_class=tokenizer,
+        peft_config=lora_config,
+        callbacks=[_ProgressCallback()],
     )
     trainer.train()
 
-    # 모델과 토크나이저를 함께 저장
     trainer.save_model(output_dir)
     tokenizer.save_pretrained(output_dir)
-    print(f"[{role.upper()}] 어댑터 저장 완료: {output_dir}")
+    print(f"\n[{role.upper()}] 어댑터 저장 완료: {output_dir}")
 
-    # Ollama 자동 연동을 위한 Modelfile 생성
+    # ── Modelfile 생성 ─────────────────────────────────────────
     modelfile_path = os.path.join(output_dir, "Modelfile")
-    adapter_file = "adapter_model.safetensors" if os.path.exists(os.path.join(output_dir, "adapter_model.safetensors")) else "adapter_model.bin"
-    absolute_adapter_path = os.path.abspath(os.path.join(output_dir, adapter_file))
-
-    modelfile_content = f"FROM {settings.OLLAMA_MODEL}\nADAPTER {absolute_adapter_path}"
+    adapter_file = (
+        "adapter_model.safetensors"
+        if os.path.exists(os.path.join(output_dir, "adapter_model.safetensors"))
+        else "adapter_model.bin"
+    )
+    abs_adapter = os.path.abspath(os.path.join(output_dir, adapter_file))
+    ollama_base = os.getenv("OLLAMA_RED_MODEL", "hauhau-qwen-aggressive:latest")
 
     with open(modelfile_path, "w", encoding="utf-8") as f:
-        f.write(modelfile_content)
+        f.write(f"FROM {ollama_base}\nADAPTER {abs_adapter}\n")
 
-    agent_name = f"agent-{role}"
-    print("=" * 50)
-    print(f"\n[Ollama {agent_name} 자동 저장 시작]\n")
-    try:
-        # subprocess.run을 사용해 터미널 명령어를 직접 실행합니다.
-        result = subprocess.run(
-            ["ollama", "create", agent_name, "-f", modelfile_path],
-            capture_output=True, # 실행 결과를 변수에 담음
-            text=True,           # 출력을 문자열로 처리
-            check=True           # 명령어 실패 시 예외 발생
-        )
-        print(f"[Ollama] 등록 성공: {result.stdout.strip()}")
-    except subprocess.CalledProcessError as e:
-        print(f"[Ollama] 등록 실패: {e.stderr}")
-    except FileNotFoundError:
-        print("[Ollama] 시스템에서 'ollama' 명령어를 찾을 수 없습니다. Ollama가 설치되어 있나요?")
-        
-    print(f"\n[완료 {role.upper()}] 아래의 수동버전은 실행할 필요 없습니다.\n")
+    print(f"[Ollama] Modelfile 생성: {modelfile_path}")
+    print(f"  ※ adapter 병합/변환 후 Ollama 등록 필요:")
+    print(f"     ollama create agent-{role} -f {modelfile_path}")
 
-    print("=" * 50)
-    print(f"\n[Ollama 연동 가이드 - 수동]\n")
-    print(f"다음 명령어를 터미널에 입력하여 '{role}' 에이전트를 Ollama에 등록하세요:")
-    print(f"ollama create agent-{role} -f {modelfile_path}\n")
-  
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Role-based LoRA Fine-tuning")
-    parser.add_argument("--role", choices=["red", "judge", "blue"], required=True, help="에이전트 역할")
-    parser.add_argument("--data", required=True, help="학습용 JSONL 데이터 경로")
-    parser.add_argument("--output", default=None, help="어댑터 저장 경로 (입력하지 않으면 settings 기본 경로 사용)")
+    parser = argparse.ArgumentParser(description="Red Agent QLoRA SFT (Qwen3.5-2B, TRL 1.3.0)")
+    parser.add_argument("--role", choices=["red", "judge", "blue"], required=True)
+    parser.add_argument("--data", required=True, help="JSONL 경로 (ChatML 포맷)")
+    parser.add_argument("--output", default=None)
     args = parser.parse_args()
-    
-    # 출력 경로 결정 (settings 기본값)
-    if args.output:
-        final_output = args.output
-    else:
-        path_map = {
-            "red": settings.LORA_RED_PATH,
-            "judge": settings.LORA_JUDGE_PATH,
-            "blue": settings.LORA_BLUE_PATH
-        }
-        final_output = path_map[args.role]
 
-    print(f"최종 저장 경로가 '{final_output}'(으)로 설정되었습니다.")
+    final_output = args.output or {
+        "red":   os.getenv("LORA_RED_PATH",   "./adapters/lora-red-qwen35-2b-abliterated"),
+        "judge": os.getenv("LORA_JUDGE_PATH",  "./adapters/lora-judge"),
+        "blue":  os.getenv("LORA_BLUE_PATH",   "./adapters/lora-blue"),
+    }[args.role]
 
     os.makedirs(final_output, exist_ok=True)
+    print(f"저장 경로: {final_output}")
     train_role_adapter(args.role, args.data, final_output)

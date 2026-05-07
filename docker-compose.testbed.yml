@@ -1,3 +1,5 @@
+version: "3.9"
+
 # AgentShield Testbed — 기존 docker-compose.yml과 독립적으로 동작
 # 기존 포트(8000~8004, 5432) 와 충돌 없음
 #
@@ -37,12 +39,6 @@ services:
     environment:
       - IS_PERSISTENT=TRUE
       - ALLOW_RESET=TRUE
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo >/dev/tcp/127.0.0.1/8000' || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
 
   # ── Mailpit (이메일 샌드박스) ────────────────────────────────────────────────
   mailpit:
@@ -56,7 +52,7 @@ services:
       MP_SMTP_AUTH_ACCEPT_ANY: 1
       MP_SMTP_AUTH_ALLOW_INSECURE: 1
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8025/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8025 || wget -q -O- http://127.0.0.1:8025/ >/dev/null 2>&1 || exit 1"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -67,8 +63,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: testbed-tool-gateway
-    env_file:
-      - .env
     ports:
       - "8020:8020"
     environment:
@@ -83,14 +77,14 @@ services:
       postgres_testbed:
         condition: service_healthy
       chromadb_testbed:
-        condition: service_healthy
+        condition: service_started
       mailpit:
         condition: service_healthy
     volumes:
       - ./data/testbed_kb:/app/data/testbed_kb:ro
     command: uvicorn testbed.tool_gateway.app:app --host 0.0.0.0 --port 8020 --reload
     healthcheck:
-      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8020/health')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8020/health', timeout=5).read()\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -102,28 +96,26 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: testbed-chatbot
-    env_file:
-      - .env
     ports:
       - "8010:8010"
     environment:
       OLLAMA_BASE_URL: ${TESTBED_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3.5:4b}
-      TESTBED_SECURITY_MODE: ${TESTBED_SECURITY_MODE:-weak}
-      TOOL_GATEWAY_URL: ${TESTBED_TOOL_GATEWAY_DOCKER_URL:-http://tool_gateway:8020}
-      TESTBED_PORT: ${TESTBED_PORT:-8010}
+      OLLAMA_MODEL: ${OLLAMA_MODEL}
+      TESTBED_SECURITY_MODE: ${TESTBED_SECURITY_MODE:-strict}
       TESTBED_OLLAMA_TIMEOUT: ${TESTBED_OLLAMA_TIMEOUT:-180}
       TESTBED_OLLAMA_MAX_RETRIES: ${TESTBED_OLLAMA_MAX_RETRIES:-5}
       TESTBED_OLLAMA_TEMPERATURE: ${TESTBED_OLLAMA_TEMPERATURE:-0.2}
       TESTBED_OLLAMA_NUM_CTX: ${TESTBED_OLLAMA_NUM_CTX:-4096}
-      TESTBED_MAX_TOOL_LOOPS: ${TESTBED_MAX_TOOL_LOOPS:-3}
-      TESTBED_TOOL_GATEWAY_TIMEOUT: ${TESTBED_TOOL_GATEWAY_TIMEOUT:-180}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30s}
+      LLM_DEFAULT_NUM_PREDICT: ${LLM_DEFAULT_NUM_PREDICT:-1024}
+      TOOL_GATEWAY_URL: http://tool_gateway:8020
+      TESTBED_PORT: 8010
     depends_on:
       tool_gateway:
         condition: service_healthy
     command: uvicorn testbed.target_chatbot.app:app --host 0.0.0.0 --port 8010 --reload
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8010/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=5).read()\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -135,8 +127,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: testbed-db-seed
-    env_file:
-      - .env
     environment:
       TESTBED_DB_URL: postgresql://testbed:testbed@postgres_testbed:5432/testbed
     depends_on:
@@ -151,14 +141,12 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: testbed-kb-ingest
-    env_file:
-      - .env
     environment:
       TESTBED_CHROMADB_HOST: chromadb_testbed
       TESTBED_CHROMADB_PORT: 8000
     depends_on:
       chromadb_testbed:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - ./data/testbed_kb:/app/data/testbed_kb:ro
     command: python scripts/ingest_testbed_kb.py
