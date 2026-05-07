@@ -588,8 +588,7 @@ def train_role_adapter(
             fp16=not _cuda_bf16,
             bf16=_cuda_bf16,
             optim="paged_adamw_32bit",
-            evaluation_strategy="epoch" if eval_ds is not None else "no",
-            eval_steps=None,
+            eval_strategy="epoch" if eval_ds is not None else "no",
             **sft_common,
         )
     else:
@@ -599,8 +598,7 @@ def train_role_adapter(
             fp16=False,
             bf16=False,
             optim="adamw_torch",
-            evaluation_strategy="epoch" if eval_ds is not None else "no",
-            eval_steps=None,
+            eval_strategy="epoch" if eval_ds is not None else "no",
             **sft_common,
         )
 
