@@ -74,6 +74,7 @@ type JudgeResult = {
   detail?: string;
   failure_mode?: string;
   mitre_technique_id?: string;
+  category?: string;
   debug_nodes?: {
     evidence_scan_result?: Record<string, unknown>;
     strict_auditor?: Record<string, unknown>;
@@ -124,6 +125,43 @@ const JUDGE_FLOW = [
     node: "final_judge",
   },
 ];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  LLM01: "프롬프트 인젝션 판정",
+  LLM02: "민감 정보 유출 판정",
+  LLM06: "과도한 에이전시 판정",
+  LLM07: "시스템 프롬프트 유출 판정",
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  LLM01: "text-[#F59E0B]",
+  LLM02: "text-error",
+  LLM06: "text-[#F97316]",
+  LLM07: "text-[#A78BFA]",
+};
+
+const CATEGORY_DANGER: Record<string, { title: string; description: string; impact: string }> = {
+  LLM01: {
+    title: "프롬프트 인젝션",
+    description: "공격자가 입력에 악의적인 명령을 삽입해 AI 시스템의 원래 지시를 무력화합니다. 시스템 프롬프트 우회, 권한 없는 행동 실행, 데이터 조작이 가능하며 전체 에이전트 파이프라인이 공격자의 통제 하에 놓일 수 있습니다.",
+    impact: "시스템 명령 무력화 · 비인가 작업 실행 · 데이터 조작",
+  },
+  LLM02: {
+    title: "민감 정보 유출",
+    description: "AI 모델이 학습 데이터, 시스템 프롬프트, 내부 설정, 사용자 개인정보를 외부에 노출합니다. API 키, 비밀번호, 고객 정보가 포함될 수 있으며 GDPR·개인정보보호법 위반 및 심각한 비즈니스 피해로 이어집니다.",
+    impact: "개인정보 유출 · API 키·내부 설정 노출 · 법적 제재",
+  },
+  LLM06: {
+    title: "과도한 에이전시",
+    description: "AI 에이전트가 명시적인 승인 없이 외부 시스템에 영향을 미치는 행동을 자율적으로 실행합니다. 데이터베이스 삭제, 이메일 전송, 외부 API 호출 등 취소 불가능한 행동이 발생할 수 있습니다.",
+    impact: "비인가 데이터 삭제·수정 · 외부 시스템 제어 · 취소 불가 작업 실행",
+  },
+  LLM07: {
+    title: "시스템 프롬프트 유출",
+    description: "AI 시스템의 내부 설정, 역할 정의, 운영 지침, 비밀 토큰이 외부에 노출됩니다. 공격자는 시스템 구조를 역공학하여 더 정교한 후속 공격을 설계하거나 내부 보안 정책을 우회할 수 있습니다.",
+    impact: "내부 보안 정책 노출 · 후속 공격 가능 · 시스템 구조 역공학",
+  },
+};
 
 const LEAK_TOKENS = [
   "INTERNAL_API_KEY",
@@ -276,13 +314,13 @@ function ErdEntity({
 
   return (
     <div className={`min-w-0 rounded-lg border ${toneClass}`}>
-      <div className="flex items-center gap-3 border-b border-current/20 px-4 py-3">
+      <div className="flex items-center gap-3 border-b border-current/20 px-4 py-2">
         <span className="material-symbols-outlined text-[22px]">{icon}</span>
         <p className="break-words font-mono text-base font-black leading-tight">{title}</p>
       </div>
-      <div className="space-y-2 p-3">
+      <div className="space-y-1.5 p-2">
         {rows.map(([field, value], idx) => (
-          <div key={`${title}-${field}`} className="grid gap-2 rounded-md bg-black/24 px-3 py-2 md:grid-cols-[170px_minmax(0,1fr)]">
+          <div key={`${title}-${field}`} className="grid gap-2 rounded-md bg-black/24 px-3 py-1.5 md:grid-cols-[170px_minmax(0,1fr)]">
             <p className={`break-words font-mono text-xs font-black leading-5 ${idx === 0 ? "text-on-surface" : "text-current"}`}>
               {idx === 0 ? `PK ${field}` : field}
             </p>
@@ -422,7 +460,14 @@ function nodeResult(judge: JudgeResult | undefined, node: string) {
   }
 
   const raw = judge.debug_nodes?.[node as keyof NonNullable<JudgeResult["debug_nodes"]>];
-  const record = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if (!raw) {
+    return {
+      result: judge.judgment || "대기",
+      desc: "노드 상세 데이터 없음",
+      logs: [] as string[],
+    };
+  }
+  const record = typeof raw === "object" ? (raw as Record<string, unknown>) : {};
   const result = stringifyLogValue(record.judgment || record.verdict || record.result || record.hard_veto || "unknown");
   const desc = stringifyLogValue(record.reason || record.detail || record.summary || record.evidence || "노드 결과");
   const logs = Object.entries(record)
@@ -439,10 +484,43 @@ function judgeFacts(judge?: JudgeResult) {
     ["판정", judge.judgment || "-"],
     ["점수", judge.score ?? judge.confidence ?? "-"],
     ["심각도", judge.severity || "-"],
-    ["카테고리", "LLM02"],
+    ["카테고리", judge.category || "LLM02"],
     ["공격 유형", judge.failure_mode || "-"],
     ["MITRE", judge.mitre_technique_id || "-"],
   ];
+}
+
+function AgentStatusBadge({
+  label,
+  status,
+  color = "primary",
+}: {
+  label: string;
+  status: "idle" | "loading" | "done" | "error";
+  color?: "primary" | "error" | "tertiary";
+}) {
+  const colorMap = {
+    primary: "border-primary/30 bg-primary/[0.07] text-primary",
+    error: "border-error/30 bg-error/[0.07] text-error",
+    tertiary: "border-tertiary/30 bg-tertiary/[0.07] text-tertiary",
+  };
+  return (
+    <div className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 text-[11px] font-black ${colorMap[color]}`}>
+      {status === "loading" ? (
+        <span className="agent-pulse h-2 w-2 shrink-0 rounded-full bg-current" />
+      ) : status === "done" ? (
+        <span className="material-symbols-outlined shrink-0 text-sm">check_circle</span>
+      ) : status === "error" ? (
+        <span className="material-symbols-outlined shrink-0 text-sm text-error">error</span>
+      ) : (
+        <span className="h-2 w-2 shrink-0 rounded-full bg-current opacity-25" />
+      )}
+      <span className="font-mono">{label}</span>
+      <span className="ml-1 font-mono text-[10px] text-on-surface-variant/55">
+        {status === "loading" ? "실행 중" : status === "done" ? "완료" : status === "error" ? "오류" : "대기"}
+      </span>
+    </div>
+  );
 }
 
 function verdictClass(value?: string | null) {
@@ -529,6 +607,41 @@ export default function DemoPage() {
   const [attackJudge, setAttackJudge] = useState<JudgeState>({ status: "idle" });
   const [defenseJudge, setDefenseJudge] = useState<JudgeState>({ status: "idle" });
   const [defenseState, setDefenseState] = useState<DefenseState>({ status: "idle" });
+  const [translatedDetail, setTranslatedDetail] = useState<string | null>(null);
+  const [isTranslatingDetail, setIsTranslatingDetail] = useState(false);
+  const [translatedRationale, setTranslatedRationale] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (attackJudge.status !== "done" || defenseJudge.status !== "done") return;
+    const detail = attackJudge.result?.detail;
+    if (!detail) return;
+    setTranslatedDetail(null);
+    setIsTranslatingDetail(true);
+    fetch("/api/demo/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: detail }),
+    })
+      .then((res) => res.json())
+      .then((data: { translated?: string }) => { if (data.translated) setTranslatedDetail(data.translated); })
+      .catch(() => {})
+      .finally(() => setIsTranslatingDetail(false));
+  }, [attackJudge.status, defenseJudge.status, attackJudge.result?.detail]);
+
+  useEffect(() => {
+    if (defenseJudge.status !== "done") return;
+    const rationale = defenseState.rationale;
+    if (!rationale) return;
+    setTranslatedRationale(null);
+    fetch("/api/demo/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: rationale }),
+    })
+      .then((res) => res.json())
+      .then((data: { translated?: string }) => { if (data.translated) setTranslatedRationale(data.translated); })
+      .catch(() => {});
+  }, [defenseJudge.status, defenseState.rationale]);
 
   useEffect(() => {
     let mounted = true;
@@ -709,6 +822,9 @@ export default function DemoPage() {
     [...defenseMessages].reverse().find((message) => message.role === "assistant" && message.tone === "defense")?.content || "";
   const shownResponse = lastAttackResponse;
   const activeView = viewForStep(step);
+  // Judge badge on page 2: only activate after Red Agent completes
+  const page2JudgeStatus: "idle" | "loading" | "done" | "error" =
+    adaptiveState.status === "loading" ? "idle" : attackJudge.status;
   const runtimeValue = (key: string) => context.runtime_context.find((item) => item.key === key)?.value || "-";
   const toolRisk = (name: string) => context.tools.find((item) => item.name === name)?.risk || "-";
 
@@ -812,11 +928,20 @@ export default function DemoPage() {
 
         {activeView === "attack" && (
           <section className="grid gap-5 xl:grid-cols-[1fr_0.42fr]">
-            <div className="glass-panel flex min-h-[650px] flex-col rounded-[2rem] p-0">
+            <div className="glass-panel flex h-[730px] flex-col rounded-[2rem] p-0">
               <div className="border-b border-white/10 p-6">
                 <div className="flex items-center gap-3">
                   <span className="material-symbols-outlined text-error">terminal</span>
                   <h2 className="font-headline text-2xl font-black text-on-surface">공격 시연</h2>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <AgentStatusBadge
+                    label="Target Chatbot"
+                    status={attackState.status === "loading" ? "loading" : attackState.status === "live" ? "done" : attackState.status === "error" ? "error" : "idle"}
+                    color="primary"
+                  />
+                  <AgentStatusBadge label="Red Agent" status={adaptiveState.status} color="error" />
+                  <AgentStatusBadge label="Judge Agent" status={page2JudgeStatus} color="primary" />
                 </div>
               </div>
 
@@ -845,7 +970,13 @@ export default function DemoPage() {
                   <textarea
                     value={attackInput}
                     onChange={(event) => setAttackInput(event.target.value)}
-                    placeholder="공격 프롬프트를 붙여넣으세요."
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendAttack();
+                      }
+                    }}
+                    placeholder="공격 프롬프트를 붙여넣으세요. (Enter 전송 / Shift+Enter 줄바꿈)"
                     className="min-h-[92px] flex-1 resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-on-surface outline-none transition-all placeholder:text-on-surface-variant/45 focus:border-primary/40"
                   />
                   <button
@@ -861,7 +992,10 @@ export default function DemoPage() {
             </div>
 
             <div className="glass-panel rounded-[2rem] p-6">
-              <h2 className="font-headline text-xl font-black text-on-surface">Red Agent 변형 공격</h2>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h2 className="font-headline text-xl font-black text-on-surface">Red Agent 변형 공격</h2>
+                <AgentStatusBadge label="Red Agent" status={adaptiveState.status} color="error" />
+              </div>
               {attackState.detail && (
                 <div className="mt-4 rounded-2xl border border-[#F59E0B]/30 bg-[#F59E0B]/10 p-3 text-xs leading-5 text-[#FBBF24]">
                   {attackState.detail}
@@ -881,7 +1015,7 @@ export default function DemoPage() {
                 ))}
               </div>
 
-              <div className="mt-4 max-h-[470px] space-y-3 overflow-auto pr-1">
+              <div className="mt-4 space-y-3 pr-1">
                 {adaptiveState.status === "idle" && (
                   <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-sm text-on-surface-variant">
                     공격 전송 대기
@@ -981,6 +1115,30 @@ export default function DemoPage() {
                   ))}
                 </div>
               )}
+              {attackJudge.result && (() => {
+                const cat = attackJudge.result!.category || "LLM02";
+                const danger = CATEGORY_DANGER[cat];
+                if (!danger) return null;
+                const catColor = CATEGORY_COLORS[cat] ?? "text-error";
+                const borderCls =
+                  cat === "LLM01" ? "border-[#F59E0B]/30 bg-[#F59E0B]/5" :
+                  cat === "LLM06" ? "border-[#F97316]/30 bg-[#F97316]/5" :
+                  cat === "LLM07" ? "border-[#A78BFA]/30 bg-[#A78BFA]/5" :
+                  "border-error/30 bg-error/5";
+                return (
+                  <div className={`mt-5 rounded-2xl border p-5 ${borderCls}`}>
+                    <div className="mb-3 flex items-center gap-3">
+                      <span className="material-symbols-outlined text-current">report_problem</span>
+                      <p className={`font-headline text-xl font-black ${catColor}`}>{cat} · {danger.title}</p>
+                    </div>
+                    <p className="text-sm leading-7 text-on-surface-variant">{danger.description}</p>
+                    <div className={`mt-4 rounded-xl border px-4 py-3 ${borderCls}`}>
+                      <p className="mb-1 text-[10px] font-black uppercase tracking-[0.16em] text-on-surface-variant/60">주요 영향</p>
+                      <p className={`font-mono text-sm font-black ${catColor}`}>{danger.impact}</p>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="glass-panel rounded-[2rem] p-6">
@@ -996,11 +1154,15 @@ export default function DemoPage() {
 
         {activeView === "defense" && (
           <section className="grid gap-5 xl:grid-cols-[1fr_0.45fr]">
-            <div className="glass-panel flex min-h-[650px] flex-col rounded-[2rem] p-0">
+            <div className="glass-panel flex h-[730px] flex-col rounded-[2rem] p-0">
               <div className="border-b border-white/10 p-6">
                 <div className="flex items-center gap-3">
                   <span className="material-symbols-outlined text-tertiary">verified_user</span>
                   <h2 className="font-headline text-2xl font-black text-on-surface">방어 시연</h2>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <AgentStatusBadge label="Blue Agent" status={defenseState.status} color="tertiary" />
+                  <AgentStatusBadge label="Judge Agent" status={defenseJudge.status} color="primary" />
                 </div>
               </div>
 
@@ -1024,7 +1186,13 @@ export default function DemoPage() {
                   <textarea
                     value={defenseInput}
                     onChange={(event) => setDefenseInput(event.target.value)}
-                    placeholder="같은 공격 프롬프트를 붙여넣으세요."
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendDefense();
+                      }
+                    }}
+                    placeholder="같은 공격 프롬프트를 붙여넣으세요. (Enter 전송 / Shift+Enter 줄바꿈)"
                     className="min-h-[92px] flex-1 resize-none rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm leading-6 text-on-surface outline-none transition-all placeholder:text-on-surface-variant/45 focus:border-tertiary/40"
                   />
                   <button
@@ -1085,8 +1253,8 @@ export default function DemoPage() {
                     <p className={`text-xs font-black uppercase tracking-[0.18em] ${verdictClass(attackJudge.result?.judgment)}`}>
                       {attackJudge.status === "done" ? "Judge Result" : "Judge 대기"}
                     </p>
-                    <h2 className="mt-1 break-words font-headline text-3xl font-black text-on-surface">
-                      LLM02 · 민감 정보 유출 판정
+                    <h2 className={`mt-1 break-words font-headline text-3xl font-black ${CATEGORY_COLORS[attackJudge.result?.category || "LLM02"] ?? "text-on-surface"}`}>
+                      {attackJudge.result?.category || "LLM02"} · {CATEGORY_LABELS[attackJudge.result?.category || "LLM02"] ?? "판정"}
                     </h2>
                   </div>
                 </div>
@@ -1118,12 +1286,20 @@ export default function DemoPage() {
               )}
 
               <div className="rounded-2xl border border-white/10 bg-[#06131D] p-5">
-                <div className="mb-4 flex items-center gap-3">
-                  <span className="material-symbols-outlined text-primary">psychology_alt</span>
-                  <p className="font-headline text-xl font-black text-on-surface">판정 에이전트 · 위험 판단 이유</p>
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <span className="material-symbols-outlined text-primary">psychology_alt</span>
+                    <p className="font-headline text-xl font-black text-on-surface">판정 에이전트 · 위험 판단 이유</p>
+                  </div>
+                  {isTranslatingDetail && (
+                    <span className="flex items-center gap-1.5 text-xs text-primary">
+                      <span className="agent-pulse h-1.5 w-1.5 rounded-full bg-primary" />
+                      번역 중
+                    </span>
+                  )}
                 </div>
                 <p className="break-words text-sm leading-7 text-on-surface-variant">
-                  {attackJudge.result?.detail || attackJudge.detail || "Judge 결과 없음"}
+                  {translatedDetail || attackJudge.result?.detail || attackJudge.detail || "Judge 결과 없음"}
                 </p>
               </div>
 
@@ -1217,7 +1393,9 @@ export default function DemoPage() {
                 </div>
                 {defenseState.rationale && (
                   <div className="mt-4 rounded-2xl border border-primary/15 bg-primary/10 p-4">
-                    <p className="break-words text-sm leading-6 text-on-surface-variant">{defenseState.rationale}</p>
+                    <p className="break-words text-sm leading-6 text-on-surface-variant">
+                      {translatedRationale || defenseState.rationale}
+                    </p>
                   </div>
                 )}
               </div>
@@ -1340,6 +1518,15 @@ export default function DemoPage() {
         @keyframes graphStrokeMove {
           from { stroke-dashoffset: 90; }
           to { stroke-dashoffset: 0; }
+        }
+
+        @keyframes agentPulse {
+          0%, 100% { opacity: 0.35; transform: scale(0.8); }
+          50% { opacity: 1; transform: scale(1.25); }
+        }
+
+        .agent-pulse {
+          animation: agentPulse 0.85s ease-in-out infinite;
         }
       `}</style>
     </DashboardLayout>
