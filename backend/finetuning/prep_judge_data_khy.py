@@ -23,6 +23,7 @@ AgentShield SFT 데이터셋 전처리 파이프라인
 """
 
 import json
+import random
 import sys
 from pathlib import Path
 from typing import Dict, Any, List, Optional
