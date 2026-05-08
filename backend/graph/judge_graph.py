@@ -8,8 +8,6 @@ from backend.graph.judge_state import SecurityState
 from backend.agents.judge_nodes import (
     triage_node,
     pattern_scanner_node,
-    safe_exit_node,
-    auditor_gate_node,
     strict_auditor_node,
     context_auditor_node,
     debate_node,
@@ -42,8 +40,6 @@ def build_judge_graph():
 
     graph.add_node("triage", triage_node)
     graph.add_node("scanner", pattern_scanner_node)
-    graph.add_node("safe_exit", safe_exit_node)
-    graph.add_node("auditor_gate", auditor_gate_node)
     graph.add_node("strict_auditor", strict_auditor_node)
     graph.add_node("context_auditor", context_auditor_node)
     graph.add_node("join", join_node)
