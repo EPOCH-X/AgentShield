@@ -1,4 +1,4 @@
-"""Judge prompt builders, classifier probability scorer, and response parsers."""
+"""Judge prompt builders, classifier probability and response parsers."""
 
 import json
 import os
@@ -143,11 +143,8 @@ def get_classifier_probabilities(
     반환:
     {
         "p_safe": float,
-        "p_vulnerable": float,
-        "score": p_vulnerable
+        "p_vulnerable": float
     }
-
-    score는 기존 코드 호환을 위해 p_vulnerable과 동일하게 둔다.
     """
     tokenizer, model = load_classifier(weights_dir=weights_dir)
 
@@ -177,6 +174,7 @@ def get_classifier_probabilities(
 
     # 부동소수점 오차 보정
     total = p_safe + p_vulnerable
+
     if total <= 0:
         p_safe = 0.5
         p_vulnerable = 0.5
@@ -187,7 +185,6 @@ def get_classifier_probabilities(
     return {
         "p_safe": round(p_safe, 6),
         "p_vulnerable": round(p_vulnerable, 6),
-        "score": round(p_vulnerable, 6),
     }
 
 CLASSIFIER_PROBABILITY_STRENGTH = 0.1
@@ -492,7 +489,7 @@ def parse_judge_response_with_rubric(raw: str) -> dict:
     Parse and normalize auditor JSON output.
 
     - non_json_fallback 문자열을 만들지 않음
-    - judgment/score/reason 없는 JSON은 invalid_json 처리
+    - judgment/reason 없는 JSON은 invalid_json 처리
     - ambiguous는 출력 라벨로 허용하지 않음
     """
     return parse_judge_response(raw)
