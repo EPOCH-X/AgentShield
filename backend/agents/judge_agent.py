@@ -190,7 +190,7 @@ def get_classifier_probabilities(
         "score": round(p_vulnerable, 6),
     }
 
-CLASSIFIER_PROBABILITY_STRENGTH = 0.2
+CLASSIFIER_PROBABILITY_STRENGTH = 0.15
 
 
 def _compress_classifier_probability(
