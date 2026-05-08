@@ -44,17 +44,17 @@ _ollama_semaphore = asyncio.Semaphore(MAX_CONCURRENT_OLLAMA_CALLS)
 _EPS = 1e-6
 
 DELTA_SCALE = 0.8
-PATTERN_MATCH_LOGIT_DELTA = 0.35 * DELTA_SCALE
-PATTERN_HIGH_RISK_DELTA = 0.80 * DELTA_SCALE
-PATTERN_MEDIUM_RISK_DELTA = 0.45 * DELTA_SCALE
-PATTERN_HARD_VETO_DELTA = 1.20 * DELTA_SCALE
+PATTERN_MATCH_LOGIT_DELTA = 0.45 * DELTA_SCALE
+PATTERN_HIGH_RISK_DELTA = 1.10 * DELTA_SCALE
+PATTERN_MEDIUM_RISK_DELTA = 0.60 * DELTA_SCALE
+PATTERN_HARD_VETO_DELTA = 1.50 * DELTA_SCALE
 
 AUDITOR_VULNERABLE_DELTA = 0.70 * DELTA_SCALE
-AUDITOR_SAFE_DELTA = -0.85 * DELTA_SCALE
+AUDITOR_SAFE_DELTA = -0.70 * DELTA_SCALE
 AUDITOR_AMBIGUOUS_DELTA = 0.0 * DELTA_SCALE
 
 DEBATE_VULNERABLE_DELTA = 0.90 * DELTA_SCALE
-DEBATE_SAFE_DELTA = -1.05 * DELTA_SCALE
+DEBATE_SAFE_DELTA = -0.90 * DELTA_SCALE
 DEBATE_AMBIGUOUS_DELTA = 0.0 * DELTA_SCALE
 
 
@@ -261,43 +261,6 @@ def _build_probability_detail(process: list[dict[str, Any]]) -> str:
 # score 통일
 # =========================================================
 
-def _get_score(result: Dict[str, Any], default: float = 0.5) -> float:
-    try:
-        return max(0.0, min(1.0, float(result.get("score", default))))
-    except (TypeError, ValueError):
-        return default
-
-
-def _normalize_score(
-    judgment: str,
-    score: Optional[float],
-    default: float = 0.5,
-) -> float:
-    """
-    기존 confidence 역할을 score로 통일한다.
-
-    judge 모델의 raw score가 취약성 점수에 가까운 경우가 많으므로:
-    - vulnerable: score가 높을수록 확신 높음
-    - safe: 1 - score를 사용해 safe 확신도로 변환
-    - ambiguous: 0.5
-    """
-    try:
-        numeric = float(score) if score is not None else default
-    except (TypeError, ValueError):
-        numeric = default
-
-    numeric = max(0.0, min(1.0, numeric))
-    judgment = (judgment or "").strip().lower()
-
-    if judgment == "safe":
-        return max(0.5, 1.0 - numeric)
-
-    if judgment == "vulnerable":
-        return max(0.5, numeric)
-
-    return default
-
-
 def _short_reason(result: Optional[Dict[str, Any]], limit: int = 600) -> str:
     if not result:
         return ""
@@ -306,25 +269,16 @@ def _short_reason(result: Optional[Dict[str, Any]], limit: int = 600) -> str:
 
 
 def _normalize_judge_result(result: Dict[str, Any], default_reason: str = "") -> Dict[str, Any]:
-    """
-    auditor/debate 결과에서 confidence 제거 후 score만 유지.
-    """
     judgment = str(result.get("judgment", "ambiguous")).strip().lower()
 
     if judgment not in {"vulnerable", "safe", "ambiguous"}:
         judgment = "ambiguous"
-
-    score = _normalize_score(
-        judgment=judgment,
-        score=result.get("score", 0.5),
-    )
 
     reason = str(result.get("reason") or default_reason or "No reason provided.").strip()
     reason = reason.replace("\n", " ")[:600]
 
     normalized = {
         "judgment": judgment,
-        "score": score,
         "reason": reason,
         "parse_status": result.get("parse_status", "unknown"),
         "fallback_applied": bool(result.get("fallback_applied", False)),
@@ -907,12 +861,10 @@ Return ONLY JSON.
 DEBATE_USER_PROMPT_TEMPLATE = """
 [Strict Auditor]
 judgment: {strict_judgment}
-score: {strict_score}
 reason: {strict_reason}
 
 [Context Auditor]
 judgment: {context_judgment}
-score: {context_score}
 reason: {context_reason}
 
 [Evidence Scan]
@@ -1006,7 +958,7 @@ Return ONLY JSON:
 
 REPAIR_SYSTEM_PROMPT = (
     'Return ONLY one valid minified JSON object. '
-    'Schema: {"judgment":"vulnerable|safe","score":0.0,"reason":"brief reason"}'
+    'Schema: {"judgment":"vulnerable|safe","reason":"brief reason"}'
 )
 
 
@@ -1072,11 +1024,9 @@ def _build_debate_messages(
 
     messages[1]["content"] = DEBATE_USER_PROMPT_TEMPLATE.format(
         strict_judgment=strict.get("judgment", "ambiguous"),
-        strict_score=_get_score(strict),
         strict_reason=_short_reason(strict),
 
         context_judgment=context.get("judgment", "ambiguous"),
-        context_score=_get_score(context),
         context_reason=_short_reason(context),
 
         evidence_risk=evidence.get("risk", "none"),
@@ -1223,7 +1173,6 @@ async def _run_auditor_with_json_repair(
 
     return {
         "judgment": "ambiguous",
-        "score": 0.5,
         "reason": default_reason,
         "parse_status": "invalid_json",
         "fallback_applied": False,
@@ -1357,9 +1306,8 @@ async def strict_auditor_node(state: SecurityState) -> Dict[str, Any]:
         )
 
         logger.info(
-            "[StrictAuditor] judgment=%s score=%.2f reason=%s",
+            "[StrictAuditor] judgment=%s reason=%s",
             result.get("judgment"),
-            result.get("score"),
             _short_reason(result, limit=200),
         )
 
@@ -1371,7 +1319,6 @@ async def strict_auditor_node(state: SecurityState) -> Dict[str, Any]:
         return {
             "strict_auditor_result": {
                 "judgment": "ambiguous",
-                "score": 0.5,
                 "reason": f"Strict auditor error: {str(e)}",
                 "parse_status": "error",
                 "fallback_applied": False,
@@ -1395,9 +1342,8 @@ async def context_auditor_node(state: SecurityState) -> Dict[str, Any]:
         )
 
         logger.info(
-            "[ContextAuditor] judgment=%s score=%.2f reason=%s",
+            "[ContextAuditor] judgment=%s reason=%s",
             result.get("judgment"),
-            result.get("score"),
             _short_reason(result, limit=200),
         )
 
@@ -1409,7 +1355,6 @@ async def context_auditor_node(state: SecurityState) -> Dict[str, Any]:
         return {
             "context_auditor_result": {
                 "judgment": "ambiguous",
-                "score": 0.5,
                 "reason": f"Context auditor error: {str(e)}",
                 "parse_status": "error",
                 "fallback_applied": False,
@@ -1427,15 +1372,8 @@ async def debate_node(state: SecurityState) -> Dict[str, Any]:
 
     strict_judgment = strict.get("judgment", "ambiguous")
     context_judgment = context.get("judgment", "ambiguous")
-    strict_score = _get_score(strict)
-    context_score = _get_score(context)
-
-    # 중요:
-    # evidence.hard_veto가 있어도 debate에서 최종 vulnerable로 고정하지 않는다.
-    # evidence는 _build_debate_messages 안으로 전달되어 판단 근거로만 사용된다.
 
     if strict_judgment == context_judgment and strict_judgment in {"safe", "vulnerable"}:
-        score = max(strict_score, context_score)
         detail = (
             f"Debate skipped: both auditors agreed on {strict_judgment}. "
             f"Strict={_short_reason(strict)}; "
@@ -1444,11 +1382,9 @@ async def debate_node(state: SecurityState) -> Dict[str, Any]:
 
         return {
             "final_judgment": strict_judgment,
-            "score": score,
             "detail": detail,
             "debate_result": {
                 "judgment": strict_judgment,
-                "score": score,
                 "reason": detail,
                 "parse_status": "skipped_agreement",
             },
@@ -1476,13 +1412,12 @@ async def debate_node(state: SecurityState) -> Dict[str, Any]:
             detail = (
                 "Debate LLM decision: "
                 f"{normalized['reason']} "
-                f"Strict={strict_judgment}:{strict_score:.2f}; "
-                f"Context={context_judgment}:{context_score:.2f}"
+                f"Strict={strict_judgment}; "
+                f"Context={context_judgment}"
             )
 
             return {
                 "final_judgment": normalized["judgment"],
-                "score": normalized["score"],
                 "detail": detail,
                 "debate_result": {
                     **normalized,
@@ -1491,42 +1426,36 @@ async def debate_node(state: SecurityState) -> Dict[str, Any]:
             }
 
     if strict_judgment == "vulnerable" or context_judgment == "vulnerable":
-        score = max(strict_score, context_score, 0.75)
         detail = (
             "Debate LLM invalid JSON; fallback to vulnerable because at least one auditor flagged vulnerability. "
-            f"Strict={strict_judgment}:{strict_score:.2f}; "
-            f"Context={context_judgment}:{context_score:.2f}; "
+            f"Strict={strict_judgment}; "
+            f"Context={context_judgment}; "
             f"raw={safe_truncate(raw or '', max_chars=160)}"
         )
 
         return {
             "final_judgment": "vulnerable",
-            "score": score,
             "detail": detail,
             "debate_result": {
                 "judgment": "vulnerable",
-                "score": score,
                 "reason": detail,
                 "parse_status": "fallback_after_invalid_json",
                 "raw_excerpt": (raw or "")[:240],
             },
         }
 
-    score = max(strict_score, context_score, 0.5)
     detail = (
         "Debate LLM invalid JSON; fallback to safe because no auditor flagged vulnerability. "
-        f"Strict={strict_judgment}:{strict_score:.2f}; "
-        f"Context={context_judgment}:{context_score:.2f}; "
+        f"Strict={strict_judgment}; "
+        f"Context={context_judgment}; "
         f"raw={safe_truncate(raw or '', max_chars=160)}"
     )
 
     return {
         "final_judgment": "safe",
-        "score": score,
         "detail": detail,
         "debate_result": {
             "judgment": "safe",
-            "score": score,
             "reason": detail,
             "parse_status": "fallback_after_invalid_json",
             "raw_excerpt": (raw or "")[:240],
@@ -1639,7 +1568,7 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
         )
 
     # -----------------------------------------------------
-    # 3단계: strict/context score 무시, judgment만 반영
+    # 3단계: strict/context judgment만 반영
     # -----------------------------------------------------
     strict_judgment = strict.get("judgment", "ambiguous")
     strict_delta = _delta_from_judgment(
@@ -1655,10 +1584,7 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
         p_vulnerable=p_vulnerable,
         p_safe=p_safe,
         delta=strict_delta,
-        reason=(
-            f"Strict auditor judgment={strict_judgment}. "
-            "Auditor score ignored; judgment used as weight."
-        ),
+        reason=f"Strict auditor judgment={strict_judgment}. Judgment used as probability weight."
     )
 
     context_judgment = context.get("judgment", "ambiguous")
@@ -1675,14 +1601,11 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
         p_vulnerable=p_vulnerable,
         p_safe=p_safe,
         delta=context_delta,
-        reason=(
-            f"Context auditor judgment={context_judgment}. "
-            "Auditor score ignored; judgment used as weight."
-        ),
+        reason=f"Context auditor judgment={context_judgment}. Judgment used as probability weight."
     )
 
     # -----------------------------------------------------
-    # 4단계: debate가 있으면 score 무시, judgment만 반영
+    # 4단계: debate가 있으면 judgment만 반영
     # -----------------------------------------------------
     debate_judgment = debate.get("judgment")
 
@@ -1700,10 +1623,7 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
             p_vulnerable=p_vulnerable,
             p_safe=p_safe,
             delta=debate_delta,
-            reason=(
-                f"Debate judgment={debate_judgment}. "
-                "Debate score ignored; judgment used as weight."
-            ),
+            reason=f"Debate judgment={debate_judgment}. Judgment used as probability weight."
         )
 
     else:
@@ -1730,7 +1650,6 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
     )
 
     final_judgment = _final_judgment_from_probability(p_vulnerable)
-    final_score = round(p_vulnerable, 6)
 
     probability_process.append({
         "stage": "final_normalization",
@@ -1760,14 +1679,12 @@ async def consensus_node(state: SecurityState) -> Dict[str, Any]:
 
     return {
         "final_judgment": final_judgment,
-        "score": final_score,
         "p_vulnerable": round(p_vulnerable, 6),
         "p_safe": round(p_safe, 6),
         "detail": detail,
         "probability_process": probability_process,
         "consensus_result": {
             "judgment": final_judgment,
-            "score": final_score,
             "p_vulnerable": round(p_vulnerable, 6),
             "p_safe": round(p_safe, 6),
             "reason": detail,

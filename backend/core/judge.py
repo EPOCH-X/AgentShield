@@ -70,8 +70,10 @@ async def full_judge(
                     response,
                     detail,
                 )
+
                 if isinstance(taxonomy, dict):
                     result.update(taxonomy)
+
             except Exception as e:
                 logger.warning("Taxonomy inference failed: %s", e)
 
@@ -80,6 +82,7 @@ async def full_judge(
                 category,
                 result.get("failure_mode"),
             )
+
         except Exception as e:
             logger.warning("MITRE mapping failed: %s", e)
             result["mitre_technique_id"] = ""
@@ -97,5 +100,7 @@ async def full_judge(
             "probability_process": [],
             "evidence_scan_result": {},
             "mitre_technique_id": "",
-            "debug_nodes": {"error": str(e)},
+            "debug_nodes": {
+                "error": str(e),
+            },
         }
