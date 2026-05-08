@@ -214,7 +214,7 @@ async def benchmark_judge(
 
             await asyncio.sleep(0.2)
 
-            if (i + 1) % 10 == 0:
+            if (i + 1) % 2 == 0:
                 save_checkpoint(
                     output_path,
                     metrics,
