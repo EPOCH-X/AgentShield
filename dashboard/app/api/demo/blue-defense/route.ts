@@ -1,29 +1,23 @@
 import { spawn } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { loadAgentShieldEnv, projectRoot } from "../../../../lib/serverEnv";
+
+const root = process.env.AGENTSHIELD_ROOT || path.resolve(process.cwd(), "..");
+const python = process.env.PYTHON_BIN || "python3";
 
 function runBlueDefense(payload: unknown): Promise<{ status: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const root = projectRoot();
-    const venvPython = path.join(root, "venv", "bin", "python");
-    const python = process.env.PYTHON_BIN || (fs.existsSync(venvPython) ? venvPython : "python3");
     const child = spawn(python, ["scripts/run_demo_blue_defense.py"], {
       cwd: root,
       stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env, ...loadAgentShieldEnv() },
+      env: process.env,
     });
 
     let stdout = "";
     let stderr = "";
     const timeout = setTimeout(() => child.kill("SIGTERM"), 300_000);
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     child.on("close", (code) => {
       clearTimeout(timeout);
       resolve({ status: code ?? 1, stdout, stderr });

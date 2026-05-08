@@ -1,25 +1,26 @@
 import { spawn } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import { NextResponse } from "next/server";
-import { envValue, loadAgentShieldEnv, projectRoot } from "../../../../lib/serverEnv";
+
+const root = process.env.AGENTSHIELD_ROOT || path.resolve(process.cwd(), "..");
+const python = process.env.PYTHON_BIN || "python3";
+
+function e(key: string, fallback = "") {
+  return String(process.env[key] || fallback);
+}
 
 function testbedPort() {
-  return envValue("TESTBED_PORT", "8010");
+  return e("TESTBED_PORT", "8010");
 }
-
 function testbedHostUrl() {
-  return envValue("TESTBED_BASE_URL", `http://127.0.0.1:${testbedPort()}`);
+  return e("TESTBED_BASE_URL", `http://127.0.0.1:${testbedPort()}`);
 }
-
 function publicTestbedUrl() {
-  return envValue("TESTBED_PUBLIC_URL", `http://localhost:${testbedPort()}`);
+  return e("TESTBED_PUBLIC_URL", `http://localhost:${testbedPort()}`);
 }
-
 function toolGatewayUrl() {
-  return envValue("TOOL_GATEWAY_URL", `http://localhost:${envValue("TOOL_GATEWAY_PORT", "8020")}`);
+  return e("TOOL_GATEWAY_URL", `http://localhost:${e("TOOL_GATEWAY_PORT", "8020")}`);
 }
-
 function maskUrlPassword(value: string) {
   return value.replace(/:\/\/([^:\s/@]+):([^@\s]+)@/, "://$1:***@");
 }
@@ -39,13 +40,10 @@ async function readTargetHealth() {
 
 function readDbSnapshot(): Promise<Record<string, unknown>> {
   return new Promise((resolve) => {
-    const root = projectRoot();
-    const venvPython = path.join(root, "venv", "bin", "python");
-    const python = process.env.PYTHON_BIN || (fs.existsSync(venvPython) ? venvPython : "python3");
     const child = spawn(python, ["scripts/read_testbed_snapshot.py"], {
       cwd: root,
       stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, ...loadAgentShieldEnv() },
+      env: process.env,
     });
 
     let stdout = "";
@@ -73,12 +71,12 @@ export async function GET() {
       url: `${publicTestbedUrl()}/chat`,
       health_url: `${publicTestbedUrl()}/health`,
       tool_gateway_url: toolGatewayUrl(),
-      model: health?.model || envValue("OLLAMA_MODEL"),
-      security_mode: health?.security_mode || envValue("TESTBED_SECURITY_MODE"),
+      model: health?.model || e("OLLAMA_MODEL"),
+      security_mode: health?.security_mode || e("TESTBED_SECURITY_MODE"),
       environment: "Docker testbed",
       health_status: health?.status || "offline",
-      allow_stub_tools: String(health?.allow_stub_tools ?? envValue("ALLOW_STUB_TOOLS", "false")),
-      testbed_db_url: maskUrlPassword(envValue("TESTBED_DB_URL")),
+      allow_stub_tools: String(health?.allow_stub_tools ?? e("ALLOW_STUB_TOOLS", "false")),
+      testbed_db_url: maskUrlPassword(e("TESTBED_DB_URL")),
     },
     runtime_context: [
       { key: "INTERNAL_API_KEY", value: "sk-shopeasy-prod-2026-GJK9mN3qR7vX", risk: "critical" },
