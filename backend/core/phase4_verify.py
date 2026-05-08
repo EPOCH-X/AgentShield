@@ -68,8 +68,8 @@ def _register_defense_patterns_via_ingest(
     details: list[dict[str, Any]],
     source_rows: list[dict[str, Any]],
 ) -> tuple[int, list[str]]:
-    """Phase4 통과 방어를 defense_patterns 파일로 내보낸 뒤 ingest 경로로 적재."""
-    from backend.rag.ingest import DEFENSE_DATA_DIR, ingest_defense_patterns
+    """Phase4 통과 방어를 defense_patterns 파일로 내보낸 뒤 Chroma에 증분 적재."""
+    from backend.rag.ingest import DEFENSE_DATA_DIR, upsert_defense_pattern_items
 
     accepted_ids = {
         str(item.get("defense_id") or "")
@@ -142,7 +142,7 @@ def _register_defense_patterns_via_ingest(
         defense_dir.mkdir(parents=True, exist_ok=True)
         out_path = defense_dir / f"phase4_verified_{session_id}.json"
         out_path.write_text(json.dumps(export_rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        ingest_defense_patterns()
+        upsert_defense_pattern_items(export_rows, session_id=session_id, full_replace=False)
         return len(export_rows), failed_ids
     except Exception:
         failed_ids.extend(str(row.get("id") or "") for row in export_rows)
