@@ -251,6 +251,6 @@ if __name__ == "__main__":
         benchmark_judge(
             DATA_PATH,
             OUTPUT_PATH,
-            target_per_class=5,
+            target_per_class=600,
         )
     )
