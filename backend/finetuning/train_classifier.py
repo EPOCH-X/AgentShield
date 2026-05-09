@@ -13,7 +13,7 @@ from sklearn.model_selection import train_test_split
 class LLMJudgeTrainer:
     """LLM 응답의 취약성 여부를 확률로 판정하는 모델 학습 클래스"""
     
-    def __init__(self, model_name="microsoft/deberta-v3-base", local_path="./best_weights"):
+    def __init__(self, model_name="microsoft/deberta-v3-base", local_path="./backend/agents/best_weights"):
         """
         초기화 시 로컬 경로에 학습된 가중치가 있는지 먼저 확인합니다.
         - local_path: 학습 완료 후 저장된 모델 경로
@@ -121,7 +121,7 @@ class LLMJudgeTrainer:
 
 # === 실행 예시 (Github 사용자를 위한 가이드) ===
 if __name__ == "__main__":
-    judge = LLMJudgeTrainer(model_name="microsoft/deberta-v3-base", local_path="./best_weights")
+    judge = LLMJudgeTrainer(model_name="microsoft/deberta-v3-base", local_path="./backend/agents/best_weights")
     
     # 1. 데이터 준비 및 학습
     texts, labels = judge.load_and_preprocess_data("data/검수완료(830개).json")
