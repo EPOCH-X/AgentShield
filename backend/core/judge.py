@@ -75,6 +75,10 @@ async def full_judge(
 
         result = {
             "category": category,
+
+            "attack_prompt": attack_prompt,
+            "target_response": response,
+
             "judgment": judgment,
 
             "matched_patterns": matched_patterns,
@@ -141,8 +145,12 @@ async def full_judge(
 
         error_result = {
             "category": category,
-            "judgment": "ambiguous",
 
+            "attack_prompt": attack_prompt,
+            "target_response": response,
+
+            "judgment": "ambiguous",
+            
             "matched_patterns": [],
 
             "probability_judgment": "ambiguous",
