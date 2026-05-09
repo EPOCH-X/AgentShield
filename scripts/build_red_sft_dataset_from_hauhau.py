@@ -104,6 +104,7 @@ async def main() -> int:
         build_sft_seed_prompt,
         compact_sft_training_user,
         fingerprint_attack_prompt,
+        get_carrier_for_seed,
         get_sft_seed_system_prompt,
         normalize_attack_prompt_output,
         validate_sft_seed_output,
@@ -160,6 +161,8 @@ async def main() -> int:
         code_strategy = "none"
         pyrit_converter_strategy = "none"
         encoding_index = (seed_index - 1) % 12
+        carrier = get_carrier_for_seed(seed_index - 1)
+        carrier_name = carrier["name"]
 
         for attempt in range(1, args.generation_attempts + 1):
             raw = await llm.generate(
@@ -179,15 +182,16 @@ async def main() -> int:
                 attack_prompt, code_strategy = apply_code_mutation(attack_prompt, 1)
                 attack_prompt = normalize_attack_prompt_output(attack_prompt)
 
-            ok, reason = validate_sft_seed_output(
+            ok, reason, evidence = validate_sft_seed_output(
                 attack_prompt,
                 min_chars=args.min_attack_chars,
                 max_chars=args.max_attack_chars,
+                carrier=carrier_name,
             )
             if ok:
                 dedup_key = _normalize_for_dedup(attack_prompt)
                 if dedup_key in seen:
-                    ok, reason = False, "duplicate attack prompt"
+                    ok, reason, evidence = False, "duplicate attack prompt", ""
                 else:
                     seen.add(dedup_key)
                     attack_prompt, pyrit_converter_strategy = apply_pyrit_converter(
@@ -206,8 +210,10 @@ async def main() -> int:
                     "category": category,
                     "subcategory": subcategory,
                     "domain": domain,
+                    "carrier": carrier_name,
                     "encoding_index": encoding_index,
                     "rejection_reason": reason,
+                    "rejection_evidence": evidence,
                     "raw_output": str(raw or ""),
                     "raw_output_len": len(str(raw or "")),
                     "normalized_output": attack_prompt,
@@ -219,6 +225,7 @@ async def main() -> int:
                 base_prompt=generation_prompt,
                 rejection_reason=reason,
                 attempt=attempt,
+                evidence=evidence,
             )
 
         if not accepted_prompt:
@@ -251,6 +258,7 @@ async def main() -> int:
                 "category": category,
                 "subcategory": subcategory,
                 "domain": domain,
+                "carrier": carrier_name,
                 "seed_index": seed_index,
                 "source_seed_id": seed_row.get("id") or seed_row.get("seed_id") or "",
                 "code_mutation_strategy": code_strategy,
@@ -280,6 +288,8 @@ async def main() -> int:
 
     category_counts = Counter(r["category"] for r in raw_records)
     domain_counts = Counter(r["domain"] for r in raw_records)
+    carrier_counts = Counter(r["carrier"] for r in raw_records)
+    pyrit_strategy_counts = Counter(r["pyrit_converter_strategy"] for r in raw_records)
     report = {
         "model": args.red_model,
         "output": str(output_path),
@@ -288,6 +298,8 @@ async def main() -> int:
         "rejections": dict(rejection_counts.most_common()),
         "category_counts": dict(category_counts),
         "domain_counts": dict(domain_counts),
+        "carrier_counts": dict(carrier_counts),
+        "pyrit_strategy_counts": dict(pyrit_strategy_counts),
         "system_prompt_mode": args.system_prompt,
         "jsonl_contract": "messages only; no target_response/judge/score/round logs in JSONL",
     }

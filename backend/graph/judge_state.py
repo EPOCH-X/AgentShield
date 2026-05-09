@@ -14,10 +14,7 @@ class SecurityState(TypedDict, total=False):
     context_auditor_result: Optional[Dict[str, Any]]
     debate_result: Optional[Dict[str, Any]]
 
-    auditor_analysis: Optional[Dict[str, Any]]
-
     final_judgment: Optional[str]
-    score: float
     p_vulnerable: float
     p_safe: float
     detail: str
