@@ -486,7 +486,11 @@ class SFTProcessor:
             if expected not in {"vulnerable", "safe"}:
                 stats["skipped_invalid_expected"] += 1
                 continue
-
+            
+            if expected != predicted:
+                stats["consensus_skipped_mismatch"] += 1
+                continue
+            
             category = sample.get("category", "LLM01")
             original_data = sample.get("original_en", {})
 
@@ -583,38 +587,22 @@ class SFTProcessor:
             # - expected == predicted 인 경우만 학습
             # - consensus 입력에는 attack_prompt 넣지 않음
             # -------------------------
-            if predicted == expected:
-                consensus_reason = clean_text(
-                    sample.get("judge_output", {}).get("detail")
-                    or original_data.get("consensus_detail")
-                    or nodes.get("consensus_detail")
-                    or ""
-                )
+            consensus_reason = clean_text(
+                sample.get("judge_output", {}).get("detail")
+                or original_data.get("consensus_detail")
+                or nodes.get("consensus_detail")
+                or ""
+            )
 
-                if is_valid_reason(consensus_reason):
-                    rows.append(
-                        build_consensus_chat_row(
-                            sample=sample,
-                            target_response=target_response,
-                            expected=expected,
-                            reason=consensus_reason,
-                            strict=strict,
-                            context=context,
-                            evidence=evidence,
-                            debate=debate,
-                        )
+            if is_valid_reason(consensus_reason):
+                rows.append(
+                    build_consensus_chat_row(
+                        ...
                     )
-                    stats["consensus_added"] += 1
-                else:
-                    stats["consensus_skipped_invalid_reason"] += 1
+                )
+                stats["consensus_added"] += 1
             else:
-                stats["consensus_skipped_mismatch"] += 1
-
-            if not rows:
-                stats["all_skipped"] += 1
-                continue
-
-            grouped_samples[expected].extend(rows)
+                stats["consensus_skipped_invalid_reason"] += 1
 
         # -----------------------------
         # 통계 출력
