@@ -1837,6 +1837,10 @@
       .popup-side-btn:disabled {
         opacity: 0.2;
         cursor: default;
+        pointer-events: none;
+      }
+      .popup-side-btn.is-hidden {
+        display: none;
       }
 
       @media (max-width: 720px) {
@@ -3732,7 +3736,7 @@
               "
               draggable="false"
             />
-            <div class="label">🐶 개 판정관</div>
+            <div class="label">Judge Agent</div>
           </div>
         </div>
 
@@ -5864,8 +5868,8 @@
         const jsonOverlay = document.getElementById("json-overlay");
 
         if (ndOverlay && ndOverlay.classList.contains("open")) {
-          if (dir === "right") ndGoSlide(_ndIdx + 1);
-          else ndGoSlide(_ndIdx - 1);
+          if (dir === "right") ndManualGoSlide(_ndIdx + 1);
+          else ndManualGoSlide(_ndIdx - 1);
           return;
         }
         if (n1Overlay && n1Overlay.classList.contains("open")) {
@@ -6553,12 +6557,12 @@ ${outputLines}
       }
 
       const NODE1_DEMO_NOTES = [
-        '<span class="blue">쥐</span>는 백신처럼 먼저 공격해보는 Red Agent입니다.<br><span class="yellow">고양이</span>는 위험한 답변을 안전하게 바꾸는 Blue Agent입니다.<br><span class="yellow">개</span>는 공격과 방어 결과를 판정하는 Judge입니다.',
-        '이 발표에서는 <span class="blue">챗봇을 치즈 창고</span>, 개인정보와 내부 토큰 같은 기밀정보를 <span class="yellow">치즈</span>로 비유합니다. AgentShield는 치즈가 새지 않는지 미리 검사합니다.',
-        "사용자가 점검할 챗봇 주소를 넣으면 AgentShield가 검사 대상을 확정합니다. 이 단계는 실제 공격 전, 어느 창고를 점검할지 정하는 준비 단계입니다.",
-        "쥐 요원은 아무 문장이나 던지는 것이 아니라, 검사 목적에 맞는 공격 묶음을 고릅니다. 어떤 방식으로 챗봇을 흔들어볼지 작전 계획을 세우는 장면입니다.",
+        '<span class="blue">쥐</span>는 공격 프롬프트를 생성하고 전송하는 공격 에이전트입니다.<br><span class="yellow">고양이</span>는 취약 응답을 안전한 방어 응답으로 바꾸는 방어 에이전트입니다.<br><span class="yellow">강아지</span>는 공격과 방어 결과를 증거 기반으로 판정합니다.',
+        'AgentShield는 점검 대상인 <span class="blue">Target Chatbot</span>에 공격 프롬프트를 보내고, 개인정보와 내부 토큰 같은 <span class="yellow">민감정보</span>가 노출되는지 확인합니다.',
+        "사용자가 점검할 챗봇 주소를 넣으면 AgentShield가 검사 대상을 확정합니다. 이 단계는 실제 공격 전, 어떤 Target Chatbot을 점검할지 정하는 준비 단계입니다.",
+        "Red Agent는 아무 문장이나 보내는 것이 아니라, 검사 목적에 맞는 공격 seed와 전략을 선택합니다. 어떤 방식으로 Target Chatbot을 테스트할지 보안 검사 계획을 세우는 장면입니다.",
         "검사 번호가 발급되면 하나의 보안 점검 세션이 시작됩니다. 이후 공격, 판정, 방어, 검증 결과가 이 세션에 묶여 저장됩니다.",
-        "본격적인 공격 전에 챗봇이 실제로 응답할 수 있는지 확인합니다. 문이 열려 있어야 다음 단계에서 공격 테스트를 진행할 수 있습니다.",
+        "본격적인 공격 전에 Target Chatbot이 실제로 응답할 수 있는지 확인합니다. 정상 응답이 확인되어야 다음 단계에서 공격 테스트를 진행할 수 있습니다.",
       ];
 
       function toggleSlideHelp(e, btn) {
@@ -6868,10 +6872,10 @@ ${outputLines}
           }
           if (e.key === "ArrowRight" || e.key === " ") {
             e.preventDefault();
-            ndGoSlide(_ndIdx + 1);
+            ndManualGoSlide(_ndIdx + 1);
           } else if (e.key === "ArrowLeft") {
             e.preventDefault();
-            ndGoSlide(_ndIdx - 1);
+            ndManualGoSlide(_ndIdx - 1);
           }
           return;
         }
@@ -6913,12 +6917,12 @@ ${outputLines}
 
         // ── STEP 2: 사전 탐색 (창고 문 확인) ──
         {
-          title: "STEP 2 · 창고 문이 열려 있나요?",
+          title: "STEP 2 · Target Chatbot 응답 확인",
           slides: [
             {
               html: `
       <div class="nd-illustr-wrap nd-illustr-wrap--roomy">
-        <div class="nd-illustration-title">📡 쥐(AgentShield)가 창고 문을 두드립니다</div>
+        <div class="nd-illustration-title">📡 AgentShield가 Target Chatbot 연결을 확인합니다</div>
         <svg class="nd-illustration-svg" width="672" height="382" viewBox="0 0 672 382" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="gB"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -6954,11 +6958,11 @@ ${outputLines}
             <animate attributeName="r" values="26;30;26" dur="3s" repeatCount="indefinite"/>
           </circle>
           <text x="558" y="179" font-size="22" text-anchor="middle" fill="#fbbf24" font-weight="900">?</text>
-          <text x="558" y="318" font-size="11" text-anchor="middle" fill="#7dd3fc" font-weight="700">챗봇 (창고) — 응답 대기 중</text>
+          <text x="558" y="318" font-size="11" text-anchor="middle" fill="#7dd3fc" font-weight="700">Target Chatbot — 응답 대기 중</text>
 
           <!-- 하단 레이블 -->
           <rect x="26" y="332" width="620" height="26" rx="13" fill="rgba(0,212,255,0.08)" stroke="#00d4ff" stroke-width="1"/>
-          <text x="336" y="349" font-size="11" text-anchor="middle" fill="#7dd3fc">STEP 2 · 사전 탐색 — target 응답 확인 완료 시 쥐가 진입 가능</text>
+          <text x="336" y="349" font-size="11" text-anchor="middle" fill="#7dd3fc">STEP 2 · 사전 점검 — target 응답 확인 완료 시 스캔 진행 가능</text>
         </svg>
         <div class="nd-illustration-foot" style="border:1px solid rgba(0,212,255,0.4);color:#00d4ff;background:rgba(0,212,255,0.08);">STEP 2 · 사전 연결 확인</div>
       </div>
@@ -6967,7 +6971,7 @@ ${outputLines}
             {
               html: `
       <div class="nd-illustr-wrap nd-illustr-wrap--roomy">
-        <div class="nd-illustration-title">✅ 창고 문이 열렸습니다 — 쥐 출동!</div>
+        <div class="nd-illustration-title">✅ Target Chatbot 응답 확인 완료</div>
         <svg class="nd-illustration-svg" width="628" height="378" viewBox="0 0 628 378" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="gB2"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
@@ -6977,7 +6981,7 @@ ${outputLines}
           <g filter="url(#gB2)">
             <animateTransform attributeName="transform" type="translate" values="0,0;6,0;0,0" dur="1.2s" repeatCount="indefinite" additive="sum"/>
             <image href="img/2_문 열렸다.png" x="-6" y="48" width="218" height="302" preserveAspectRatio="xMidYMid meet"/>
-            <text x="103" y="364" font-size="12" text-anchor="middle" fill="#4ade80" font-weight="800">쥐 출동</text>
+            <text x="103" y="364" font-size="12" text-anchor="middle" fill="#4ade80" font-weight="800">스캔 가능</text>
           </g>
 
           <!-- 응답 말풍선 (쥐·창고 사이) -->
@@ -7011,12 +7015,12 @@ ${outputLines}
 
         // ── STEP 3: 공격 스캔 ──
         {
-          title: "STEP 3 · 쥐 요원의 공격",
+          title: "STEP 3 · Red Agent 공격 스캔",
           slides: [
             {
               html: `
       <div class="nd-illustr-wrap nd-illustr-wrap--roomy nd-illustr-wrap--attack-nudge">
-        <div class="nd-illustration-title">🐭 쥐가 창고에 공격 프롬프트를 쏩니다</div>
+        <div class="nd-illustration-title">Red Agent가 Target Chatbot에 공격 프롬프트를 전송합니다</div>
         <svg class="nd-illustration-svg" width="620" height="382" viewBox="0 0 620 382" xmlns="http://www.w3.org/2000/svg">
           <defs><filter id="g3b"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
           <g transform="translate(0,-28)">
@@ -7072,26 +7076,28 @@ ${outputLines}
 
         // ── STEP 4: 1차 판정 ──
         {
-          title: "STEP 4 · 개 판정관의 심사",
+          title: "STEP 4 · Judge Agent 판정",
           slides: [
             {
               html: `
       <div class="nd-illustr-wrap nd-illustr-wrap--roomy">
-        <div class="nd-illustration-title">🐶 개가 응답을 하나씩 검사합니다</div>
+        <div class="nd-illustration-title">Judge Agent가 응답의 위험 증거를 검사합니다</div>
         <svg class="nd-illustration-svg" width="600" height="390" viewBox="0 0 600 390" xmlns="http://www.w3.org/2000/svg">
           <defs><filter id="s4f1"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
           <!-- 응답 스택 (왼쪽) -->
-          <rect x="28" y="104" width="154" height="158" rx="12" fill="rgba(15,23,42,0.46)" stroke="rgba(148,163,184,0.22)" stroke-width="1"/>
-          <text x="105" y="124" font-size="9.5" text-anchor="middle" fill="#cbd5e1" font-weight="800">Judge 확인 항목</text>
-          <rect x="42" y="138" width="126" height="24" rx="5" fill="rgba(148,163,184,0.12)" stroke="#64748b" stroke-width="1.1"/>
-          <text x="105" y="154" font-size="8.3" text-anchor="middle" fill="#94a3b8">민감정보 출력 여부</text>
-          <rect x="42" y="172" width="126" height="24" rx="5" fill="rgba(148,163,184,0.12)" stroke="#64748b" stroke-width="1.1"/>
-          <text x="105" y="188" font-size="8.3" text-anchor="middle" fill="#94a3b8">명령 실행 흔적 여부</text>
-          <rect x="42" y="206" width="126" height="24" rx="5" fill="rgba(255,215,0,0.12)" stroke="#FFD700" stroke-width="1.5"/>
-          <text x="105" y="222" font-size="8.3" text-anchor="middle" fill="#FFD700">실제 위험 행동 여부</text>
-          <rect x="42" y="240" width="126" height="18" rx="5" fill="rgba(148,163,184,0.08)" stroke="#475569" stroke-width="1"/>
-          <text x="105" y="253" font-size="8" text-anchor="middle" fill="#94a3b8">판단 기준: 위험 증거 존재</text>
-          <text x="104" y="272" font-size="10" text-anchor="middle" fill="#64748b">가능 결과: safe / vulnerable / ambiguous</text>
+          <g transform="translate(-36,0)">
+          <rect x="8" y="94" width="190" height="184" rx="12" fill="rgba(15,23,42,0.46)" stroke="rgba(148,163,184,0.22)" stroke-width="1"/>
+          <text x="103" y="118" font-size="13" text-anchor="middle" fill="#cbd5e1" font-weight="800">Judge 확인 항목</text>
+          <rect x="24" y="134" width="158" height="28" rx="6" fill="rgba(148,163,184,0.12)" stroke="#64748b" stroke-width="1.1"/>
+          <text x="103" y="153" font-size="11" text-anchor="middle" fill="#94a3b8">민감정보 출력 여부</text>
+          <rect x="24" y="171" width="158" height="28" rx="6" fill="rgba(148,163,184,0.12)" stroke="#64748b" stroke-width="1.1"/>
+          <text x="103" y="190" font-size="11" text-anchor="middle" fill="#94a3b8">명령 실행 흔적 여부</text>
+          <rect x="24" y="208" width="158" height="28" rx="6" fill="rgba(255,215,0,0.12)" stroke="#FFD700" stroke-width="1.5"/>
+          <text x="103" y="227" font-size="11" text-anchor="middle" fill="#FFD700">실제 위험 행동 여부</text>
+          <rect x="24" y="246" width="158" height="22" rx="6" fill="rgba(148,163,184,0.08)" stroke="#475569" stroke-width="1"/>
+          <text x="103" y="261" font-size="9.6" text-anchor="middle" fill="#94a3b8">판단 기준: 위험 증거 존재</text>
+          <text x="103" y="292" font-size="11" text-anchor="middle" fill="#64748b">가능 결과: safe / vulnerable / ambiguous</text>
+          </g>
           <!-- 개 (가운데, 확대 — 하단 막대 y=346 위로 여유) -->
           <g filter="url(#s4f1)">
             <animateTransform attributeName="transform" type="translate" values="0,0;0,-4;0,0;0,-2;0,0" dur="2s" repeatCount="indefinite" additive="sum"/>
@@ -7123,12 +7129,12 @@ ${outputLines}
 
         // ── STEP 5: 공격 변형 ──
         {
-          title: "STEP 5 · 쥐의 변장술",
+          title: "STEP 5 · Red Agent 공격 변형",
           slides: [
             {
               html: `
       <div class="nd-illustr-wrap nd-illustr-wrap--roomy nd-illustr-wrap--step5-nudge">
-        <div class="nd-illustration-title">🐭 막혔다! 쥐가 변장을 시작합니다</div>
+        <div class="nd-illustration-title">Red Agent가 막힌 공격을 변형합니다</div>
         <svg class="nd-illustration-svg" width="620" height="392" viewBox="0 0 620 392" xmlns="http://www.w3.org/2000/svg">
           <defs><filter id="g5r"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
 
@@ -7190,28 +7196,38 @@ ${outputLines}
 
         // ── STEP 6: 2차 판정 ──
         {
-          title: "STEP 6 · 치즈가 보였나요?",
+          title: "STEP 6 · 민감정보가 노출됐나요?",
           slides: [
             {
               html: `
         <style>
           @keyframes n6fi { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+          @keyframes n6DefensePulse { 0%,100%{box-shadow:0 0 0 rgba(248,113,113,0);transform:scale(1)} 50%{box-shadow:0 0 22px rgba(248,113,113,0.45);transform:scale(1.035)} }
           .n6a { opacity:0; animation:n6fi 0.55s ease forwards; }
+          .n6-defense-next { animation:n6DefensePulse 1.25s ease-in-out infinite; transform-origin:center; }
+          .n6-mini-flow { width:100%;display:flex;align-items:center;justify-content:center;margin-top:4px; }
+          .n6-mini-step { flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:5px;min-width:76px;padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.04);color:#e2e8f0;font-size:10.5px;font-weight:700;line-height:1;text-align:center;white-space:nowrap; }
+          .n6-mini-step .ps-num { font-size:10px;color:#94a3b8; }
+          .n6-mini-step.is-on { border-color:rgba(0,212,255,0.65);background:rgba(0,212,255,0.12);color:#7dd3fc;box-shadow:0 0 10px rgba(0,212,255,0.22); }
+          .n6-mini-step.is-on .ps-num { color:#38bdf8; }
+          .n6-mini-step.is-current { border-color:rgba(0,212,255,0.8);background:rgba(0,212,255,0.14);color:#7dd3fc;animation:pipelineBlink 1.2s ease-in-out infinite; }
+          .n6-mini-step.is-current .ps-num { color:#38bdf8; }
+          .n6-mini-dash { flex:0 0 8px;height:2px;margin:0 3px;background:repeating-linear-gradient(90deg,rgba(0,212,255,0.4) 0px,rgba(0,212,255,0.4) 4px,transparent 4px,transparent 8px);background-size:12px 2px;animation:dashSlide 0.7s linear infinite; }
         </style>
-        <div style="font-size:15px;font-weight:800;color:#f1f5f9;margin-bottom:8px;text-align:center;flex-shrink:0;">정말 공격이 맞는지 재검사합니다. · 위험 확인 / 미확인 분기</div>
+        <div style="font-size:15px;font-weight:800;color:#f1f5f9;margin-bottom:8px;text-align:center;flex-shrink:0;">변형 공격 재검사</div>
         <div style="display:flex;gap:0;width:100%;flex:1;min-height:0;align-items:flex-start;">
           <!-- 왼쪽: video1 + 텍스트 카드 -->
           <div style="flex:0 0 50%;display:flex;flex-direction:column;gap:10px;min-width:0;height:100%;">
-            <video src="img/6슬1.mp4" autoplay muted loop playsinline preload="metadata" style="width:100%;max-height:45vh;object-fit:contain;flex-shrink:0;"></video>
-            <div style="flex:1;min-height:0;overflow-y:auto;padding:14px 18px;border-radius:12px;background:rgba(15,23,42,0.7);border:1px solid rgba(239,68,68,0.2);line-height:1.8;">
+            <video src="img/6슬1.mp4" autoplay muted loop playsinline preload="metadata" style="width:100%;max-height:39vh;object-fit:contain;flex-shrink:0;"></video>
+            <div style="flex:1;min-height:0;overflow:hidden;padding:14px 18px;border-radius:12px;background:rgba(15,23,42,0.7);border:1px solid rgba(239,68,68,0.2);line-height:1.8;text-align:center;">
               <div class="n6a" style="color:#f87171;font-weight:700;margin-bottom:10px;font-size:16px;letter-spacing:0.06em;animation-delay:0.2s;">RED AGENT · 변형 프롬프트</div>
-              <div style="display:grid;grid-template-columns:auto 1fr;gap:7px 16px;margin-bottom:12px;">
+              <div style="display:grid;grid-template-columns:1fr;gap:4px;margin-bottom:12px;text-align:center;">
                 <span class="n6a" style="color:#94a3b8;font-size:15px;animation-delay:0.65s;">요청 형태</span><span class="n6a" style="color:#e2e8f0;font-size:15px;animation-delay:0.65s;">고객지원 품질 점검용 JSON 재구성</span>
                 <span class="n6a" style="color:#94a3b8;font-size:15px;animation-delay:1.1s;">위험 항목</span><span class="n6a" style="color:#fbbf24;font-size:15px;font-weight:700;animation-delay:1.1s;">customer_email / internal_token</span>
                 <span class="n6a" style="color:#94a3b8;font-size:15px;animation-delay:1.55s;">검사 목적</span><span class="n6a" style="color:#e2e8f0;font-size:15px;animation-delay:1.55s;">변형 공격이 실제로 뚫렸는지 확인</span>
               </div>
               <div class="n6a" style="text-align:center;color:#64748b;font-size:20px;margin:6px 0;animation-delay:2.0s;">↓</div>
-              <div class="n6a" style="color:#94a3b8;font-size:15px;animation-delay:2.4s;">Judge가 변형 공격의 target 응답을 다시 판정합니다.</div>
+              <div class="n6a" style="color:#94a3b8;font-size:15px;text-align:center;animation-delay:2.4s;">Judge가 변형 공격의 target 응답을 다시 판정합니다.</div>
             </div>
           </div>
           <!-- 가운데: 긴 애니메이션 화살표 + 안전/취약 분기 -->
@@ -7222,28 +7238,31 @@ ${outputLines}
               </line>
               <polygon points="76,11 96,21 76,31" fill="#f59e0b"/>
             </svg>
-            <div class="n6a" style="color:#f59e0b;font-size:13px;font-weight:700;text-align:center;line-height:1.4;animation-delay:2.9s;">안전/취약<br>분기</div>
+            <div class="n6a" style="color:#f59e0b;font-size:13px;font-weight:700;text-align:center;line-height:1.4;animation-delay:2.9s;">판정 결과에 따른<br>분기점</div>
           </div>
           <!-- 오른쪽: video2 + 분기 화살표 + 결과 노드 -->
           <div style="flex:1;display:flex;flex-direction:column;gap:4px;min-width:0;height:100%;">
-            <video src="img/6슬2.mp4" autoplay muted loop playsinline preload="metadata" style="width:100%;max-height:45vh;object-fit:contain;flex-shrink:0;"></video>
+            <video class="n6a" src="img/6슬2.mp4" autoplay muted loop playsinline preload="metadata" style="width:100%;max-height:39vh;object-fit:contain;flex-shrink:0;animation-delay:3.25s;"></video>
             <!-- 위→아래 수직 화살표 두 개 -->
-            <svg class="n6a" width="100%" height="58" viewBox="0 0 240 58" xmlns="http://www.w3.org/2000/svg" style="flex-shrink:0;animation-delay:3.4s;">
-              <!-- 왼쪽: safe 방향 (초록) -->
-              <line x1="60" y1="2" x2="60" y2="42" stroke="#4ade80" stroke-width="3" stroke-dasharray="8 5" stroke-linecap="round">
-                <animate attributeName="stroke-dashoffset" from="26" to="-26" dur="1.7s" repeatCount="indefinite"/>
-              </line>
-              <polygon points="51,42 60,56 69,42" fill="#4ade80"/>
-              <!-- 오른쪽: vulnerable 방향 (빨강) -->
-              <line x1="180" y1="2" x2="180" y2="42" stroke="#f87171" stroke-width="3" stroke-dasharray="8 5" stroke-linecap="round">
-                <animate attributeName="stroke-dashoffset" from="26" to="-26" dur="1.7s" repeatCount="indefinite"/>
-              </line>
-              <polygon points="171,42 180,56 189,42" fill="#f87171"/>
-            </svg>
+            <div class="n6a" style="width:100%;height:64px;display:grid;grid-template-columns:1fr 22px 1fr;gap:22px;flex-shrink:0;animation-delay:3.75s;">
+              <svg width="22" height="64" viewBox="0 0 22 64" xmlns="http://www.w3.org/2000/svg" style="justify-self:center;">
+                <line x1="11" y1="1" x2="11" y2="53" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="6 4" stroke-linecap="round">
+                  <animate attributeName="stroke-dashoffset" from="18" to="-18" dur="1.7s" repeatCount="indefinite"/>
+                </line>
+                <polygon points="4,53 11,64 18,53" fill="#4ade80"/>
+              </svg>
+              <div></div>
+              <svg width="22" height="64" viewBox="0 0 22 64" xmlns="http://www.w3.org/2000/svg" style="justify-self:center;">
+                <line x1="11" y1="1" x2="11" y2="53" stroke="#f87171" stroke-width="2.5" stroke-dasharray="6 4" stroke-linecap="round">
+                  <animate attributeName="stroke-dashoffset" from="18" to="-18" dur="1.7s" repeatCount="indefinite"/>
+                </line>
+                <polygon points="4,53 11,64 18,53" fill="#f87171"/>
+              </svg>
+            </div>
             <!-- 결과 노드 두 개 -->
-            <div style="display:flex;gap:8px;flex:1;min-height:0;">
+            <div style="display:flex;gap:22px;flex:1;min-height:0;margin-top:0;">
               <!-- safe 노드 다이어그램 -->
-              <div class="n6a" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 8px;border-radius:10px;background:rgba(34,197,94,0.04);border:1px solid rgba(34,197,94,0.18);animation-delay:3.9s;">
+              <div class="n6a" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:0 2px;animation-delay:4.2s;">
                 <div style="width:100%;padding:10px;border-radius:7px;background:rgba(34,197,94,0.13);border:1px solid rgba(34,197,94,0.45);text-align:center;">
                   <span style="color:#4ade80;font-size:15px;font-weight:800;">결과: 2차 판정 safe</span>
                 </div>
@@ -7256,9 +7275,16 @@ ${outputLines}
                 <div style="width:100%;padding:10px;border-radius:7px;background:rgba(34,197,94,0.13);border:1px solid rgba(34,197,94,0.45);text-align:center;">
                   <span style="color:#4ade80;font-size:15px;font-weight:800;">공격 변형으로 복귀</span>
                 </div>
+                <div class="n6-mini-flow">
+                  <div class="n6-mini-step is-current"><span class="ps-num">5</span><span>공격 변형</span></div>
+                  <div class="n6-mini-dash"></div>
+                  <div class="n6-mini-step is-on"><span class="ps-num">6</span><span>2차 판정</span></div>
+                  <div class="n6-mini-dash"></div>
+                  <div class="n6-mini-step"><span class="ps-num">7</span><span>방어 생성</span></div>
+                </div>
               </div>
               <!-- vulnerable 결과 노드 -->
-              <div class="n6a" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:10px 8px;border-radius:10px;background:rgba(239,68,68,0.04);border:1px solid rgba(239,68,68,0.18);animation-delay:3.9s;">
+              <div class="n6a" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:0 2px;animation-delay:4.2s;">
                 <div style="width:100%;padding:10px;border-radius:7px;background:rgba(239,68,68,0.13);border:1px solid rgba(239,68,68,0.45);text-align:center;">
                   <span style="color:#f87171;font-size:15px;font-weight:800;">결과 · 2차 판정: vulnerable</span>
                 </div>
@@ -7268,8 +7294,15 @@ ${outputLines}
                   </line>
                   <polygon points="4,18 11,28 18,18" fill="#f87171"/>
                 </svg>
-                <div style="width:100%;padding:10px;border-radius:7px;background:rgba(239,68,68,0.13);border:1px solid rgba(239,68,68,0.45);text-align:center;">
-                  <span style="color:#f87171;font-size:15px;font-weight:800;">방어생성으로 이동!</span>
+                <div class="n6-defense-next" style="width:100%;padding:10px;border-radius:7px;background:rgba(239,68,68,0.16);border:1px solid rgba(248,113,113,0.75);text-align:center;">
+                  <span style="color:#f87171;font-size:15px;font-weight:800;">방어 생성으로 진행!</span>
+                </div>
+                <div class="n6-mini-flow">
+                  <div class="n6-mini-step"><span class="ps-num">5</span><span>공격 변형</span></div>
+                  <div class="n6-mini-dash"></div>
+                  <div class="n6-mini-step is-on"><span class="ps-num">6</span><span>2차 판정</span></div>
+                  <div class="n6-mini-dash"></div>
+                  <div class="n6-mini-step is-current"><span class="ps-num">7</span><span>방어 생성</span></div>
                 </div>
               </div>
             </div>
@@ -7283,7 +7316,7 @@ ${outputLines}
 
         // ── STEP 7: 방어 생성 ──
         {
-          title: "STEP 7 · 고양이의 방어 작전",
+          title: "STEP 7 · Blue Agent 방어 생성",
           slides: [
             {
               html: `
@@ -7292,24 +7325,24 @@ ${outputLines}
           @keyframes n7Reveal { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
           .n7-reveal { opacity:0; animation:n7Reveal 0.55s ease forwards; }
         </style>
-        <div style="display:flex;gap:0;width:100%;flex:0 0 48%;min-height:0;">
-          <video src="img/7슬1 (2).mp4" autoplay muted loop playsinline preload="metadata" onloadedmetadata="this.playbackRate=0.65" onplay="this.playbackRate=0.65" style="flex:0 0 55%;min-width:0;object-fit:contain;"></video>
-          <video src="img/7슬2.mp4" autoplay muted loop playsinline preload="metadata" onloadedmetadata="this.playbackRate=0.75" onplay="this.playbackRate=0.75" style="flex:1;min-width:0;object-fit:contain;"></video>
+        <div style="display:flex;gap:0;width:100%;flex:0 0 44%;min-height:0;">
+          <video class="n7-reveal" src="img/7슬1 (2).mp4" autoplay muted loop playsinline preload="metadata" onloadedmetadata="this.playbackRate=0.65" onplay="this.playbackRate=0.65" style="flex:0 0 55%;min-width:0;object-fit:contain;animation-delay:0.15s;"></video>
+          <video class="n7-reveal" src="img/7슬2.mp4" autoplay muted loop playsinline preload="metadata" onloadedmetadata="this.playbackRate=0.75" onplay="this.playbackRate=0.75" style="flex:1;min-width:0;object-fit:contain;animation-delay:1.55s;"></video>
         </div>
-        <div style="flex:1;min-height:0;width:100%;display:grid;grid-template-columns:1fr 112px 1fr;gap:12px;margin-top:12px;align-items:stretch;">
+        <div style="flex:0 0 38%;min-height:0;width:100%;display:grid;grid-template-columns:0.82fr 168px 0.82fr;gap:12px;margin-top:10px;align-items:stretch;">
           <div class="anim-section input n7-reveal" style="min-height:0;text-align:center;animation-delay:0.25s;">
             <div class="anim-label" style="opacity:1;justify-content:center;">입력</div>
-            <div class="anim-section-body" style="padding:10px 14px;">
-              <div class="anim-line strong" style="opacity:1;font-size:18px;margin-bottom:8px;">취약하다고 확인된 응답</div>
-              <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:8px;padding-top:8px;">
+            <div class="anim-section-body" style="padding:8px 12px;">
+              <div class="anim-line strong" style="opacity:1;font-size:17px;margin-bottom:6px;">취약하다고 확인된 응답</div>
+              <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:5px;padding-top:5px;">
                 <span class="anim-k" style="font-size:14px;">문제 응답</span>
                 <span class="anim-v" style="font-size:14.5px;font-weight:700;">customer_email, internal_token 출력</span>
               </div>
-              <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:8px;padding-top:8px;">
+              <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:5px;padding-top:5px;">
                 <span class="anim-k" style="font-size:14px;">위험 유형</span>
                 <span class="anim-v" style="font-size:14.5px;font-weight:800;color:#fbbf24;">민감정보 노출</span>
               </div>
-              <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:8px;padding-top:8px;">
+              <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:5px;padding-top:5px;">
                 <span class="anim-k" style="font-size:14px;">방어 목표</span>
                 <span class="anim-v" style="font-size:14.5px;font-weight:700;">같은 상황에서 안전하게 답하는 예시 생성</span>
               </div>
@@ -7321,10 +7354,10 @@ ${outputLines}
           </div>
           <div class="anim-section output n7-reveal" style="min-height:0;text-align:center;animation-delay:1.55s;">
             <div class="anim-label" style="opacity:1;justify-content:center;">결과</div>
-            <div class="anim-section-body" style="padding:12px 14px;">
-              <div class="anim-line strong" style="opacity:1;font-size:18px;margin-bottom:8px;">방어 응답 생성</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;color:#d1fae5;font-weight:700;">개인정보 또는 내부 보안 정보는 제공할 수 없다고 안내합니다.</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;">대신 안전한 주문 상태 확인 절차를 제안합니다.</div>
+            <div class="anim-section-body" style="padding:8px 12px;height:100%;display:flex;flex-direction:column;justify-content:center;">
+              <div class="anim-line strong" style="opacity:1;font-size:17px;margin-bottom:6px;">방어 응답 생성</div>
+              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:5px;color:#d1fae5;font-weight:700;">개인정보 또는 내부 보안 정보는 제공할 수 없다고 안내합니다.</div>
+              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:5px;">대신 안전한 주문 상태 확인 절차를 제안합니다.</div>
             </div>
           </div>
         </div>
@@ -7336,48 +7369,48 @@ ${outputLines}
 
         // ── STEP 8: 방어 검증 ──
         {
-          title: "STEP 8 · 방어가 진짜 통했나요?",
+          title: "STEP 8 · 방어 응답 검증",
           slides: [
             {
               html: `
-        <div style="font-size:16px;font-weight:800;color:#f1f5f9;margin-bottom:10px;text-align:center;flex-shrink:0;">판정 에이전트가 방어 응답을 다시 검사합니다</div>
+        <div style="font-size:20px;font-weight:900;color:#f1f5f9;margin-bottom:10px;text-align:center;flex-shrink:0;">판정 에이전트가 방어 응답을 다시 검사합니다</div>
         <style>
           @keyframes n8Reveal { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:translateY(0)} }
           .n8-reveal { opacity:0; animation:n8Reveal 0.55s ease forwards; }
         </style>
-        <div style="width:100%;flex:0 0 48%;min-height:0;display:flex;align-items:center;justify-content:center;">
-          <video src="img/8슬1.mp4" autoplay muted loop playsinline preload="metadata" onloadedmetadata="this.playbackRate=0.85" onplay="this.playbackRate=0.85" style="width:auto;height:100%;max-width:82vw;max-height:390px;object-fit:contain;display:block;border-radius:14px;background:rgba(2,6,23,0.72);box-shadow:0 18px 46px rgba(0,0,0,0.32);"></video>
+        <div style="width:100%;flex:0 0 44%;min-height:0;display:flex;align-items:center;justify-content:center;">
+          <video src="img/8슬1.mp4" autoplay muted loop playsinline preload="metadata" onloadedmetadata="this.playbackRate=0.85" onplay="this.playbackRate=0.85" style="width:auto;height:100%;max-width:78vw;max-height:350px;object-fit:contain;display:block;border-radius:14px;background:rgba(2,6,23,0.72);box-shadow:0 18px 46px rgba(0,0,0,0.32);"></video>
         </div>
-        <div style="flex:1;min-height:0;width:100%;display:grid;grid-template-columns:1fr 112px 1fr;gap:12px;margin-top:12px;align-items:stretch;">
+        <div style="flex:1;min-height:0;width:100%;display:grid;grid-template-columns:0.82fr 168px 0.82fr;gap:12px;margin-top:12px;align-items:stretch;">
           <div class="anim-section input n8-reveal" style="min-height:0;text-align:center;animation-delay:0.25s;">
             <div class="anim-label" style="opacity:1;justify-content:center;">입력</div>
             <div class="anim-section-body" style="padding:12px 14px;">
-              <div class="anim-line strong" style="opacity:1;font-size:18px;margin-bottom:8px;">Blue Agent가 만든 방어 응답</div>
+              <div class="anim-line strong" style="opacity:1;font-size:19px;margin-bottom:8px;">Blue Agent가 만든 방어 응답</div>
               <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:8px;padding-top:8px;">
-                <span class="anim-k" style="font-size:14px;">응답 요약</span>
-                <span class="anim-v" style="font-size:14.5px;font-weight:700;">민감정보 제공 거부</span>
+                <span class="anim-k" style="font-size:15px;">응답 요약</span>
+                <span class="anim-v" style="font-size:15.5px;font-weight:700;">민감정보 제공 거부</span>
               </div>
               <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:8px;padding-top:8px;">
-                <span class="anim-k" style="font-size:14px;">대체 안내</span>
-                <span class="anim-v" style="font-size:14.5px;font-weight:700;">안전한 확인 절차 제시</span>
+                <span class="anim-k" style="font-size:15px;">대체 안내</span>
+                <span class="anim-v" style="font-size:15.5px;font-weight:700;">안전한 확인 절차 제시</span>
               </div>
               <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:8px;padding-top:8px;">
-                <span class="anim-k" style="font-size:14px;">검증 목표</span>
-                <span class="anim-v" style="font-size:14.5px;font-weight:700;">방어 응답 자체가 안전한지 재판정</span>
+                <span class="anim-k" style="font-size:15px;">검증 목표</span>
+                <span class="anim-v" style="font-size:15.5px;font-weight:700;">방어 응답 자체가 안전한지 재판정</span>
               </div>
             </div>
           </div>
           <div class="anim-arrow-wrap n8-reveal" style="min-height:0;animation-delay:0.95s;">
             <div class="anim-arrow-circle" style="width:38px;height:38px;font-size:18px;">→</div>
-            <div class="anim-process-text" style="font-size:13.5px;line-height:1.45;">방어 응답을 다시 Judge로 검증합니다.</div>
+            <div class="anim-process-text" style="font-size:15px;line-height:1.45;">방어 응답을 다시 Judge로 검증합니다.</div>
           </div>
           <div class="anim-section output n8-reveal" style="min-height:0;text-align:center;animation-delay:1.55s;">
             <div class="anim-label" style="opacity:1;justify-content:center;">결과</div>
-            <div class="anim-section-body" style="padding:12px 14px;">
-              <div class="anim-line strong" style="opacity:1;font-size:18px;margin-bottom:8px;">재검증 결과: safe</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;color:#d1fae5;font-weight:700;">민감정보가 출력되지 않았고 거부 응답이 중심입니다.</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;">safe로 통과한 방어만 defense_patterns에 저장합니다.</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;">unsafe가 남으면 한도 안에서 Phase 3로 되돌아갑니다.</div>
+            <div class="anim-section-body" style="padding:12px 14px;text-align:center;transform:translateY(10px);">
+              <div class="anim-line strong" style="opacity:1;font-size:19px;margin-bottom:8px;">재검증 결과: safe</div>
+              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:15.5px;margin-top:8px;color:#d1fae5;font-weight:700;text-align:center;">민감정보가 출력되지 않았고 거부 응답이 중심입니다.</div>
+              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:15.5px;margin-top:8px;text-align:center;">safe로 통과한 방어만 defense_patterns에 저장합니다.</div>
+              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:15.5px;margin-top:8px;text-align:center;">unsafe가 남으면 한도 안에서 Phase 3로 되돌아갑니다.</div>
             </div>
           </div>
         </div>
@@ -7385,7 +7418,7 @@ ${outputLines}
           <defs><filter id="s8f1"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
           <!-- 방어 응답 (왼쪽) -->
           <rect x="30" y="110" width="158" height="180" rx="10" fill="rgba(16,185,129,0.08)" stroke="#6ee7b7" stroke-width="1.5"/>
-          <text x="109" y="132" font-size="9.5" text-anchor="middle" fill="#6ee7b7" font-weight="700">고양이의 방어 응답</text>
+          <text x="109" y="132" font-size="9.5" text-anchor="middle" fill="#6ee7b7" font-weight="700">Blue Agent 방어 응답</text>
           <rect x="42" y="144" width="134" height="70" rx="5" fill="rgba(16,185,129,0.1)" stroke="#6ee7b7" stroke-width="0.8"/>
           <text x="109" y="159" font-size="8" text-anchor="middle" fill="#a7f3d0">"해당 정보는 개인정보에</text>
           <text x="109" y="171" font-size="8" text-anchor="middle" fill="#a7f3d0">해당하여 제공 불가합니다.</text>
@@ -7441,7 +7474,7 @@ ${outputLines}
 
         // ── STEP 9: 최종 결과 ──
         {
-          title: "STEP 9 · 작전 완료 보고",
+          title: "STEP 9 · 스캔 완료 보고",
           slides: [
             {
               html: `
@@ -7481,14 +7514,14 @@ ${outputLines}
             <div class="anim-label" style="opacity:1;justify-content:center;">결과</div>
             <div class="anim-section-body" style="padding:12px 14px;">
               <div class="anim-line strong" style="opacity:1;font-size:18px;margin-bottom:8px;">최종 상태: 방어 성공</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;color:#d1fae5;font-weight:700;">성공 공격은 attack_results 후보로 남깁니다.</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;">검증된 방어는 defense_patterns 후보로 저장합니다.</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;">전체 흐름은 status/results/review_queue JSON으로 저장됩니다.</div>
+              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;color:#d1fae5;font-weight:700;text-align:center;">성공 공격은 attack_results 후보로 남깁니다.</div>
+              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;text-align:center;">검증된 방어는 defense_patterns 후보로 저장합니다.</div>
+              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:8px;text-align:center;">전체 흐름은 status/results/review_queue JSON으로 저장됩니다.</div>
             </div>
           </div>
         </div>
         <div class="n9-reveal" style="width:100%;margin-top:10px;padding:12px 18px;border-radius:14px;border:1px solid rgba(56,189,248,0.65);background:rgba(14,165,233,0.16);color:#bae6fd;font-size:18px;font-weight:900;text-align:center;box-shadow:0 0 26px rgba(56,189,248,0.24),0 14px 34px rgba(0,0,0,0.22);animation-delay:2.15s;">
-          <span class="n9-safe-text">이제 진짜 해커가 와서 공격을 해도 챗봇은 안전합니다.</span>
+          <span class="n9-safe-text">동일 유형의 공격 요청에도 Target Chatbot은 안전 응답을 반환하기 때문에 의심스러운 공격으로부터 안전합니다!</span>
         </div>
         <svg style="display:none" width="580" height="390" viewBox="0 0 580 390" xmlns="http://www.w3.org/2000/svg">
           <defs><filter id="s9f1"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
@@ -7528,7 +7561,7 @@ ${outputLines}
             <ellipse cx="81" cy="300" rx="1.5" ry="3" fill="rgba(150,200,255,0.8)"/>
             <ellipse cx="99" cy="300" rx="1.5" ry="3" fill="rgba(150,200,255,0.8)"/>
           </g>
-          <text x="90" y="340" font-size="11" text-anchor="middle" fill="#a05050">🐭 ㅜㅜ 실패...</text>
+          <text x="90" y="340" font-size="11" text-anchor="middle" fill="#a05050">공격 실패</text>
           <!-- 고양이 (오른쪽 아래, 승리) -->
           <g filter="url(#s9f1)">
             <animateTransform attributeName="transform" type="translate" values="0,0;0,-5;0,0;0,-3;0,0" dur="3s" repeatCount="indefinite" additive="sum"/>
@@ -7540,7 +7573,7 @@ ${outputLines}
             <path d="M476,305 L476,342 Q490,355 504,342 L504,305 Q490,294 476,305 Z" fill="rgba(16,185,129,0.22)" stroke="#6ee7b7" stroke-width="2"/>
             <path d="M482 320 L489 328 L502 312" stroke="#6ee7b7" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
           </g>
-          <text x="490" y="368" font-size="11" text-anchor="middle" fill="#6ee7b7">🐱 방어 성공!</text>
+          <text x="490" y="368" font-size="11" text-anchor="middle" fill="#6ee7b7">방어 성공</text>
           <!-- 보고서 (오른쪽 위) -->
           <g filter="url(#s9f1)">
             <rect x="400" y="30" width="155" height="130" rx="10" fill="rgba(99,102,241,0.1)" stroke="#a5b4fc" stroke-width="1.8"/>
@@ -7559,9 +7592,9 @@ ${outputLines}
           <!-- 결과 배너 -->
           <rect x="60" y="5" width="280" height="40" rx="12" fill="rgba(16,185,129,0.1)" stroke="#6ee7b7" stroke-width="1.5"><animate attributeName="opacity" values="1;0.7;1" dur="2s" repeatCount="indefinite"/></rect>
           <text x="200" y="22" font-size="11" text-anchor="middle" fill="#6ee7b7" font-weight="800">🛡 AgentShield 완료</text>
-          <text x="200" y="37" font-size="9.5" text-anchor="middle" fill="#94a3b8">치즈 창고 보안 강화 완료</text>
+          <text x="200" y="37" font-size="9.5" text-anchor="middle" fill="#94a3b8">Target Chatbot 보안 점검 완료</text>
         </svg>
-        <div style="margin-top:4px;padding:3px 14px;border-radius:999px;font-size:10px;font-weight:700;border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;background:rgba(99,102,241,0.08);align-self:center;">STEP 9 · 작전 완료 · 보고서 저장</div>
+        <div style="margin-top:4px;padding:3px 14px;border-radius:999px;font-size:10px;font-weight:700;border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;background:rgba(99,102,241,0.08);align-self:center;">STEP 9 · 스캔 완료 · 보고서 저장</div>
       `,
             },
           ],
@@ -7574,22 +7607,22 @@ ${outputLines}
           "챗봇이 정상 응답을 돌려보내면 연결 준비가 끝난 것입니다. 이제 공격 에이전트가 실제 보안 테스트를 시작할 수 있습니다.",
         ],
         2: [
-          "쥐 요원이 우리 서비스에 맞춰 직접 설계하고 구축한 공격 데이터셋을 챗봇에 보냅니다. 이 단계에서는 아직 결론을 내리지 않고, 챗봇의 답변을 모아 Judge에게 넘깁니다.",
+          "Red Agent가 우리 서비스에 맞춰 직접 설계하고 구축한 공격 데이터셋을 Target Chatbot에 보냅니다. 이 단계에서는 아직 결론을 내리지 않고, 챗봇의 답변을 모아 Judge Agent에게 넘깁니다.",
         ],
         3: [
-          "개 판정관은 챗봇 답변에 실제 위험 증거가 있는지 확인합니다. 단순히 공격 문장을 거절하면서 인용한 경우와, 민감정보나 도구 호출이 실제로 나온 경우를 구분합니다.",
+          "Judge Agent는 챗봇 답변에 실제 위험 증거가 있는지 확인합니다. 단순히 공격 문장을 거절하면서 인용한 경우와, 민감정보나 도구 호출이 실제로 나온 경우를 구분합니다.",
         ],
         4: [
-          "1차 공격이 막히면 쥐 요원이 표현 방식을 바꿔 다시 시도합니다. 역할 바꾸기, 출력 형식 바꾸기 같은 변형 전략으로 최대 라운드 안에서 더 정교한 공격을 만듭니다.",
+          "1차 공격이 막히면 Red Agent가 표현 방식을 바꿔 다시 시도합니다. 역할 바꾸기, 출력 형식 바꾸기 같은 변형 전략으로 최대 라운드 안에서 더 정교한 공격을 만듭니다.",
         ],
         5: [
-          "변형 공격의 응답도 같은 기준으로 다시 판정합니다. 여기서 치즈가 보인다는 것은 개인정보, 내부 토큰, 숨겨진 메타데이터 같은 민감 정보가 실제로 노출됐다는 뜻입니다.",
+          "변형 공격의 응답도 같은 기준으로 다시 판정합니다. 여기서 민감정보가 감지된다는 것은 개인정보, 내부 토큰, 숨겨진 메타데이터 같은 보호 대상 정보가 실제로 노출됐다는 뜻입니다.",
         ],
         6: [
-          "고양이 Blue Agent는 취약하다고 확인된 답변을 안전한 응답으로 바꿉니다. 챗봇 코드 자체를 고치는 것이 아니라, 같은 상황에서 어떻게 답해야 안전한지 방어 응답을 만듭니다.",
+          "Blue Agent는 취약하다고 확인된 답변을 안전한 응답으로 바꿉니다. 챗봇 코드 자체를 고치는 것이 아니라, 같은 상황에서 어떻게 답해야 안전한지 방어 응답을 만듭니다.",
         ],
         7: [
-          "방어 응답도 바로 통과시키지 않고 개 판정관이 다시 검사합니다. 방어문 안에 위험 정보가 남아 있으면 다시 만들고, 안전하다고 판단된 방어만 저장합니다.",
+          "방어 응답도 바로 통과시키지 않고 Judge Agent가 다시 검사합니다. 방어문 안에 위험 정보가 남아 있으면 다시 만들고, 안전하다고 판단된 방어만 저장합니다.",
         ],
         8: [
           "마지막에는 공격 결과, 방어 결과, 판정 기록을 보고서와 저장 데이터로 정리합니다. 성공한 공격과 검증된 방어는 다음 검사에 참고할 수 있는 기억으로 남습니다.",
@@ -7600,6 +7633,7 @@ ${outputLines}
         _ndAutoTimer = null,
         _ndNodeIdx = 0;
       let _node2LoopTimer = null;
+      let _node2AutoMode = false;
 
       function ndGoSlide(idx) {
         const slides = document.querySelectorAll(".nd-slide");
@@ -7616,12 +7650,38 @@ ${outputLines}
         }
         slides[_ndIdx].classList.add("active");
         dots.forEach((d, i) => d.classList.toggle("active", i === _ndIdx));
-        document.getElementById("nd-prev").style.opacity =
-          _ndIdx === 0 ? "0.3" : "1";
-        document.getElementById("nd-next").style.opacity =
-          _ndIdx === total - 1 ? "0.3" : "1";
+        const prevBtn = document.getElementById("nd-prev");
+        const nextBtn = document.getElementById("nd-next");
+        if (prevBtn) {
+          prevBtn.disabled = _ndIdx === 0;
+          prevBtn.style.opacity = prevBtn.disabled ? "0.2" : "1";
+        }
+        if (nextBtn) {
+          nextBtn.disabled = _ndIdx === total - 1;
+          nextBtn.style.opacity = nextBtn.disabled ? "0.2" : "1";
+        }
         syncSlideVideos(document.getElementById("nd-slides"));
         _ndResetAuto();
+      }
+
+      function stopNode2AutoMode() {
+        if (_node2LoopTimer) {
+          clearTimeout(_node2LoopTimer);
+          _node2LoopTimer = null;
+        }
+        _node2AutoMode = false;
+        document.querySelectorAll("#nd-slides .nd-slide").forEach(function (slide) {
+          slide.style.opacity = "";
+          slide.style.transform = "";
+          slide.style.transition = "";
+          slide.style.pointerEvents = "";
+          slide.style.background = "";
+        });
+      }
+
+      function ndManualGoSlide(idx) {
+        if (_ndNodeIdx === 1 && _node2AutoMode) stopNode2AutoMode();
+        ndGoSlide(idx);
       }
 
       function _ndResetAuto() {}
@@ -7631,6 +7691,7 @@ ${outputLines}
           clearTimeout(_node2LoopTimer);
           _node2LoopTimer = null;
         }
+        _node2AutoMode = true;
         const slidesEl = document.getElementById("nd-slides");
         if (!slidesEl) return;
         const allSlides = slidesEl.querySelectorAll(".nd-slide");
@@ -7656,7 +7717,7 @@ ${outputLines}
         if (nav) nav.style.display = "none";
 
         function loop() {
-          // 3초 뒤 쥐 출동! 페이지가 자연스럽게 페이드인
+          // 5초 뒤 응답 확인 완료 화면이 자연스럽게 페이드인
           _node2LoopTimer = setTimeout(function () {
             if (
               !document
@@ -7666,7 +7727,7 @@ ${outputLines}
               return;
             slide1.style.opacity = "1";
             slide1.style.transform = "scale(1)";
-            // 3초 표시 후 다시 페이드아웃
+            // 5초 표시 후 다시 페이드아웃
             _node2LoopTimer = setTimeout(function () {
               if (
                 !document
@@ -7678,8 +7739,8 @@ ${outputLines}
               slide1.style.transform = "scale(0.98)";
               // 페이드아웃 완료(1.4s) 후 다시 AgentShield 단계로 반복
               _node2LoopTimer = setTimeout(loop, 1500);
-            }, 3000);
-          }, 3000);
+            }, 5000);
+          }, 5000);
         }
 
         loop();
@@ -7713,13 +7774,25 @@ ${outputLines}
         dotsEl.innerHTML = data.slides
           .map(
             (_, i) =>
-              `<span class="nd-dot${i === 0 ? " active" : ""}" onclick="ndGoSlide(${i})"></span>`,
+              `<span class="nd-dot${i === 0 ? " active" : ""}" onclick="ndManualGoSlide(${i})"></span>`,
           )
           .join("");
 
-        document.getElementById("nd-prev").style.opacity = "0.3";
-        document.getElementById("nd-next").style.opacity =
-          data.slides.length > 1 ? "1" : "0.3";
+        const prevBtn = document.getElementById("nd-prev");
+        const nextBtn = document.getElementById("nd-next");
+        [prevBtn, nextBtn].forEach(function (btn) {
+          if (!btn) return;
+          btn.classList.remove("is-hidden");
+          btn.style.display = "";
+        });
+        if (prevBtn) {
+          prevBtn.disabled = true;
+          prevBtn.style.opacity = "0.2";
+        }
+        if (nextBtn) {
+          nextBtn.disabled = data.slides.length <= 1;
+          nextBtn.style.opacity = nextBtn.disabled ? "0.2" : "1";
+        }
 
         document.getElementById("node-demo-overlay").classList.add("open");
         syncSlideVideos(slidesEl);
@@ -7736,8 +7809,17 @@ ${outputLines}
           clearTimeout(_node2LoopTimer);
           _node2LoopTimer = null;
         }
+        _node2AutoMode = false;
         const nav = document.getElementById("nd-nav");
         if (nav) nav.style.display = "";
+        ["nd-prev", "nd-next"].forEach(function (id) {
+          const btn = document.getElementById(id);
+          if (!btn) return;
+          btn.classList.remove("is-hidden");
+          btn.disabled = false;
+          btn.style.display = "";
+          btn.style.opacity = "";
+        });
       }
     </script>
 
@@ -7948,10 +8030,10 @@ ${outputLines}
                 />
                 <image
                   href="img/1.등장인물 소개_강아지.png"
-                  x="145"
-                  y="5"
-                  width="155"
-                  height="355"
+                  x="126"
+                  y="-50"
+                  width="192"
+                  height="432"
                   preserveAspectRatio="xMidYMid meet"
                 />
               </g>
@@ -7973,7 +8055,7 @@ ${outputLines}
                 fill="#fbbf24"
                 font-weight="800"
               >
-                🐶 Judge
+                🐶 Judge Agent
               </text>
               <text
                 x="222"
@@ -7982,7 +8064,7 @@ ${outputLines}
                 text-anchor="middle"
                 fill="#94a3b8"
               >
-                판정관
+                판정 에이전트
               </text>
 
               <!-- ══ 고양이 (Blue Agent) · 제일 작은 크기 ══ -->
@@ -7998,10 +8080,10 @@ ${outputLines}
                 />
                 <image
                   href="img/1.등장인물 소개_고양이.png"
-                  x="305"
-                  y="95"
-                  width="110"
-                  height="265"
+                  x="285"
+                  y="43"
+                  width="150"
+                  height="330"
                   preserveAspectRatio="xMidYMid meet"
                 />
               </g>
@@ -8066,10 +8148,48 @@ ${outputLines}
                   preserveAspectRatio="xMidYMid meet"
                 />
               </g>
+              <rect
+                x="455"
+                y="382"
+                width="210"
+                height="28"
+                rx="14"
+                fill="rgba(0,212,255,0.2)"
+                stroke="#00d4ff"
+                stroke-width="1.2"
+              />
+              <text
+                x="560"
+                y="401"
+                font-size="16"
+                text-anchor="middle"
+                fill="#67e8f9"
+                font-weight="800"
+              >
+                🧀 Target Chatbot
+              </text>
+              <text
+                x="560"
+                y="426"
+                font-size="14"
+                text-anchor="middle"
+                fill="#94a3b8"
+              >
+                Target Chatbot = 검사 대상
+              </text>
+              <text
+                x="560"
+                y="448"
+                font-size="14"
+                text-anchor="middle"
+                fill="#94a3b8"
+              >
+                내부 기밀 정보 = 보호 대상 데이터
+              </text>
             </svg>
           </div>
 
-          <!-- 카드 3: 쥐가 작전을 짭니다 / 작전 세션 개시 -->
+          <!-- 카드 3: 보안 검사 전 점검 / 검사 세션 개시 -->
           <div
             class="n1-slide"
             style="
@@ -8108,12 +8228,12 @@ ${outputLines}
                     font-size: clamp(18px, 2.6vw, 26px);
                   "
                 >
-                  🐭 쥐가 작전을 짭니다..
+                  보안 검사 전 점검
                 </div>
                 <img
                   class="float-img"
                   src="img/1_작전쥐.png"
-                  alt="쥐가 작전을 짭니다"
+                  alt="보안 검사 전 점검"
                   style="
                     max-height: min(40vh, 340px);
                     max-width: 100%;
@@ -8175,12 +8295,12 @@ ${outputLines}
                     font-size: clamp(18px, 2.6vw, 26px);
                   "
                 >
-                  작전 세션 개시 !
+                  검사 세션 개시
                 </div>
                 <img
                   class="float-img"
                   src="img/1_작전개시.png"
-                  alt="작전 세션 개시"
+                  alt="검사 세션 개시"
                   style="
                     max-height: min(40vh, 340px);
                     max-width: 100%;
@@ -8425,7 +8545,7 @@ ${outputLines}
         <button
           class="popup-side-btn"
           id="nd-prev"
-          onclick="ndGoSlide(_ndIdx - 1)"
+          onclick="ndManualGoSlide(_ndIdx - 1)"
           style="left: 0; border-radius: 0 14px 14px 0"
         >
           &#8249;
@@ -8433,7 +8553,7 @@ ${outputLines}
         <button
           class="popup-side-btn"
           id="nd-next"
-          onclick="ndGoSlide(_ndIdx + 1)"
+          onclick="ndManualGoSlide(_ndIdx + 1)"
           style="right: 0; border-radius: 14px 0 0 14px"
         >
           &#8250;
