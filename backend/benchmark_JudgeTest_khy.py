@@ -18,7 +18,7 @@ if str(project_root) not in sys.path:
 from backend.core.judge import full_judge
 
 # 설정
-DATA_PATH = project_root / "data" / "검수완료(830개).json"
+DATA_PATH = project_root / "data" / "검수완료.json"
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 OUTPUT_PATH = project_root / "data" / f"benchmark_result_probability_{TIMESTAMP}.json"
 
