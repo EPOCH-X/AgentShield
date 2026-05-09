@@ -597,7 +597,14 @@ class SFTProcessor:
             if is_valid_reason(consensus_reason):
                 rows.append(
                     build_consensus_chat_row(
-                        ...
+                        sample=sample,
+                        target_response=target_response,
+                        expected=expected,
+                        reason=consensus_reason,
+                        strict=strict,
+                        context=context,
+                        evidence=evidence,
+                        debate=debate,
                     )
                 )
                 stats["consensus_added"] += 1
