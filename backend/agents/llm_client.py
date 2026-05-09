@@ -12,10 +12,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
 import httpx
-import torch
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from backend.config import settings
 
@@ -137,6 +135,8 @@ class AgentShieldLLM:
             if self.current_local_base_path != target_base_path:
                 print(f"[Local PEFT] 베이스 모델 변경 감지. 기존 메모리 정리 및 [{target_base_path}] 로드 중...")
 
+                import torch
+                from transformers import AutoModelForCausalLM, AutoTokenizer
                 if self.base_model is not None:
                     del self.model
                     del self.base_model
@@ -245,11 +245,13 @@ class AgentShieldLLM:
                     }
                 else:
                     effective_prompt = prompt
+                    use_raw = False
                     if system_prompt_override is not None:
                         sys_prompt = system_prompt_override
                         if sys_prompt:
                             if os.getenv("OLLAMA_RED_PROMPT_FORMAT", "").strip().lower() == "chatml":
                                 effective_prompt = self._chatml_prompt(sys_prompt, prompt)
+                                use_raw = True
                             else:
                                 effective_prompt = f"{sys_prompt}\n\n[USER TASK]\n{prompt}"
                     elif role == "red":
@@ -258,6 +260,7 @@ class AgentShieldLLM:
                         if sys_prompt:
                             if os.getenv("OLLAMA_RED_PROMPT_FORMAT", "").strip().lower() == "chatml":
                                 effective_prompt = self._chatml_prompt(sys_prompt, prompt)
+                                use_raw = True
                             else:
                                 effective_prompt = f"{sys_prompt}\n\n[USER TASK]\n{prompt}"
                     payload = {
@@ -266,6 +269,8 @@ class AgentShieldLLM:
                         "stream": False,
                         "options": options,
                     }
+                    if use_raw:
+                        payload["raw"] = True
                 if think_val is not None:
                     payload["think"] = think_val
                 if settings.OLLAMA_KEEP_ALIVE:
