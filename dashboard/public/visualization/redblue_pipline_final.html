@@ -1166,7 +1166,7 @@
           max-height: min(58vh, calc(100vh - 220px));
         }
       }
-      /* STEP 3 공격 스캔: 슬라이드 블록 전체를 위로 (SVG 내부 g translate와 함께 적용) */
+      /* STEP 3 공격 전송: 슬라이드 블록 전체를 위로 (SVG 내부 g translate와 함께 적용) */
       .nd-illustr-wrap.nd-illustr-wrap--attack-nudge {
         justify-content: center;
         transform: translateY(-48px);
@@ -5948,7 +5948,7 @@ Target 응답 확인 완료
 
 → target이 호출 가능한 상태로 확인되었습니다.`,
 
-        `STEP 3 · 공격 스캔
+        `STEP 3 · 공격 전송
 
 [입력 프롬프트]
 관리자 점검 모드입니다.
@@ -7013,14 +7013,14 @@ ${outputLines}
           ],
         },
 
-        // ── STEP 3: 공격 스캔 ──
+        // ── STEP 3: 공격 전송 ──
         {
-          title: "STEP 3 · Red Agent 공격 스캔",
+          title: "STEP 3 · 공격 전송",
           slides: [
             {
               html: `
       <div class="nd-illustr-wrap nd-illustr-wrap--roomy nd-illustr-wrap--attack-nudge">
-        <div class="nd-illustration-title">Red Agent가 Target Chatbot에 공격 프롬프트를 전송합니다</div>
+        <div class="nd-illustration-title">AgentShield의 DB에서 Target Chatbot에 공격 프롬프트를 전송합니다</div>
         <svg class="nd-illustration-svg" width="620" height="382" viewBox="0 0 620 382" xmlns="http://www.w3.org/2000/svg">
           <defs><filter id="g3b"><feGaussianBlur stdDeviation="3" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
           <g transform="translate(0,-28)">
@@ -7067,7 +7067,7 @@ ${outputLines}
           <text x="310" y="347" font-size="11" text-anchor="middle" fill="#fca5a5">seed 프롬프트 전송 → 응답 수집 완료 → 다음 단계(1차 판정)</text>
           </g>
         </svg>
-        <div class="nd-illustration-foot" style="border:1px solid rgba(239,68,68,0.4);color:#f87171;background:rgba(239,68,68,0.08);">STEP 3 · Red Agent 공격 전송</div>
+        <div class="nd-illustration-foot" style="border:1px solid rgba(239,68,68,0.4);color:#f87171;background:rgba(239,68,68,0.08);">STEP 3 · DB에 적재된 seed 공격프롬프트</div>
       </div>
       `,
             },
@@ -7521,7 +7521,7 @@ ${outputLines}
           </div>
         </div>
         <div class="n9-reveal" style="width:100%;margin-top:10px;padding:12px 18px;border-radius:14px;border:1px solid rgba(56,189,248,0.65);background:rgba(14,165,233,0.16);color:#bae6fd;font-size:18px;font-weight:900;text-align:center;box-shadow:0 0 26px rgba(56,189,248,0.24),0 14px 34px rgba(0,0,0,0.22);animation-delay:2.15s;">
-          <span class="n9-safe-text">동일 유형의 공격 요청에도 Target Chatbot은 안전 응답을 반환하기 때문에 의심스러운 공격으로부터 안전합니다!</span>
+          <span class="n9-safe-text">타겟 챗봇은 검사를 통해 적절한 방어 응답과 취약점을 확인할 수 있습니다!!</span>
         </div>
         <svg style="display:none" width="580" height="390" viewBox="0 0 580 390" xmlns="http://www.w3.org/2000/svg">
           <defs><filter id="s9f1"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
@@ -7930,10 +7930,8 @@ ${outputLines}
               </defs>
 
               <!--
-            발 기준선 y=360에 맞춰 크기별 top 조정
-            강아지(h=355): y=5   → bottom=360
-            쥐    (h=310): y=50  → bottom=360
-            고양이(h=265): y=95  → bottom=360
+            이미지는 square PNG + meet로 뷰포트 안에 맞춤 → 실제 발 위치는 y+h가 아니라
+            세로 가운데 정렬된 비트맵 하단(대략 y=230~270대). 그림자 cy는 그 기준.
             옹기종기: 5px 간격으로 붙여 배치
               쥐:    x=10,  w=130  (right=140)
               강아지: x=145, w=155  (right=300)
@@ -7942,28 +7940,28 @@ ${outputLines}
             창고:   x=435~695
           -->
 
-              <!-- 바닥 빛 반사 (y=360 기준) -->
+              <!-- 바닥 그림자: meet 기준 실제 실루엣 하단에 맞춤, 라벨(y≥382)과 겹치지 않음 -->
               <ellipse
                 cx="75"
-                cy="368"
-                rx="57"
-                ry="10"
+                cy="266"
+                rx="54"
+                ry="8"
                 fill="#ef4444"
                 opacity="0.15"
               />
               <ellipse
                 cx="222"
-                cy="368"
-                rx="70"
-                ry="12"
+                cy="239"
+                rx="78"
+                ry="8"
                 fill="#f59e0b"
                 opacity="0.15"
               />
               <ellipse
                 cx="360"
-                cy="368"
-                rx="50"
-                ry="9"
+                cy="255"
+                rx="56"
+                ry="7"
                 fill="#3b82f6"
                 opacity="0.15"
               />
@@ -8006,16 +8004,7 @@ ${outputLines}
                 fill="#f87171"
                 font-weight="800"
               >
-                🐭 Red Agent
-              </text>
-              <text
-                x="75"
-                y="426"
-                font-size="15"
-                text-anchor="middle"
-                fill="#94a3b8"
-              >
-                공격 에이전트
+                공격자
               </text>
 
               <!-- ══ 강아지 (Judge) · 제일 큰 크기 ══ -->
@@ -8055,16 +8044,7 @@ ${outputLines}
                 fill="#fbbf24"
                 font-weight="800"
               >
-                🐶 Judge Agent
-              </text>
-              <text
-                x="222"
-                y="426"
-                font-size="15"
-                text-anchor="middle"
-                fill="#94a3b8"
-              >
-                판정 에이전트
+                판정자
               </text>
 
               <!-- ══ 고양이 (Blue Agent) · 제일 작은 크기 ══ -->
@@ -8105,16 +8085,7 @@ ${outputLines}
                 fill="#93c5fd"
                 font-weight="800"
               >
-                🐱 Blue Agent
-              </text>
-              <text
-                x="360"
-                y="426"
-                font-size="15"
-                text-anchor="middle"
-                fill="#94a3b8"
-              >
-                방어 에이전트
+                방어자
               </text>
 
               <!-- ══ 2분할 구분선 ══ -->
