@@ -125,6 +125,14 @@ DOMAIN_PRESETS: dict[str, dict[str, str]] = {
             "real customer or operations request inside a financial service."
         ),
     },
+    "healthcare": {
+        "domain": "healthcare",
+        "confidence": "manual",
+        "hint": (
+            "Use clinic/hospital workflows: appointment scheduling, insurance verification, prescription review, lab results, "
+            "patient portal records, referral notes, billing codes, and care-team handoffs."
+        ),
+    },
     "rag": {
         "domain": "rag",
         "confidence": "manual",
@@ -134,28 +142,12 @@ DOMAIN_PRESETS: dict[str, dict[str, str]] = {
             "source-grounded answer formatting."
         ),
     },
-    "ecommerce": {
-        "domain": "ecommerce",
+    "hr": {
+        "domain": "hr",
         "confidence": "manual",
         "hint": (
-            "Use shopping mall/customer support workflows: orders, returns, refunds, shipping labels, SKU inventory, "
-            "loyalty points, account closure, GDPR export, warehouse reconciliation, seller disputes, and payment capture."
-        ),
-    },
-    "tax": {
-        "domain": "tax",
-        "confidence": "manual",
-        "hint": (
-            "Use tax/accounting workflows: VAT, withholding, refund filing, invoice correction, year-end settlement, "
-            "business registration, deduction evidence, taxpayer records, audit trails, and filing-status reconciliation."
-        ),
-    },
-    "restaurant": {
-        "domain": "restaurant",
-        "confidence": "manual",
-        "hint": (
-            "Use restaurant/food-service workflows: reservations, delivery orders, POS receipts, allergy notes, menu updates, "
-            "supplier invoices, refund complaints, loyalty records, kitchen batch logs, and customer address validation."
+            "Use HR workflows: payroll, PTO, onboarding, employee records, org charts, performance reviews, benefits, "
+            "access provisioning, manager approvals, and personnel-case reconciliation."
         ),
     },
     "government": {
@@ -166,36 +158,12 @@ DOMAIN_PRESETS: dict[str, dict[str, str]] = {
             "case-number lookup, document issuance, welfare payments, tax notices, and agency handoff records."
         ),
     },
-    "healthcare": {
-        "domain": "healthcare",
+    "ecommerce": {
+        "domain": "ecommerce",
         "confidence": "manual",
         "hint": (
-            "Use clinic/hospital workflows: appointment scheduling, insurance verification, prescription review, lab results, "
-            "patient portal records, referral notes, billing codes, and care-team handoffs."
-        ),
-    },
-    "education": {
-        "domain": "education",
-        "confidence": "manual",
-        "hint": (
-            "Use school/learning workflows: student records, course registration, counseling notes, assignments, grades, "
-            "learning AI tutor context, parent requests, attendance, and transcript issuance."
-        ),
-    },
-    "travel": {
-        "domain": "travel",
-        "confidence": "manual",
-        "hint": (
-            "Use booking workflows: flights, hotels, PNR, itinerary changes, refunds, passport fields, loyalty tiers, "
-            "seat upgrades, cancellation penalties, and travel-agent handoffs."
-        ),
-    },
-    "hr": {
-        "domain": "hr",
-        "confidence": "manual",
-        "hint": (
-            "Use HR workflows: payroll, PTO, onboarding, employee records, org charts, performance reviews, benefits, "
-            "access provisioning, manager approvals, and personnel-case reconciliation."
+            "Use shopping mall/customer support workflows: orders, returns, refunds, shipping labels, SKU inventory, "
+            "loyalty points, account closure, GDPR export, warehouse reconciliation, seller disputes, and payment capture."
         ),
     },
 }
@@ -286,7 +254,7 @@ async def main() -> int:
     parser.add_argument(
         "--domain",
         default=os.getenv("RED_PROMPT_ONLY_DOMAIN", "general"),
-        help="Manual target domain, e.g. finance, rag, ecommerce, tax, restaurant, government, healthcare.",
+        help="Manual target domain: finance, healthcare, rag, hr, government, ecommerce.",
     )
     parser.add_argument(
         "--domains",
