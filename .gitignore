@@ -131,4 +131,4 @@ nohup.out
 CLAUDE.md
 
 data/
-* best_weights
+backend/agents/best_weights/
