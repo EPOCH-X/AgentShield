@@ -479,20 +479,22 @@ class SFTProcessor:
         for sample in detailed_results:
             stats["total"] += 1
 
-            eval_data = sample.get("evaluation", {})
+            eval_data = sample.get("evaluation", {}) or {}
             expected = eval_data.get("expected_judgment")
             predicted = eval_data.get("predicted_judgment")
 
             if expected not in {"vulnerable", "safe"}:
                 stats["skipped_invalid_expected"] += 1
                 continue
-            
+
+            # 전체 학습 데이터 조건:
+            # expected와 predicted가 같은 샘플만 사용
             if expected != predicted:
                 stats["consensus_skipped_mismatch"] += 1
                 continue
-            
+
             category = sample.get("category", "LLM01")
-            original_data = sample.get("original_en", {})
+            original_data = sample.get("original_en", {}) or {}
 
             attack_prompt = original_data.get("attack_prompt", "").strip()
             target_response = original_data.get("target_response", "").strip()
@@ -584,7 +586,7 @@ class SFTProcessor:
 
             # -------------------------
             # CONSENSUS
-            # - expected == predicted 인 경우만 학습
+            # - 이미 expected == predicted 필터를 통과한 샘플만 여기 도달
             # - consensus 입력에는 attack_prompt 넣지 않음
             # -------------------------
             consensus_reason = clean_text(
@@ -611,18 +613,16 @@ class SFTProcessor:
             else:
                 stats["consensus_skipped_invalid_reason"] += 1
 
-        # -----------------------------
-        # 통계 출력
-        # -----------------------------
+            if not rows:
+                stats["all_skipped"] += 1
+                continue
+
+            grouped_samples[expected].extend(rows)
+
         print("\n[전처리 통계]")
         for key, value in stats.items():
             print(f"{key}: {value}")
 
-        # -----------------------------
-        # 데이터 병합
-        # - 작은 데이터셋이므로 강제 밸런싱하지 않음
-        # - vulnerable / safe 샘플을 모두 사용
-        # -----------------------------
         counts = {
             label: len(items)
             for label, items in grouped_samples.items()
