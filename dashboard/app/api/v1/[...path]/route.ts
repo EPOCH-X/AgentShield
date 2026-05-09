@@ -13,6 +13,8 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
   const search = req.nextUrl.searchParams;
   const method = req.method;
   const bodyText = method !== "GET" && method !== "HEAD" ? await req.text() : "";
+  const tail = segments.join("/");
+  const timeoutMs = tail === "scan/sitegpt/red-mutation" ? 30000 : 8000;
 
   // 백엔드로 프록시 시도
   try {
@@ -26,7 +28,7 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
       method,
       headers,
       body: bodyText || undefined,
-      signal: AbortSignal.timeout(8000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     const contentType = res.headers.get("content-type") ?? "";

@@ -1,33 +1,30 @@
 import { spawn } from "node:child_process";
-import fs from "node:fs";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { envValue, loadAgentShieldEnv, projectRoot } from "../../../../lib/serverEnv";
+
+const root = process.env.AGENTSHIELD_ROOT || path.resolve(process.cwd(), "..");
+const python = process.env.PYTHON_BIN || "python3";
+
+function e(key: string, fallback = "") {
+  return String(process.env[key] || fallback);
+}
 
 function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: string; stderr: string }> {
+  const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
+  const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
+  const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
+
   return new Promise((resolve) => {
-    const root = projectRoot();
-    const venvPython = path.join(root, "venv", "bin", "python");
-    const python = process.env.PYTHON_BIN || (fs.existsSync(venvPython) ? venvPython : "python3");
-    const redModel = envValue("RED_CAMPAIGN_MODEL") || envValue("OLLAMA_RED_MODEL");
-    const targetUrl = envValue("TESTBED_CHAT_URL", `http://127.0.0.1:${envValue("TESTBED_PORT", "8010")}/chat`);
-    const rounds = envValue("RED_CAMPAIGN_ROUNDS", "5");
     const child = spawn(
       python,
       [
         "scripts/run_demo_red_adaptive_rounds.py",
-        "--target-url",
-        targetUrl,
-        "--red-model",
-        redModel,
-        "--rounds",
-        rounds,
-        "--seed",
-        "57",
-        "--category",
-        "LLM02",
-        "--subcategory",
-        "config-extraction",
+        "--target-url", targetUrl,
+        "--red-model", redModel,
+        "--rounds", rounds,
+        "--seed", "57",
+        "--category", "LLM02",
+        "--subcategory", "config-extraction",
         "--initial-prompt-stdin",
       ],
       {
@@ -35,8 +32,7 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
         stdio: ["pipe", "pipe", "pipe"],
         env: {
           ...process.env,
-          ...loadAgentShieldEnv(),
-          RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: envValue("DEMO_RED_CONTINUE_AFTER_SUCCESS", "false"),
+          RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "false"),
         },
       }
     );
@@ -47,12 +43,8 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
       child.kill("SIGTERM");
     }, 600_000);
 
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
+    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
     child.on("close", (code) => {
       clearTimeout(timeout);
       resolve({ status: code ?? 1, stdout, stderr });
@@ -63,7 +55,6 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
 
 export async function POST(req: NextRequest) {
   let body: { prompt?: string };
-
   try {
     body = await req.json();
   } catch {
@@ -81,11 +72,7 @@ export async function POST(req: NextRequest) {
   try {
     const payload = JSON.parse(lastLine);
     return NextResponse.json(
-      {
-        ...payload,
-        status: result.status,
-        stderr_tail: payload.stderr_tail || result.stderr.slice(-4000),
-      },
+      { ...payload, status: result.status, stderr_tail: payload.stderr_tail || result.stderr.slice(-4000) },
       { status: payload.ok ? 200 : 502 }
     );
   } catch {

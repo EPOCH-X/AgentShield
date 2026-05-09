@@ -149,4 +149,5 @@ nohup.out
 발표_대본_초안.txt
 CLAUDE.md
 
-
+data/
+backend/agents/best_weights/

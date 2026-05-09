@@ -18,24 +18,30 @@ export function removeToken(): void {
   localStorage.removeItem("username");
 }
 
+/** 기본 RequestInit에 더해, 401 시 전역 로그인 리다이렉트를 끌 수 있다(백그라운드 요청 충돌 방지). */
+export type ApiFetchOptions = RequestInit & {
+  redirectOn401?: boolean;
+};
+
 export async function apiFetch(
   path: string,
-  options: RequestInit = {}
+  options: ApiFetchOptions = {}
 ): Promise<Response> {
+  const { redirectOn401 = true, ...init } = options;
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...((options.headers as Record<string, string>) || {}),
+    ...((init.headers as Record<string, string>) || {}),
   };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(path, { ...init, headers });
 
   if (res.status === 401) {
     removeToken();
-    if (typeof window !== "undefined") {
+    if (redirectOn401 && typeof window !== "undefined") {
       window.location.href = "/login";
     }
     throw new Error("Unauthorized");
@@ -97,10 +103,11 @@ export async function startScan(
   target_url: string,
   project_name: string,
   target_api_key?: string,
+  max_phase?: number,
 ): Promise<{ session_id: string; status: string }> {
   const res = await apiFetch("/api/v1/scan/llm-security", {
     method: "POST",
-    body: JSON.stringify({ target_url, project_name, target_api_key }),
+    body: JSON.stringify({ target_url, project_name, target_api_key, max_phase }),
   });
   if (!res.ok) throw new Error("스캔을 시작할 수 없습니다.");
   return res.json();
@@ -115,9 +122,101 @@ export async function getScanStatus(sessionId: string): Promise<{
   vulnerable_count: number;
   safe_count: number;
   elapsed_seconds?: number;
+  termination_reason?: string;
+  attempted_count?: number;
+  failed_attempts?: number;
+  attack_success?: boolean;
+  error_message?: string;
 }> {
   const res = await apiFetch(`/api/v1/scan/${sessionId}/status`);
   if (!res.ok) throw new Error("스캔 상태를 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function getPhase1Seeds(
+  category?: string,
+  limit?: number,
+): Promise<{
+  category: string;
+  count: number;
+  items: Array<{
+    id?: number | string | null;
+    attack_prompt: string;
+    category?: string;
+    subcategory?: string;
+    seed_id?: string;
+  }>;
+}> {
+  const qs = new URLSearchParams();
+  if (category) qs.set("category", category);
+  if (limit != null) qs.set("limit", String(limit));
+  const url = `/api/v1/scan/phase1-seeds${qs.toString() ? "?" + qs.toString() : ""}`;
+  const res = await apiFetch(url, { redirectOn401: false });
+  if (!res.ok) throw new Error("공격 시드 목록을 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function getSitegptConfig(): Promise<{ phase2_max_rounds: number }> {
+  const res = await apiFetch("/api/v1/scan/sitegpt/config", { redirectOn401: false });
+  if (!res.ok) throw new Error("SiteGPT 설정을 불러올 수 없습니다.");
+  return res.json();
+}
+
+export async function postSitegptRedMutation(payload: {
+  category: string;
+  attack_prompt: string;
+  target_response: string;
+  round: number;
+  subcategory?: string;
+  judge_detail?: string;
+  used_techniques?: string[];
+  used_failure_modes?: string[];
+  cross_category_intel?: Record<string, string>;
+  target_url?: string;
+}): Promise<{
+  mutated_prompt: string;
+  techniques: string[];
+  failure_mode?: string | null;
+  detail: string;
+}> {
+  const res = await apiFetch("/api/v1/scan/sitegpt/red-mutation", {
+    method: "POST",
+    body: JSON.stringify({
+      category: payload.category,
+      attack_prompt: payload.attack_prompt,
+      target_response: payload.target_response,
+      round: payload.round,
+      subcategory: payload.subcategory ?? "",
+      judge_detail: payload.judge_detail ?? "",
+      used_techniques: payload.used_techniques ?? [],
+      used_failure_modes: payload.used_failure_modes ?? [],
+      cross_category_intel: payload.cross_category_intel,
+      target_url: payload.target_url,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || "Red 변형 요청에 실패했습니다.");
+  }
+  return res.json();
+}
+
+export async function manualCheck(payload: {
+  attack_prompt: string;
+  target_response: string;
+  category?: string;
+}): Promise<{
+  judgment: string;
+  severity?: string | null;
+  detail?: string;
+  confidence?: number;
+  manual_review_needed?: boolean;
+}> {
+  const res = await apiFetch("/api/v1/scan/manual-check", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("수동 판정 요청에 실패했습니다.");
   return res.json();
 }
 

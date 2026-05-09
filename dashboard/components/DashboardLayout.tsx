@@ -12,6 +12,7 @@ interface DashboardLayoutProps {
 const navItems = [
   { icon: "security", label: "LLM 보안 스캔", href: "/scan" },
   { icon: "science", label: "시연", href: "/demo" },
+  { icon: "account_tree", label: "파이프라인 시각화", href: "/visualization" },
   { icon: "visibility", label: "모니터링 및 위반", href: "/monitoring" },
   { icon: "admin_panel_settings", label: "관리자", href: "/monitoring/admin" },
 ];
@@ -38,6 +39,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   function isActive(href: string): boolean {
     if (href === "/scan") return pathname === "/scan" || pathname.startsWith("/scan/");
     if (href === "/demo") return pathname === "/demo";
+    if (href === "/visualization") return pathname === "/visualization";
     if (href === "/monitoring") return pathname === "/monitoring";
     if (href === "/monitoring/admin") {
       return pathname === "/monitoring/admin" || pathname.startsWith("/monitoring/admin/");
@@ -49,7 +51,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     <div className="min-h-screen bg-background text-on-surface">
       {/* Sidebar */}
       <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#050F1A] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
-        <div className="p-8 flex items-center gap-3">
+        <Link href="/" className="p-8 flex items-center gap-3 hover:opacity-90 transition-opacity">
           {/* Logo Image */}
           <img
             src="/logo3.png"
@@ -64,7 +66,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               SENTINEL ADVANCED
             </p>
           </div>
-        </div>
+        </Link>
 
         <nav className="flex-1 px-4 space-y-1 mt-2">
           {navItems.map((item) => {

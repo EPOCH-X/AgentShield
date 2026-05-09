@@ -12,10 +12,8 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Type
 
 import httpx
-import torch
 from dotenv import load_dotenv
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from backend.config import settings
 
@@ -137,6 +135,8 @@ class AgentShieldLLM:
             if self.current_local_base_path != target_base_path:
                 print(f"[Local PEFT] 베이스 모델 변경 감지. 기존 메모리 정리 및 [{target_base_path}] 로드 중...")
 
+                import torch
+                from transformers import AutoModelForCausalLM, AutoTokenizer
                 if self.base_model is not None:
                     del self.model
                     del self.base_model
@@ -202,6 +202,8 @@ class AgentShieldLLM:
         prompt: str,
         max_tokens: int,
         response_model: Optional[Type[BaseModel]],
+        system_prompt_override: Optional[str] = None,
+        options_override: Optional[Dict[str, Any]] = None,
     ) -> str:
         role_config = self.role_configs.get(role, self.role_configs["base"])
         options = {
@@ -211,6 +213,8 @@ class AgentShieldLLM:
             "top_k": role_config.get("top_k", 64),
             "num_ctx": role_config["num_ctx"],
         }
+        if options_override:
+            options.update(options_override)
         think_val = role_config.get("think")
         retries = max(1, int(settings.LLM_REQUEST_RETRIES))
         backoff_base = max(1.0, float(settings.LLM_RETRY_BACKOFF_BASE))
@@ -224,7 +228,11 @@ class AgentShieldLLM:
                 url = f"{self.ollama_base_url.rstrip('/')}{api_path}"
                 if use_chat_api:
                     messages: list = [{"role": "user", "content": prompt}]
-                    if role == "red":
+                    if system_prompt_override is not None:
+                        sys_prompt = system_prompt_override
+                        if sys_prompt:
+                            messages = [{"role": "system", "content": sys_prompt}] + messages
+                    elif role == "red":
                         from backend.agents.red_agent import get_system_prompt
                         sys_prompt = get_system_prompt()
                         if sys_prompt:
@@ -237,12 +245,22 @@ class AgentShieldLLM:
                     }
                 else:
                     effective_prompt = prompt
-                    if role == "red":
+                    use_raw = False
+                    if system_prompt_override is not None:
+                        sys_prompt = system_prompt_override
+                        if sys_prompt:
+                            if os.getenv("OLLAMA_RED_PROMPT_FORMAT", "").strip().lower() == "chatml":
+                                effective_prompt = self._chatml_prompt(sys_prompt, prompt)
+                                use_raw = True
+                            else:
+                                effective_prompt = f"{sys_prompt}\n\n[USER TASK]\n{prompt}"
+                    elif role == "red":
                         from backend.agents.red_agent import get_system_prompt
                         sys_prompt = get_system_prompt()
                         if sys_prompt:
                             if os.getenv("OLLAMA_RED_PROMPT_FORMAT", "").strip().lower() == "chatml":
                                 effective_prompt = self._chatml_prompt(sys_prompt, prompt)
+                                use_raw = True
                             else:
                                 effective_prompt = f"{sys_prompt}\n\n[USER TASK]\n{prompt}"
                     payload = {
@@ -251,6 +269,8 @@ class AgentShieldLLM:
                         "stream": False,
                         "options": options,
                     }
+                    if use_raw:
+                        payload["raw"] = True
                 if think_val is not None:
                     payload["think"] = think_val
                 if settings.OLLAMA_KEEP_ALIVE:
@@ -304,6 +324,8 @@ class AgentShieldLLM:
         role: str = "base",
         max_tokens: int = 2048,
         response_model: Optional[Type[BaseModel]] = None,
+        system_prompt_override: Optional[str] = None,
+        options_override: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """역할에 맞는 모델로 텍스트 또는 구조화된 응답을 생성한다."""
         self.switch_role(role)
@@ -323,6 +345,8 @@ class AgentShieldLLM:
                     prompt=prompt,
                     max_tokens=max_tokens,
                     response_model=response_model,
+                    system_prompt_override=system_prompt_override,
+                    options_override=options_override,
                 )
                 if response_model:
                     try:

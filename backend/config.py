@@ -103,6 +103,10 @@ class AppSettings:
     # Dev seed
     DEV_SEED_INCLUDE_ATTACK_PATTERNS: bool = os.getenv("DEV_SEED_INCLUDE_ATTACK_PATTERNS", "false").lower() == "true"
 
+    # Red Agent
+    RED_MAX_ATTACK_CHARS: int = int(os.getenv("RED_MAX_ATTACK_CHARS", 8000))
+    RED_SFT_SEED_CODE_MUTATION: bool = os.getenv("RED_SFT_SEED_CODE_MUTATION", "true").lower() == "true"
+
     # Phase 2
     PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 5))
     PHASE2_TIMEOUT: int = int(os.getenv("PHASE2_TIMEOUT", 300))
