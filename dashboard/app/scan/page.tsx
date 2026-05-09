@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
 import ChatbotTestModal from "../../components/ChatbotTestModal";
-import { startScan, manualCheck } from "../../lib/api";
+import { startScan, manualCheck, getPhase1Seeds, getToken } from "../../lib/api";
 import { MOCK_RECENT_SCANS } from "../../lib/mockClientData";
 
 const MOCK_SESSION_ID = "mock-session-demo";
@@ -30,6 +30,11 @@ interface RecentScan {
 
 type SiteGptSdkStatus = "idle" | "loading" | "ready" | "error";
 type DemoLogLevel = "info" | "success" | "error";
+
+/** SiteGPT 시드 줄: info=정상 폴백 안내, warn=오류성 폴백 */
+type DemoSeedsBanner =
+  | null
+  | { tone: "info" | "warn"; message: string };
 
 interface DemoLogEntry {
   ts: string;
@@ -116,7 +121,64 @@ export default function ScanPage() {
   const [lastSeedPrompt, setLastSeedPrompt] = useState("");
   const [demoCategory, setDemoCategory] = useState("LLM01");
   const [demoLogs, setDemoLogs] = useState<DemoLogEntry[]>([]);
+  const [demoSeedPrompts, setDemoSeedPrompts] = useState<string[]>([]);
+  const [demoSeedsLoading, setDemoSeedsLoading] = useState(false);
+  const [demoSeedsBanner, setDemoSeedsBanner] = useState<DemoSeedsBanner>(null);
   const demoLogPanelRef = useRef<HTMLDivElement | null>(null);
+
+  const loadDemoSeedsForVector = useCallback(async (vectorId: string): Promise<string[]> => {
+    const fallback =
+      DEMO_PROMPT_SEEDS_BY_VECTOR[vectorId] || DEMO_PROMPT_SEEDS_BY_VECTOR.jailbreak;
+    const category = DEMO_CATEGORY_BY_VECTOR[vectorId] || "LLM01";
+
+    // 시드 API는 로그인(JWT) 후에만 의미 있음 — 미로그인이면 요청하지 않고 로컬 풀만 사용
+    if (!getToken()) {
+      setDemoSeedsBanner(null);
+      setDemoSeedPrompts(fallback);
+      return fallback;
+    }
+
+    setDemoSeedsLoading(true);
+    setDemoSeedsBanner(null);
+    try {
+      const collectPrompts = (data: Awaited<ReturnType<typeof getPhase1Seeds>>) =>
+        (Array.isArray(data.items) ? data.items : [])
+          .map((i) => {
+            const row = i as { attack_prompt?: string; prompt_text?: string };
+            return (row.attack_prompt ?? row.prompt_text ?? "").trim();
+          })
+          .filter((p) => p.length > 0);
+
+      let data = await getPhase1Seeds(category, 500);
+      let prompts = collectPrompts(data);
+      // 실행 중 백엔드 DB가 삽입 DB와 다를 때(또는 카테고리 필터만 비었을 때) ALL로 한 번 더 시도
+      if (prompts.length === 0 && category !== "ALL") {
+        data = await getPhase1Seeds("ALL", 500);
+        prompts = collectPrompts(data);
+      }
+      if (prompts.length === 0) {
+        prompts = fallback;
+        // 로컬 예시 풀과 동일하게 조용히 진행(상단 경고는 API 실패 시에만)
+        setDemoSeedsBanner(null);
+      }
+      setDemoSeedPrompts(prompts);
+      return prompts;
+    } catch (err) {
+      setDemoSeedPrompts(fallback);
+      const unauthorized = err instanceof Error && err.message === "Unauthorized";
+      setDemoSeedsBanner(
+        unauthorized
+          ? null
+          : {
+              tone: "warn",
+              message: "시드 API를 불러오지 못해 로컬 예시 문구를 사용합니다.",
+            },
+      );
+      return fallback;
+    } finally {
+      setDemoSeedsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     try {
@@ -161,6 +223,12 @@ export default function ScanPage() {
     document.head.appendChild(script);
   }, [showSiteGptDemo]);
 
+  useEffect(() => {
+    if (!showSiteGptDemo) return;
+    const primaryVector = selectedVectors[0] || "jailbreak";
+    void loadDemoSeedsForVector(primaryVector);
+  }, [showSiteGptDemo, selectedVectors, loadDemoSeedsForVector]);
+
   function pushSiteGpt(command: unknown[]) {
     const sdk = (window as Window & { $sitegpt?: { push: (cmd: unknown[]) => void } }).$sitegpt;
     if (!sdk || typeof sdk.push !== "function") {
@@ -176,10 +244,13 @@ export default function ScanPage() {
     setDemoLogs((prev) => [...prev, { ts, level, message }].slice(-10));
   }
 
-  function pickSeedPrompt(vectorId: string, excludedPrompt?: string) {
-    const pool = DEMO_PROMPT_SEEDS_BY_VECTOR[vectorId] || DEMO_PROMPT_SEEDS_BY_VECTOR.jailbreak;
-    const candidates = pool.filter((prompt) => prompt !== excludedPrompt);
-    const source = candidates.length > 0 ? candidates : pool;
+  function pickSeedPromptFromPool(pool: string[], vectorId: string, excludedPrompt?: string) {
+    const effective =
+      pool.length > 0
+        ? pool
+        : DEMO_PROMPT_SEEDS_BY_VECTOR[vectorId] || DEMO_PROMPT_SEEDS_BY_VECTOR.jailbreak;
+    const candidates = effective.filter((prompt) => prompt !== excludedPrompt);
+    const source = candidates.length > 0 ? candidates : effective;
     return source[Math.floor(Math.random() * source.length)];
   }
 
@@ -236,7 +307,8 @@ export default function ScanPage() {
       appendDemoLog("info", "SiteGPT 대화 세션 초기화 완료");
       const primaryVector = selectedVectors[0] || "jailbreak";
       const category = DEMO_CATEGORY_BY_VECTOR[primaryVector] || "LLM01";
-      const firstPrompt = pickSeedPrompt(primaryVector);
+      const pool = await loadDemoSeedsForVector(primaryVector);
+      const firstPrompt = pickSeedPromptFromPool(pool, primaryVector);
       setDemoCategory(category);
       setPhase1SeedIndex(1);
       setPhase2Round(1);
@@ -294,7 +366,7 @@ export default function ScanPage() {
       if (nextFailCount >= DEMO_PHASE2_MAX_ROUNDS) {
         const primaryVector = selectedVectors[0] || "jailbreak";
         const nextSeedIndex = phase1SeedIndex + 1;
-        const nextSeedPrompt = pickSeedPrompt(primaryVector, lastSeedPrompt);
+        const nextSeedPrompt = pickSeedPromptFromPool(demoSeedPrompts, primaryVector, lastSeedPrompt);
         setPhase1SeedIndex(nextSeedIndex);
         setPhase2Round(1);
         setPhase2FailCount(0);
@@ -587,6 +659,20 @@ export default function ScanPage() {
                   </div>
                   <div className="mb-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-on-surface-variant">
                     {siteGptSdkDetail || "SDK 상태 대기 중"}
+                    {demoSeedsLoading && (
+                      <p className="mt-2 text-[11px] text-outline">Phase 1 시드 목록 불러오는 중...</p>
+                    )}
+                    {demoSeedsBanner && (
+                      <p
+                        className={
+                          demoSeedsBanner.tone === "warn"
+                            ? "mt-2 text-[11px] text-amber-300/90"
+                            : "mt-2 text-[11px] text-on-surface-variant/55"
+                        }
+                      >
+                        {demoSeedsBanner.message}
+                      </p>
+                    )}
                   </div>
                   <div className="mb-3 rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-on-surface-variant">
                     <p className="mb-1 text-[11px] text-outline">현재 공격 프롬프트</p>

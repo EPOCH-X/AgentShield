@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,6 +72,33 @@ class ManualCheckResponse(BaseModel):
     detail: str = ""
     confidence: float = 0.0
     manual_review_needed: bool = False
+
+
+def _normalize_phase1_pattern_id(raw: Any) -> Any:
+    """JSON 시드의 id가 dict/list 등이면 응답 직렬화가 깨질 수 있어 스칼라로 맞춘다."""
+    if raw is None:
+        return None
+    if isinstance(raw, (int, str)):
+        return raw
+    return str(raw)
+
+
+def _phase1_seed_row_json(p: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """응답 본문용 JSON-safe dict (response_model 직렬화 실패 회피)."""
+    try:
+        rid = _normalize_phase1_pattern_id(p.get("id"))
+        ap = str(p.get("attack_prompt") or "")
+        if not ap.strip():
+            return None
+        return {
+            "id": rid,
+            "attack_prompt": ap,
+            "category": str(p.get("category") or ""),
+            "subcategory": str(p.get("subcategory") or ""),
+            "seed_id": str(p.get("seed_id") or ""),
+        }
+    except Exception:
+        return None
 
 
 def _result_dict(r: TestResult, session_id: str) -> dict:
@@ -434,6 +461,43 @@ async def latest_scan(
         created_at=session.created_at.isoformat() if session.created_at else None,
         completed_at=session.completed_at.isoformat() if session.completed_at else None,
     )
+
+
+@router.get("/phase1-seeds")
+async def get_phase1_seeds(
+    category: str = Query("ALL"),
+    limit: Optional[int] = Query(None, ge=1, le=500),
+    _user: UserInfo = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Phase 1과 동일한 소스(DB 우선, 파일 폴백)에서 공격 시드 목록을 반환한다.
+
+    dict를 그대로 반환해 response_model 검증 단계에서의 500을 피한다.
+    """
+    cat_q = category or "ALL"
+    try:
+        from backend.core.phase1_scanner import load_phase1_attack_patterns
+
+        effective_limit = limit if limit is not None else 500
+        try:
+            patterns = await load_phase1_attack_patterns(cat_q, effective_limit)
+        except Exception:
+            logger.exception("[scan] phase1-seeds load_phase1_attack_patterns failed")
+            patterns = []
+
+        items: list[dict[str, Any]] = []
+        for p in patterns:
+            if not isinstance(p, dict):
+                continue
+            row = _phase1_seed_row_json(p)
+            if row is not None:
+                items.append(row)
+
+        return {"category": cat_q, "count": len(items), "items": items}
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("[scan] phase1-seeds fatal")
+        return {"category": cat_q, "count": 0, "items": []}
 
 
 @router.post("/{session_id}/cancel")

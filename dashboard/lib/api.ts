@@ -18,24 +18,30 @@ export function removeToken(): void {
   localStorage.removeItem("username");
 }
 
+/** 기본 RequestInit에 더해, 401 시 전역 로그인 리다이렉트를 끌 수 있다(백그라운드 요청 충돌 방지). */
+export type ApiFetchOptions = RequestInit & {
+  redirectOn401?: boolean;
+};
+
 export async function apiFetch(
   path: string,
-  options: RequestInit = {}
+  options: ApiFetchOptions = {}
 ): Promise<Response> {
+  const { redirectOn401 = true, ...init } = options;
   const token = getToken();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...((options.headers as Record<string, string>) || {}),
+    ...((init.headers as Record<string, string>) || {}),
   };
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(path, { ...init, headers });
 
   if (res.status === 401) {
     removeToken();
-    if (typeof window !== "undefined") {
+    if (redirectOn401 && typeof window !== "undefined") {
       window.location.href = "/login";
     }
     throw new Error("Unauthorized");
@@ -124,6 +130,29 @@ export async function getScanStatus(sessionId: string): Promise<{
 }> {
   const res = await apiFetch(`/api/v1/scan/${sessionId}/status`);
   if (!res.ok) throw new Error("스캔 상태를 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function getPhase1Seeds(
+  category?: string,
+  limit?: number,
+): Promise<{
+  category: string;
+  count: number;
+  items: Array<{
+    id?: number | string | null;
+    attack_prompt: string;
+    category?: string;
+    subcategory?: string;
+    seed_id?: string;
+  }>;
+}> {
+  const qs = new URLSearchParams();
+  if (category) qs.set("category", category);
+  if (limit != null) qs.set("limit", String(limit));
+  const url = `/api/v1/scan/phase1-seeds${qs.toString() ? "?" + qs.toString() : ""}`;
+  const res = await apiFetch(url, { redirectOn401: false });
+  if (!res.ok) throw new Error("공격 시드 목록을 가져올 수 없습니다.");
   return res.json();
 }
 
