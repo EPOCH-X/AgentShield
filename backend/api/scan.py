@@ -20,10 +20,12 @@ from backend.database import async_session, get_db
 from backend.graph.llm_security_graph import run_scan
 from backend.api.auth import get_current_admin, get_current_user, UserInfo
 from backend.models import TestSession, TestResult
+from backend.core.judge_utils import rule_based_judge
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 SCAN_TASKS: dict[str, asyncio.Task] = {}
+SCAN_SUMMARIES: dict[str, dict[str, Any]] = {}
 
 
 class ScanRequest(BaseModel):
@@ -32,6 +34,7 @@ class ScanRequest(BaseModel):
     target_api_key: Optional[str] = None
     target_provider: Optional[str] = None
     target_model: Optional[str] = None
+    max_phase: Optional[int] = None
 
 
 class ScanResponse(BaseModel):
@@ -55,6 +58,20 @@ class ReviewUpdateRequest(BaseModel):
     detail: Optional[str] = None
     defense_reviewed: Optional[bool] = None
     verify_result: Optional[str] = None
+
+
+class ManualCheckRequest(BaseModel):
+    attack_prompt: str
+    target_response: str
+    category: str = "LLM01"
+
+
+class ManualCheckResponse(BaseModel):
+    judgment: str
+    severity: Optional[str] = None
+    detail: str = ""
+    confidence: float = 0.0
+    manual_review_needed: bool = False
 
 
 def _result_dict(r: TestResult, session_id: str) -> dict:
@@ -278,6 +295,7 @@ async def _execute_scan_background(
     session_id: str,
     target_url: str,
     target_config: dict[str, Any],
+    max_phase: int = 2,
 ) -> None:
     print(f"[scan:{session_id}] background scan started target={target_url}", flush=True)
     logger.info("[scan:%s] background scan started target=%s", session_id, target_url)
@@ -301,7 +319,16 @@ async def _execute_scan_background(
                     session_id=session_id,
                     result=result,
                 ),
+                max_phase=max_phase,
+                max_failed_attempts=5,
             )
+            SCAN_SUMMARIES[session_id] = {
+                "termination_reason": final_state.get("termination_reason") or "",
+                "failed_attempts": int(final_state.get("failed_attempts") or 0),
+                "attempted_count": len(final_state.get("attempted_seed_ids") or []),
+                "attack_success": bool(final_state.get("attack_success")),
+                "error_message": "",
+            }
 
             await _persist_phase4_summary(
                 db,
@@ -323,10 +350,17 @@ async def _execute_scan_background(
                 session.completed_at = datetime.utcnow()
                 await db.commit()
                 await _auto_export_session(db, session_id=session_id, session_status="cancelled")
+            SCAN_SUMMARIES[session_id] = {
+                "termination_reason": "cancelled",
+                "failed_attempts": 0,
+                "attempted_count": 0,
+                "attack_success": False,
+                "error_message": "",
+            }
             print(f"[scan:{session_id}] background scan cancelled", flush=True)
             logger.info("[scan:%s] background scan cancelled", session_id)
             raise
-        except Exception:
+        except Exception as exc:
             await db.rollback()
             session = await db.scalar(select(TestSession).where(TestSession.id == UUID(session_id)))
             if session:
@@ -334,6 +368,13 @@ async def _execute_scan_background(
                 session.completed_at = datetime.utcnow()
                 await db.commit()
                 await _auto_export_session(db, session_id=session_id, session_status="failed")
+            SCAN_SUMMARIES[session_id] = {
+                "termination_reason": "failed",
+                "failed_attempts": 0,
+                "attempted_count": 0,
+                "attack_success": False,
+                "error_message": f"{exc.__class__.__name__}: {str(exc)}",
+            }
             print(f"[scan:{session_id}] background scan failed", flush=True)
             logger.exception("[scan:%s] background scan failed", session_id)
 
@@ -358,11 +399,13 @@ async def start_scan(
     session_id = str(session.id)
     print(f"[scan:{session_id}] scan accepted and queued target={req.target_url}", flush=True)
     logger.info("[scan:%s] scan accepted and queued target=%s", session_id, req.target_url)
+    bounded_max_phase = max(2, min(4, int(req.max_phase or 2)))
     task = asyncio.create_task(
         _execute_scan_background(
             session_id=session_id,
             target_url=req.target_url,
             target_config=_build_target_config(req),
+            max_phase=bounded_max_phase,
         )
     )
     SCAN_TASKS[session_id] = task
@@ -441,38 +484,42 @@ async def scan_status(
     if not sess:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
 
-    total_rows = await db.scalar(
-        select(func.count()).select_from(TestResult).where(TestResult.session_id == sid)
-    ) or 0
-    phase1_completed = await db.scalar(
-        select(func.count()).select_from(TestResult).where(TestResult.session_id == sid, TestResult.phase == 1)
-    ) or 0
-    vulnerable = await db.scalar(
-        select(func.count()).select_from(TestResult)
-        .where(TestResult.session_id == sid, TestResult.judgment == "vulnerable")
-    ) or 0
-    max_phase  = await db.scalar(
-        select(func.max(TestResult.phase)).where(TestResult.session_id == sid)
-    ) or 1
-    verify_count = await db.scalar(
-        select(func.count()).select_from(TestResult)
-        .where(TestResult.session_id == sid, TestResult.verify_result.is_not(None))
-    ) or 0
-    defense_count = await db.scalar(
-        select(func.count()).select_from(TestResult)
-        .where(TestResult.session_id == sid, TestResult.defense_code.is_not(None))
-    ) or 0
-
-    if verify_count:
-        max_phase = max(max_phase, 4)
-    elif defense_count:
-        max_phase = max(max_phase, 3)
-
-    from backend.core.phase1_scanner import estimate_phase1_total
-
     try:
+        total_rows = await db.scalar(
+            select(func.count()).select_from(TestResult).where(TestResult.session_id == sid)
+        ) or 0
+        phase1_completed = await db.scalar(
+            select(func.count()).select_from(TestResult).where(TestResult.session_id == sid, TestResult.phase == 1)
+        ) or 0
+        vulnerable = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "vulnerable")
+        ) or 0
+        max_phase  = await db.scalar(
+            select(func.max(TestResult.phase)).where(TestResult.session_id == sid)
+        ) or 1
+        verify_count = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.verify_result.is_not(None))
+        ) or 0
+        defense_count = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.defense_code.is_not(None))
+        ) or 0
+
+        if verify_count:
+            max_phase = max(max_phase, 4)
+        elif defense_count:
+            max_phase = max(max_phase, 3)
+
+        from backend.core.phase1_scanner import estimate_phase1_total
         expected_phase1_total = await estimate_phase1_total()
     except Exception:
+        logger.exception("[scan:%s] status aggregation failed; fallback response", session_id)
+        total_rows = 0
+        phase1_completed = 0
+        vulnerable = 0
+        max_phase = 1
         expected_phase1_total = 0
 
     if max_phase <= 1 and sess.status in {"queued", "running", "cancelled", "failed"}:
@@ -496,6 +543,11 @@ async def scan_status(
         "vulnerable_count": vulnerable,
         "safe_count":       max(0, total_rows - vulnerable),
         "elapsed_seconds":  elapsed,
+        "termination_reason": (SCAN_SUMMARIES.get(session_id) or {}).get("termination_reason"),
+        "attempted_count": (SCAN_SUMMARIES.get(session_id) or {}).get("attempted_count"),
+        "failed_attempts": (SCAN_SUMMARIES.get(session_id) or {}).get("failed_attempts"),
+        "attack_success": (SCAN_SUMMARIES.get(session_id) or {}).get("attack_success"),
+        "error_message": (SCAN_SUMMARIES.get(session_id) or {}).get("error_message"),
     }
 
 
@@ -573,6 +625,33 @@ async def scan_result_detail(
         raise HTTPException(status_code=404, detail="결과를 찾을 수 없습니다")
 
     return _result_dict(r, session_id)
+
+
+@router.post("/manual-check", response_model=ManualCheckResponse)
+async def manual_check(
+    req: ManualCheckRequest,
+):
+    verdict = rule_based_judge(req.category, req.attack_prompt, req.target_response)
+    judgment = str(verdict.get("judgment") or "ambiguous")
+    detail = str(verdict.get("detail") or "")
+    severity = verdict.get("severity")
+
+    confidence_map = {
+        "vulnerable": 0.9,
+        "safe": 0.85,
+        "ambiguous": 0.4,
+        "error": 0.0,
+    }
+    confidence = float(verdict.get("confidence") or confidence_map.get(judgment, 0.5))
+    manual_review_needed = judgment in {"ambiguous", "error", "generation_failed"}
+
+    return ManualCheckResponse(
+        judgment=judgment,
+        severity=str(severity) if severity else None,
+        detail=detail,
+        confidence=confidence,
+        manual_review_needed=manual_review_needed,
+    )
 
 
 @router.patch("/{session_id}/results/{result_id}/review")

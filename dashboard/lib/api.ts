@@ -97,10 +97,11 @@ export async function startScan(
   target_url: string,
   project_name: string,
   target_api_key?: string,
+  max_phase?: number,
 ): Promise<{ session_id: string; status: string }> {
   const res = await apiFetch("/api/v1/scan/llm-security", {
     method: "POST",
-    body: JSON.stringify({ target_url, project_name, target_api_key }),
+    body: JSON.stringify({ target_url, project_name, target_api_key, max_phase }),
   });
   if (!res.ok) throw new Error("스캔을 시작할 수 없습니다.");
   return res.json();
@@ -115,9 +116,33 @@ export async function getScanStatus(sessionId: string): Promise<{
   vulnerable_count: number;
   safe_count: number;
   elapsed_seconds?: number;
+  termination_reason?: string;
+  attempted_count?: number;
+  failed_attempts?: number;
+  attack_success?: boolean;
+  error_message?: string;
 }> {
   const res = await apiFetch(`/api/v1/scan/${sessionId}/status`);
   if (!res.ok) throw new Error("스캔 상태를 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function manualCheck(payload: {
+  attack_prompt: string;
+  target_response: string;
+  category?: string;
+}): Promise<{
+  judgment: string;
+  severity?: string | null;
+  detail?: string;
+  confidence?: number;
+  manual_review_needed?: boolean;
+}> {
+  const res = await apiFetch("/api/v1/scan/manual-check", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("수동 판정 요청에 실패했습니다.");
   return res.json();
 }
 
