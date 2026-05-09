@@ -70,7 +70,7 @@ async def _apply_async(converter_type: str, text: str) -> str:
     return result.output_text
 
 
-def apply_pyrit_converter(text: str, encoding_index: int) -> tuple[str, str]:
+async def apply_pyrit_converter(text: str, encoding_index: int) -> tuple[str, str]:
     """PyRIT 컨버터를 적용한다.
 
     Returns:
@@ -90,5 +90,5 @@ def apply_pyrit_converter(text: str, encoding_index: int) -> tuple[str, str]:
             )
         return text, f"SKIPPED:{converter_type} (pyrit not installed)"
 
-    converted = asyncio.run(_apply_async(converter_type, text))
+    converted = await _apply_async(converter_type, text)
     return converted, converter_type
