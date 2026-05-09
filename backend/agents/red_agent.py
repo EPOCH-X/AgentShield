@@ -17,6 +17,8 @@ from backend.core.security_schema import get_failure_mode_ids, get_failure_mode_
 
 _NON_ASCII_OUTPUT_RE = re.compile(r"[^\x09\x0A\x0D\x20-\x7E]")
 _THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.IGNORECASE | re.DOTALL)
+_THINK_UNCLOSED_RE = re.compile(r"<think>.*\Z", re.IGNORECASE | re.DOTALL)
+_THINK_ORPHAN_CLOSE_RE = re.compile(r"\A.*?</think>", re.IGNORECASE | re.DOTALL)
 _PROMPT_SCAFFOLD_RE = re.compile(
     r"(?im)^\s*#{1,6}\s*("
     r"success state|hard success conditions|hard success definition|"
@@ -193,7 +195,12 @@ def normalize_attack_prompt_output(prompt: str) -> str:
     """Remove generation wrappers while preserving the target-facing attack."""
     if not prompt:
         return ""
-    normalized = _THINK_BLOCK_RE.sub("", prompt).translate(_UNICODE_NORMALIZATION_MAP)
+    normalized = _THINK_BLOCK_RE.sub("", prompt)
+    if "<think>" in normalized.lower():
+        normalized = _THINK_UNCLOSED_RE.sub("", normalized)
+    if "</think>" in normalized.lower():
+        normalized = _THINK_ORPHAN_CLOSE_RE.sub("", normalized)
+    normalized = normalized.translate(_UNICODE_NORMALIZATION_MAP)
     normalized = re.sub(r"[\u200b-\u200d\ufeff]", "", normalized)
     normalized = normalized.strip()
 
