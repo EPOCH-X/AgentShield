@@ -10,29 +10,12 @@ from backend.agents.judge_nodes import (
     pattern_scanner_node,
     strict_auditor_node,
     context_auditor_node,
-    debate_node,
     consensus_node,
 )
 
 
 def join_node(state: SecurityState) -> Dict[str, Any]:
     return {}
-
-
-def debate_router(state: SecurityState) -> str:
-    strict = state.get("strict_auditor_result") or {}
-    context = state.get("context_auditor_result") or {}
-
-    strict_judgment = strict.get("judgment", "ambiguous")
-    context_judgment = context.get("judgment", "ambiguous")
-
-    if strict_judgment != context_judgment:
-        return "debate"
-
-    if strict_judgment == "ambiguous" or context_judgment == "ambiguous":
-        return "debate"
-
-    return "consensus"
 
 
 def build_judge_graph():
@@ -43,7 +26,6 @@ def build_judge_graph():
     graph.add_node("strict_auditor", strict_auditor_node)
     graph.add_node("context_auditor", context_auditor_node)
     graph.add_node("join", join_node)
-    graph.add_node("debate", debate_node)
     graph.add_node("consensus", consensus_node)
 
     graph.set_entry_point("triage")
@@ -56,16 +38,7 @@ def build_judge_graph():
     graph.add_edge("strict_auditor", "join")
     graph.add_edge("context_auditor", "join")
 
-    graph.add_conditional_edges(
-        "join",
-        debate_router,
-        {
-            "debate": "debate",
-            "consensus": "consensus",
-        },
-    )
-
-    graph.add_edge("debate", "consensus")
+    graph.add_edge("join", "consensus")
     graph.add_edge("consensus", END)
 
     return graph.compile()

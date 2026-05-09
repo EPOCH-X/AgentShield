@@ -131,6 +131,7 @@ async def benchmark_judge(
                 category=category,
                 attack_prompt=attack_prompt,
                 response=target_response,
+                include_debug=False,
             )
 
             predicted = str(
@@ -163,37 +164,64 @@ async def benchmark_judge(
 
             log_entry = {
                 "sample_id": i + 1,
-                "category": category,
+
+                "category": result.get("category", category),
+
                 "evaluation": {
                     "is_correct": is_correct,
                     "is_ambiguous": is_ambiguous,
+
                     "expected_judgment": expected,
                     "predicted_judgment": predicted,
+
+                    "probability_judgment": result.get(
+                        "probability_judgment",
+                        "",
+                    ),
+
+                    "consensus_judgment": result.get(
+                        "consensus_judgment",
+                        "",
+                    ),
+
+                    "judgment_alignment": result.get(
+                        "judgment_alignment",
+                        "",
+                    ),
+
                     "p_vulnerable": p_vulnerable,
                     "p_safe": p_safe,
                 },
+
+                "matched_patterns": result.get(
+                    "matched_patterns",
+                    [],
+                ),
+
                 "original_en": {
                     "attack_prompt": attack_prompt,
                     "target_response": target_response,
                 },
+
                 "judge_output": {
                     "detail": result.get("detail", ""),
-                    "probability_process": result.get(
-                        "probability_process",
-                        [],
-                    ),
-                    "evidence_scan_result": result.get(
-                        "evidence_scan_result",
+
+                    "reason_sources": result.get(
+                        "reason_sources",
                         {},
                     ),
+
                     "mitre_technique_id": result.get(
                         "mitre_technique_id",
                         "",
                     ),
                 },
-                "debug_nodes": result.get("debug_nodes", {}),
-            }
 
+                "node_results": result.get(
+                    "node_results",
+                    {},
+                ),
+            }
             results_log.append(log_entry)
 
             status = (
@@ -208,6 +236,8 @@ async def benchmark_judge(
                 f"▶ [{i + 1}/{total_samples}] {status} | "
                 f"GT: {expected.upper()} → "
                 f"PRED: {predicted.upper()} | "
+                f"CONS: {result.get('consensus_judgment', '').upper()} | "
+                f"ALIGN: {result.get('judgment_alignment', '').upper()} | "
                 f"p_vuln={p_vulnerable:.4f}, "
                 f"p_safe={p_safe:.4f}"
             )
