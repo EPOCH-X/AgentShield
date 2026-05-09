@@ -47,7 +47,9 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield
+      # 프로젝트 루트 .env의 DATABASE_URL을 그대로 쓴다(RDS 등). 미설정 시에만 Compose postgres(db)로 폴백.
+      # 고정으로 db:5432를 넣으면 호스트에서 RDS에 넣은 시드와 백엔드가 서로 다른 DB를 보게 된다.
+      DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       CHROMADB_MODE: http
       CHROMADB_HOST: chromadb
@@ -77,6 +79,8 @@ services:
       chromadb:
         condition: service_started
     volumes:
+      # 이미지 빌드 시 COPY된 /app/.env보다 호스트 .env를 우선 사용(load_dotenv가 실제 파일을 읽음)
+      - ./.env:/app/.env:ro
       - ./backend:/app/backend
       - ./adapters:/app/adapters
       - ./data:/app/data

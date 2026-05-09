@@ -156,6 +156,51 @@ export async function getPhase1Seeds(
   return res.json();
 }
 
+export async function getSitegptConfig(): Promise<{ phase2_max_rounds: number }> {
+  const res = await apiFetch("/api/v1/scan/sitegpt/config", { redirectOn401: false });
+  if (!res.ok) throw new Error("SiteGPT 설정을 불러올 수 없습니다.");
+  return res.json();
+}
+
+export async function postSitegptRedMutation(payload: {
+  category: string;
+  attack_prompt: string;
+  target_response: string;
+  round: number;
+  subcategory?: string;
+  judge_detail?: string;
+  used_techniques?: string[];
+  used_failure_modes?: string[];
+  cross_category_intel?: Record<string, string>;
+  target_url?: string;
+}): Promise<{
+  mutated_prompt: string;
+  techniques: string[];
+  failure_mode?: string | null;
+  detail: string;
+}> {
+  const res = await apiFetch("/api/v1/scan/sitegpt/red-mutation", {
+    method: "POST",
+    body: JSON.stringify({
+      category: payload.category,
+      attack_prompt: payload.attack_prompt,
+      target_response: payload.target_response,
+      round: payload.round,
+      subcategory: payload.subcategory ?? "",
+      judge_detail: payload.judge_detail ?? "",
+      used_techniques: payload.used_techniques ?? [],
+      used_failure_modes: payload.used_failure_modes ?? [],
+      cross_category_intel: payload.cross_category_intel,
+      target_url: payload.target_url,
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || "Red 변형 요청에 실패했습니다.");
+  }
+  return res.json();
+}
+
 export async function manualCheck(payload: {
   attack_prompt: string;
   target_response: string;

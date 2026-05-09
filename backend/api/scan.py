@@ -12,7 +12,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +20,8 @@ from backend.database import async_session, get_db
 from backend.graph.llm_security_graph import run_scan
 from backend.api.auth import get_current_admin, get_current_user, UserInfo
 from backend.models import TestSession, TestResult
+from backend.config import settings
+from backend.core.judge import full_judge
 from backend.core.judge_utils import rule_based_judge
 
 router = APIRouter()
@@ -72,6 +74,32 @@ class ManualCheckResponse(BaseModel):
     detail: str = ""
     confidence: float = 0.0
     manual_review_needed: bool = False
+
+
+class SiteGptConfigResponse(BaseModel):
+    phase2_max_rounds: int
+
+
+class SiteGptRedMutationRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    category: str = "LLM01"
+    subcategory: str = ""
+    attack_prompt: str
+    target_response: str
+    rnd: int = Field(..., ge=1, alias="round")
+    judge_detail: str = ""
+    used_techniques: list[str] = []
+    used_failure_modes: list[str] = []
+    cross_category_intel: Optional[dict[str, str]] = None
+    target_url: Optional[str] = None
+
+
+class SiteGptRedMutationResponse(BaseModel):
+    mutated_prompt: str
+    techniques: list[str] = []
+    failure_mode: Optional[str] = None
+    detail: str = ""
 
 
 def _normalize_phase1_pattern_id(raw: Any) -> Any:
@@ -691,11 +719,61 @@ async def scan_result_detail(
     return _result_dict(r, session_id)
 
 
+@router.get("/sitegpt/config", response_model=SiteGptConfigResponse)
+async def sitegpt_config(_user: UserInfo = Depends(get_current_user)):
+    return SiteGptConfigResponse(phase2_max_rounds=settings.PHASE2_MAX_ROUNDS)
+
+
+@router.post("/sitegpt/red-mutation", response_model=SiteGptRedMutationResponse)
+async def sitegpt_red_mutation(
+    req: SiteGptRedMutationRequest,
+    _user: UserInfo = Depends(get_current_user),
+):
+    if req.rnd > settings.PHASE2_MAX_ROUNDS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"round는 1~{settings.PHASE2_MAX_ROUNDS} 이어야 합니다",
+        )
+    from backend.core.phase2_red_agent import propose_red_mutation_for_manual_demo
+
+    try:
+        out = await propose_red_mutation_for_manual_demo(
+            category=req.category,
+            subcategory=req.subcategory,
+            attack_prompt=req.attack_prompt,
+            target_response=req.target_response,
+            round_num=req.rnd,
+            judge_detail=req.judge_detail,
+            used_techniques=req.used_techniques,
+            used_failure_modes=req.used_failure_modes,
+            cross_category_intel=req.cross_category_intel,
+            target_url=req.target_url,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception:
+        logger.exception("[scan] sitegpt red-mutation")
+        raise HTTPException(status_code=503, detail="Red 변형 생성에 실패했습니다.") from None
+
+    return SiteGptRedMutationResponse(
+        mutated_prompt=out["mutated_prompt"],
+        techniques=list(out.get("techniques") or []),
+        failure_mode=out.get("failure_mode"),
+        detail=str(out.get("detail") or ""),
+    )
+
+
 @router.post("/manual-check", response_model=ManualCheckResponse)
 async def manual_check(
     req: ManualCheckRequest,
+    _user: UserInfo = Depends(get_current_user),
 ):
-    verdict = rule_based_judge(req.category, req.attack_prompt, req.target_response)
+    use_rules = os.getenv("MANUAL_CHECK_FALLBACK_RULES", "").lower() == "true"
+    if use_rules:
+        verdict = rule_based_judge(req.category, req.attack_prompt, req.target_response)
+    else:
+        verdict = await full_judge(req.category, req.attack_prompt, req.target_response)
+
     judgment = str(verdict.get("judgment") or "ambiguous")
     detail = str(verdict.get("detail") or "")
     severity = verdict.get("severity")
@@ -706,8 +784,13 @@ async def manual_check(
         "ambiguous": 0.4,
         "error": 0.0,
     }
-    confidence = float(verdict.get("confidence") or confidence_map.get(judgment, 0.5))
+    raw_conf = verdict.get("confidence")
+    if raw_conf is None:
+        raw_conf = verdict.get("score")
+    confidence = float(raw_conf if raw_conf is not None else confidence_map.get(judgment, 0.5))
     manual_review_needed = judgment in {"ambiguous", "error", "generation_failed"}
+    if verdict.get("manual_review"):
+        manual_review_needed = True
 
     return ManualCheckResponse(
         judgment=judgment,
