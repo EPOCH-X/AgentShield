@@ -98,7 +98,7 @@ type DefenseState = {
 const STEPS = [
   { id: 0, icon: "database", label: "타겟 정보", sub: "실제 값 확인", phase: "TARGET" },
   { id: 1, icon: "terminal", label: "공격 시연", sub: "프롬프트 전송", phase: "RED" },
-  { id: 2, icon: "warning", label: "위험 해석", sub: "유출 근거", phase: "RISK" },
+  { id: 2, icon: "warning", label: "위험 분석", sub: "유출 근거", phase: "RISK" },
   { id: 3, icon: "shield", label: "방어 시연", sub: "방어 응답", phase: "BLUE" },
   { id: 4, icon: "fact_check", label: "판정 리포트", sub: "Judge 분석", phase: "JUDGE" },
 ];
@@ -232,6 +232,25 @@ function viewForStep(step: number) {
   return "judge";
 }
 
+function appendConversation(
+  previous: ChatMessage[],
+  userContent: string,
+  assistantContent: string,
+): ChatMessage[] {
+  const additions: ChatMessage[] = [];
+  const lastUser = [...previous].reverse().find((message) => message.role === "user")?.content;
+  const lastAssistant = [...previous].reverse().find((message) => message.role === "assistant")?.content;
+
+  if (userContent && userContent !== lastUser) {
+    additions.push({ role: "user", content: userContent, tone: "attack" });
+  }
+  if (assistantContent && assistantContent !== lastAssistant) {
+    additions.push({ role: "assistant", content: assistantContent, tone: "attack" });
+  }
+
+  return additions.length ? [...previous, ...additions] : previous;
+}
+
 function PipelineNode({
   active,
   step,
@@ -245,7 +264,7 @@ function PipelineNode({
     <button
       type="button"
       onClick={onClick}
-      className={`group relative z-20 flex min-w-[156px] flex-col items-start gap-3 rounded-2xl border px-5 py-4 text-left transition-all duration-300 ${
+      className={`group relative z-20 flex w-[clamp(140px,9vw,156px)] shrink-0 flex-col items-start gap-3 rounded-2xl border px-5 py-4 text-left transition-all duration-300 ${
         active
           ? "demo-active-node scale-[1.08] border-primary/70 bg-[#123B43] text-primary shadow-[0_0_28px_rgba(14,165,165,0.32)]"
           : "scale-95 border-white/10 bg-[#101A25] text-on-surface-variant opacity-80 hover:scale-100 hover:border-primary/30 hover:bg-[#122231] hover:text-on-surface hover:opacity-100"
@@ -754,13 +773,11 @@ export default function DemoPage() {
         rounds.find((round: AdaptiveRound) => round.success) ||
         rounds.find((round: AdaptiveRound) => round.round === data.best_round);
       if (winningRound?.attack_prompt && winningRound?.target_response) {
-        setAttackMessages([
-          { role: "user", content: winningRound.attack_prompt, tone: "attack" },
-          { role: "assistant", content: winningRound.target_response, tone: "attack" },
-        ]);
+        setAttackMessages((prev) =>
+          appendConversation(prev, winningRound.attack_prompt, winningRound.target_response),
+        );
         setAttackState({ status: "live", detail: `Red Agent R${winningRound.round || ""} 성공 프롬프트 적용` });
         void runJudge(winningRound.attack_prompt, winningRound.target_response, setAttackJudge);
-        setStep(2);
       }
     } catch (error) {
       setAdaptiveState({
@@ -832,14 +849,16 @@ export default function DemoPage() {
     <DashboardLayout>
       <div className="mx-auto flex w-full max-w-[1720px] flex-col gap-6 p-8 page-fade-in">
         <section className="glass-panel rounded-[2rem] p-6">
-          <div className="relative min-h-[210px] overflow-x-auto px-2 py-8">
-            <div className="demo-flow-track pointer-events-none absolute left-10 right-10 top-1/2 z-0 hidden h-[5px] -translate-y-1/2 overflow-hidden rounded-full xl:block">
-              <span className="material-symbols-outlined demo-flow-arrow">arrow_forward</span>
-            </div>
-            <div className="relative z-10 flex min-w-max items-center justify-between gap-9 xl:min-w-0">
-              {STEPS.map((item) => (
-                <div key={item.id} className="relative z-20 flex items-center gap-9">
-                  <PipelineNode step={item} active={step === item.id} onClick={() => setStep(item.id)} />
+          <div className="relative min-h-[210px] overflow-visible px-2 py-8">
+            <div className="relative z-10 flex w-full min-w-0 items-center justify-between gap-0">
+              {STEPS.map((item, index) => (
+                <div key={item.id} className={`relative z-20 flex items-center ${index < STEPS.length - 1 ? "flex-1" : "shrink-0"}`}>
+                  <PipelineNode
+                    step={item}
+                    active={step === item.id}
+                    onClick={() => setStep(item.id)}
+                  />
+                  {index < STEPS.length - 1 && <span className="demo-step-connector" aria-hidden="true" />}
                 </div>
               ))}
             </div>
@@ -1415,40 +1434,54 @@ export default function DemoPage() {
           50% { box-shadow: 0 0 34px rgba(45, 212, 212, 0.46); }
         }
 
-        @keyframes demoArrowTravel {
-          0% { left: 0%; opacity: 0; transform: translate(-120%, -50%) scale(0.98); }
-          8%, 92% { opacity: 1; }
-          100% { left: 100%; opacity: 0; transform: translate(20%, -50%) scale(0.98); }
-        }
-
         @keyframes demoLinkArrowBlink {
           0%, 100% { opacity: 0.42; transform: translateX(0); }
           50% { opacity: 1; transform: translateX(4px); }
         }
 
-        .demo-flow-track {
+        .demo-step-connector {
+          position: relative;
+          z-index: 15;
+          display: inline-flex;
+          min-width: 2.75rem;
+          flex: 1 1 3.75rem;
+          height: 22px;
+          align-items: center;
+        }
+
+        .demo-step-connector::before {
+          content: "";
+          position: absolute;
+          left: 0.35rem;
+          right: -1.05rem;
+          top: 50%;
+          height: 5px;
+          transform: translateY(-50%);
+          border-radius: 999px;
           background:
             repeating-linear-gradient(
               90deg,
-              rgba(45, 212, 212, 0.18) 0,
-              rgba(45, 212, 212, 0.18) 26px,
-              rgba(45, 212, 212, 0.06) 26px,
-              rgba(45, 212, 212, 0.06) 52px
+              rgba(45, 212, 212, 0.38) 0,
+              rgba(45, 212, 212, 0.38) 26px,
+              rgba(45, 212, 212, 0.12) 26px,
+              rgba(45, 212, 212, 0.12) 52px
             );
-          box-shadow: 0 0 18px rgba(45, 212, 212, 0.18);
+          box-shadow: 0 0 22px rgba(45, 212, 212, 0.34);
           animation: demoFlowDash 2.4s linear infinite;
         }
 
-        .demo-flow-arrow {
+        .demo-step-connector::after {
+          content: ">";
           position: absolute;
+          right: -0.2rem;
           top: 50%;
-          left: 0;
-          z-index: 0;
-          font-size: 34px;
-          font-weight: 700;
-          color: #2dd4d4;
-          text-shadow: 0 0 18px rgba(45, 212, 212, 0.95), 0 0 4px rgba(224, 242, 241, 0.8);
-          animation: demoArrowTravel 2.4s linear infinite;
+          transform: translateY(-54%);
+          color: #0ea5a5;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+          font-size: 2.1rem;
+          font-weight: 900;
+          line-height: 1;
+          text-shadow: 0 0 10px rgba(14, 165, 165, 0.62);
         }
 
         .demo-active-node {
