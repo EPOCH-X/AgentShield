@@ -194,7 +194,7 @@ async def main() -> int:
                     ok, reason, evidence = False, "duplicate attack prompt", ""
                 else:
                     seen.add(dedup_key)
-                    attack_prompt, pyrit_converter_strategy = apply_pyrit_converter(
+                    attack_prompt, pyrit_converter_strategy = await apply_pyrit_converter(
                         attack_prompt, encoding_index
                     )
                     accepted_prompt = attack_prompt
