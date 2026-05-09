@@ -79,7 +79,7 @@ async def main() -> int:
     parser.add_argument("--report-output", default="")
     parser.add_argument("--category", default="ALL")
     parser.add_argument("--seed-mode", choices=["raw", "file", "hybrid"], default="raw")
-    parser.add_argument("--domains", default="finance,rag,ecommerce,tax,restaurant,government,healthcare,education,travel,hr")
+    parser.add_argument("--domains", default="finance,healthcare,rag,hr,government,ecommerce")
     parser.add_argument("--seeds", type=int, default=20)
     parser.add_argument("--rounds", type=int, default=1, help="Deprecated for SFT seed generation; one standalone prompt per seed is generated.")
     parser.add_argument("--generation-attempts", type=int, default=3)
@@ -90,7 +90,8 @@ async def main() -> int:
     parser.add_argument("--system-prompt", choices=["runtime", "minimal"], default="runtime", help="Deprecated; SFT seed generation always uses red_sft_seed_agent system prompt.")
     parser.add_argument("--allow-literal-values", action="store_true", help="Deprecated; SFT seed output always rejects hardcoded literal values.")
     parser.add_argument("--allow-stale-timestamps", action="store_true", help="Deprecated; SFT seed output always rejects hardcoded timestamps.")
-    parser.add_argument("--code-mutation", action="store_true")
+    parser.add_argument("--code-mutation", dest="code_mutation", action="store_true", default=settings.RED_SFT_SEED_CODE_MUTATION)
+    parser.add_argument("--no-code-mutation", dest="code_mutation", action="store_false")
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
 
@@ -108,6 +109,7 @@ async def main() -> int:
         validate_sft_seed_output,
     )
     from backend.core.mutation_engine import apply_code_mutation
+    from backend.core.pyrit_converter import apply_pyrit_converter
     from scripts.generate_red_attack_prompts_only import (
         _load_items,
         _raw_seed_rows,
@@ -136,6 +138,7 @@ async def main() -> int:
     domains = [d.strip() for d in args.domains.split(",") if d.strip()] or ["general"]
     accepted: list[dict[str, Any]] = []
     raw_records: list[dict[str, Any]] = []
+    rejected_records: list[dict[str, Any]] = []
     rejection_counts: Counter[str] = Counter()
     seen: set[str] = set()
     prior_fingerprints: list[dict[str, Any]] = []
@@ -149,11 +152,14 @@ async def main() -> int:
             subcategory=subcategory,
             domain=domain,
             prior_fingerprints=prior_fingerprints,
+            seed_index=seed_index - 1,
         )
         retry_prompt = generation_prompt
         accepted_prompt = ""
         final_reason = "not generated"
         code_strategy = "none"
+        pyrit_converter_strategy = "none"
+        encoding_index = (seed_index - 1) % 12
 
         for attempt in range(1, args.generation_attempts + 1):
             raw = await llm.generate(
@@ -184,12 +190,30 @@ async def main() -> int:
                     ok, reason = False, "duplicate attack prompt"
                 else:
                     seen.add(dedup_key)
+                    attack_prompt, pyrit_converter_strategy = apply_pyrit_converter(
+                        attack_prompt, encoding_index
+                    )
                     accepted_prompt = attack_prompt
                     final_reason = ""
                     break
 
             final_reason = reason
             rejection_counts[reason] += 1
+            rejected_records.append(
+                {
+                    "seed_index": seed_index,
+                    "attempt": attempt,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "domain": domain,
+                    "encoding_index": encoding_index,
+                    "rejection_reason": reason,
+                    "raw_output": str(raw or ""),
+                    "raw_output_len": len(str(raw or "")),
+                    "normalized_output": attack_prompt,
+                    "normalized_output_len": len(attack_prompt),
+                }
+            )
             print(f"[RETRY] seed={seed_index} attempt={attempt} rejected: {reason}")
             retry_prompt = build_sft_retry_prompt(
                 base_prompt=generation_prompt,
@@ -230,6 +254,7 @@ async def main() -> int:
                 "seed_index": seed_index,
                 "source_seed_id": seed_row.get("id") or seed_row.get("seed_id") or "",
                 "code_mutation_strategy": code_strategy,
+                "pyrit_converter_strategy": pyrit_converter_strategy,
                 "ollama_options": SFT_SEED_OLLAMA_OPTIONS,
                 "fingerprint": fingerprint,
                 "attack_prompt": accepted_prompt,
@@ -242,6 +267,7 @@ async def main() -> int:
     output_path = _versioned(_resolve(args.output))
     raw_path = _versioned(_resolve(args.raw_output)) if args.raw_output else output_path.with_suffix(".raw.json")
     report_path = _versioned(_resolve(args.report_output)) if args.report_output else output_path.with_suffix(".report.json")
+    rejected_path = output_path.with_suffix(".rejected.json")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     raw_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -250,6 +276,7 @@ async def main() -> int:
         for sample in accepted:
             f.write(json.dumps(sample, ensure_ascii=False) + "\n")
     raw_path.write_text(json.dumps(raw_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    rejected_path.write_text(json.dumps(rejected_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     category_counts = Counter(r["category"] for r in raw_records)
     domain_counts = Counter(r["domain"] for r in raw_records)
@@ -266,9 +293,10 @@ async def main() -> int:
     }
     report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    print(f"[saved] jsonl:  {output_path}")
-    print(f"[saved] raw:    {raw_path}")
-    print(f"[saved] report: {report_path}")
+    print(f"[saved] jsonl:    {output_path}")
+    print(f"[saved] raw:      {raw_path}")
+    print(f"[saved] report:   {report_path}")
+    print(f"[saved] rejected: {rejected_path}")
     print(f"[count] accepted={len(accepted)} rejected_attempts={sum(rejection_counts.values())}")
     return 0
 
