@@ -1,7 +1,7 @@
-# backend/graph/judge_state.py
-from typing import TypedDict, Optional, Dict, Any
+from typing import TypedDict, Optional, Dict, Any, List
 
-class SecurityState(TypedDict):
+
+class SecurityState(TypedDict, total=False):
     category: str
     attack_prompt: str
     target_response: str
@@ -15,7 +15,12 @@ class SecurityState(TypedDict):
     debate_result: Optional[Dict[str, Any]]
 
     auditor_analysis: Optional[Dict[str, Any]]
+
     final_judgment: Optional[str]
     score: float
+    p_vulnerable: float
+    p_safe: float
     detail: str
+    probability_process: List[Dict[str, Any]]
+
     retry_count: int
