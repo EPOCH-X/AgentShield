@@ -1453,7 +1453,7 @@ export default function DemoPage() {
           content: "";
           position: absolute;
           left: 0.35rem;
-          right: -1.05rem;
+          right: 0.55rem;
           top: 50%;
           height: 5px;
           transform: translateY(-50%);
@@ -1473,7 +1473,7 @@ export default function DemoPage() {
         .demo-step-connector::after {
           content: ">";
           position: absolute;
-          right: -0.2rem;
+          right: 0;
           top: 50%;
           transform: translateY(-54%);
           color: #0ea5a5;
