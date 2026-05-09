@@ -51,7 +51,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     <div className="min-h-screen bg-background text-on-surface">
       {/* Sidebar */}
       <aside className="fixed left-0 top-0 h-full flex flex-col w-64 border-r border-white/5 bg-[#050F1A] backdrop-blur-md shadow-2xl z-50 font-headline tracking-tight text-sm">
-        <div className="p-8 flex items-center gap-3">
+        <Link href="/" className="p-8 flex items-center gap-3 hover:opacity-90 transition-opacity">
           {/* Logo Image */}
           <img
             src="/logo3.png"
@@ -66,7 +66,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
               SENTINEL ADVANCED
             </p>
           </div>
-        </div>
+        </Link>
 
         <nav className="flex-1 px-4 space-y-1 mt-2">
           {navItems.map((item) => {

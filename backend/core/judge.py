@@ -59,6 +59,7 @@ async def full_judge(
                 "strict_auditor": final_state.get("strict_auditor_result"),
                 "context_auditor": final_state.get("context_auditor_result"),
                 "debate_result": final_state.get("debate_result"),
+                "consensus_result": final_state.get("consensus_result"),
             },
         }
 

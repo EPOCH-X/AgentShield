@@ -1,5 +1,7 @@
 """LangGraph judge nodes for evidence scanning and auditor consensus."""
 
+from __future__ import annotations
+
 import logging
 import math
 import re

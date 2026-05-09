@@ -89,7 +89,10 @@ export default function LoginPage() {
           <form onSubmit={handleLogin} className="space-y-4">
             {/* Username */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/80">
+              <label
+                htmlFor="login-username"
+                className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/80"
+              >
                 사용자 ID
               </label>
               <div className="relative">
@@ -97,10 +100,13 @@ export default function LoginPage() {
                   person
                 </span>
                 <input
+                  id="login-username"
+                  name="username"
                   type="text"
                   value={username}
                   onChange={(e) => setUsernameState(e.target.value)}
                   required
+                  autoComplete="username"
                   placeholder="아이디를 입력하세요"
                   className="w-full border border-white/8 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:border-primary/60 focus:ring-2 focus:ring-primary/10 focus:outline-none transition-all placeholder:text-on-surface-variant/60"
                   style={{ color: "#ffffff", backgroundColor: "rgba(255,255,255,0.06)", WebkitTextFillColor: "#ffffff" }}
@@ -110,7 +116,10 @@ export default function LoginPage() {
 
             {/* Password */}
             <div className="space-y-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/80">
+              <label
+                htmlFor="login-password"
+                className="text-[10px] font-bold uppercase tracking-[0.2em] text-on-surface-variant/80"
+              >
                 비밀번호
               </label>
               <div className="relative">
@@ -118,10 +127,13 @@ export default function LoginPage() {
                   lock
                 </span>
                 <input
+                  id="login-password"
+                  name="password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  autoComplete="current-password"
                   placeholder="비밀번호를 입력하세요"
                   className="w-full border border-white/8 rounded-2xl pl-12 pr-5 py-3.5 text-sm focus:border-primary/60 focus:ring-2 focus:ring-primary/10 focus:outline-none transition-all placeholder:text-on-surface-variant/60"
                   style={{ color: "#ffffff", backgroundColor: "rgba(255,255,255,0.06)", WebkitTextFillColor: "#ffffff" }}

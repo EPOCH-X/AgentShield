@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from backend.config import settings
-from backend.core.judge import full_judge
 from backend.core.target_adapter import TargetAdapterConfig, send_messages_to_target
 from backend.database import async_session
 from backend.models.test_result import TestResult
@@ -148,6 +147,16 @@ async def _load_attack_patterns(
 _load_attacks = _load_attack_patterns
 
 
+async def load_phase1_attack_patterns(
+    category: str = "ALL",
+    max_attacks: Optional[int] = None,
+) -> List[Dict[str, Any]]:
+    """Expose Phase 1 attack list for APIs/UI (same sources as run_phase1: DB, then file)."""
+    import backend.core.phase1_scanner as _self
+
+    return await _self._load_attacks(category, max_attacks)
+
+
 async def _load_attack_patterns_from_file(
     category: str, max_attacks: int = None
 ) -> List[Dict[str, Any]]:
@@ -161,12 +170,20 @@ async def _load_attack_patterns_from_file(
         configured_path = Path(__file__).resolve().parents[2] / configured_path
 
     curated_testbed = base / "curated_attack_sets" / "testbed_manual_mixed_10.json"
+    candidates: List[Path] = []
     if configured_path:
-        candidates = [configured_path] if configured_path.exists() else []
-    elif curated_testbed.exists():
-        candidates = [curated_testbed]
-    else:
-        candidates = sorted(base.glob("attack_patterns/**/*.json"))
+        if configured_path.exists():
+            candidates = [configured_path]
+        else:
+            logger.warning(
+                "[Phase1] ATTACK_PATTERN_PATH 가리키는 파일이 없어 data/attack_patterns 탐색으로 폴백합니다: %s",
+                configured_path,
+            )
+    if not candidates:
+        if curated_testbed.exists():
+            candidates = [curated_testbed]
+        else:
+            candidates = sorted(base.glob("attack_patterns/**/*.json"))
     if not candidates:
         single = base / "attack_patterns.json"
         candidates = [single] if single.exists() else []
@@ -261,6 +278,9 @@ async def _execute_attack_pattern(
     logger.debug(f"[Phase1] Target OK: category={category}, resp_len={len(target_response)}")
 
     try:
+        # judge 그래프는 무거운 의존성(aiohttp 등)을 끌어온다. 시드 목록 API만 쓸 때는 import하지 않도록 지연 로드.
+        from backend.core.judge import full_judge
+
         verdict = await full_judge(category, attack_prompt, target_response)
     except Exception as e:
         logger.error(
