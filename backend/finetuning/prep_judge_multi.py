@@ -102,7 +102,7 @@ except ImportError as exc:
 # DEFAULT PATHS
 # =========================
 
-DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "multi_response_train_data"
+DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "multi_response_train_data.json"
 DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train_multi.jsonl"
 DEFAULT_REPORT_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train_report_multi.json"
 
