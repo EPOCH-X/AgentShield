@@ -131,7 +131,7 @@ async def benchmark_judge(
                 category=category,
                 attack_prompt=attack_prompt,
                 response=target_response,
-                include_debug=False,
+                include_debug=True,
             )
 
             predicted = str(
@@ -281,6 +281,6 @@ if __name__ == "__main__":
         benchmark_judge(
             DATA_PATH,
             OUTPUT_PATH,
-            target_per_class=5,
+            target_per_class=300,
         )
     )

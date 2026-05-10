@@ -1,19 +1,8 @@
 """
-AgentShield Judge SFT 데이터 전처리 파이프라인 - mixed response version
+AgentShield Judge SFT 데이터 전처리 파이프라인 - four response only version
 
 지원 입력 구조:
-1) 단일 response 구조
-{
-  "category": "LLM02",
-  "attack_prompt": "...",
-  "response": {
-    "judgment": "safe|vulnerable",
-    "reason": "...",
-    "target_response": "..."
-  }
-}
-
-2) 다중 response 구조
+다중 4-response 구조만 사용
 {
   "category": "LLM02",
   "attack_prompt": "...",
@@ -22,6 +11,11 @@ AgentShield Judge SFT 데이터 전처리 파이프라인 - mixed response versi
   "vulnerable_data_exposure_response": {...},
   "vulnerable_compliance_response": {...}
 }
+
+주의:
+- 단일 response 구조는 이 스크립트에서 제외한다.
+- 위 4개 response key가 모두 존재하는 샘플만 사용한다.
+- 4개 중 하나라도 없거나 유효하지 않으면 해당 샘플 전체를 스킵한다.
 
 출력:
 - QLoRA/SFT용 JSONL
@@ -108,9 +102,9 @@ except ImportError as exc:
 # DEFAULT PATHS
 # =========================
 
-DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "make_train_data.json"
-DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train.jsonl"
-DEFAULT_REPORT_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train_report.json"
+DEFAULT_INPUT_PATH = PROJECT_ROOT / "data" / "multi_response_train_data"
+DEFAULT_OUTPUT_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train_multi.jsonl"
+DEFAULT_REPORT_PATH = PROJECT_ROOT / "data" / "finetuning" / "judge_train_report_multi.json"
 
 
 # =========================
@@ -160,6 +154,13 @@ PRIMARY_MULTI_RESPONSE_KEYS = [
     "vulnerable_runtime_alignment_response",
     "vulnerable_session_disclosure_response",
     "vulnerable_internal_reconciliation_response",
+]
+
+REQUIRED_FOUR_RESPONSE_KEYS = [
+    "safe_refusal_response",
+    "safe_structured_response",
+    "vulnerable_data_exposure_response",
+    "vulnerable_compliance_response",
 ]
 
 VALID_JUDGMENTS = {"safe", "vulnerable"}
@@ -330,28 +331,21 @@ def build_context_sft_row(
 
 def get_ordered_multi_response_keys(item: Dict[str, Any]) -> List[str]:
     """
-    알려진 key를 먼저 고정 순서로 뽑고,
-    그 외 *_response dict도 뒤에 추가한다.
+    학습에는 정확히 4개 응답 후보만 사용한다.
+    다른 *_response key가 더 있어도 사용하지 않는다.
     """
-    keys: List[str] = []
-    seen = set()
+    return [
+        key
+        for key in REQUIRED_FOUR_RESPONSE_KEYS
+        if key in item and isinstance(item.get(key), dict)
+    ]
 
-    for key in PRIMARY_MULTI_RESPONSE_KEYS:
-        if key in item and key not in seen:
-            keys.append(key)
-            seen.add(key)
 
-    for key in sorted(item.keys()):
-        if key in seen:
-            continue
-        if key == "response":
-            continue
-        if key.endswith("_response") and isinstance(item.get(key), dict):
-            keys.append(key)
-            seen.add(key)
-
-    return keys
-
+def has_required_four_responses(item: Dict[str, Any]) -> bool:
+    return all(
+        key in item and isinstance(item.get(key), dict)
+        for key in REQUIRED_FOUR_RESPONSE_KEYS
+    )
 
 def normalize_response_block(
     *,
@@ -374,30 +368,13 @@ def iter_response_records_from_item(
     *,
     source_index: int,
 ) -> Iterable[Tuple[Dict[str, Any], Dict[str, Any]]]:
-    category = str(item.get("category", "LLM01") or "LLM01").strip()
-    attack_prompt = str(item.get("attack_prompt", "") or "")
-
-    # 1) 단일 nested response 구조
-    response = item.get("response")
-    if isinstance(response, dict) and "target_response" in response:
-        yield (
-            {
-                "category": category,
-                "attack_prompt": attack_prompt,
-                "response_key": "response",
-                "target_response": str(response.get("target_response", "") or ""),
-                "judgment": get_response_judgment(response),
-                "reason": response.get("reason", ""),
-            },
-            {
-                "source_index": source_index,
-                "source_type": "single_response",
-                "response_key": "response",
-            },
-        )
+    """
+    단일 response는 제외한다.
+    정확히 필수 4개 응답 후보가 모두 있는 샘플만 record를 yield한다.
+    """
+    if not has_required_four_responses(item):
         return
 
-    # 2) 다중 response 구조
     for response_key in get_ordered_multi_response_keys(item):
         block = item.get(response_key)
 
@@ -412,11 +389,10 @@ def iter_response_records_from_item(
             ),
             {
                 "source_index": source_index,
-                "source_type": "multi_response",
+                "source_type": "four_response",
                 "response_key": response_key,
             },
         )
-
 
 def is_valid_record(record: Dict[str, Any]) -> bool:
     if not str(record.get("category", "")).strip():
@@ -507,19 +483,44 @@ def convert_dataset(
             skipped.append({"index": index, "reason": "item_not_dict"})
             continue
 
-        extracted_any = False
+        if not has_required_four_responses(item):
+            skipped.append({
+                "index": index,
+                "reason": "missing_required_four_response_keys",
+                "required_keys": REQUIRED_FOUR_RESPONSE_KEYS,
+            })
+            stats["skipped_missing_four_response_sample"] += 1
+            continue
 
-        for record, meta in iter_response_records_from_item(item, source_index=index):
-            extracted_any = True
-            stats["extracted_candidates"] += 1
+        records_with_meta = list(iter_response_records_from_item(item, source_index=index))
+        stats["extracted_candidates"] += len(records_with_meta)
 
+        invalid_records = []
+        for record, meta in records_with_meta:
             response_key_counter[meta["response_key"]] += 1
             source_type_counter[meta["source_type"]] += 1
 
             if not is_valid_record(record):
-                skipped.append({**meta, "reason": "invalid_record"})
-                continue
+                invalid_records.append({**meta, "reason": "invalid_record"})
 
+        # 4개 응답 중 하나라도 유효하지 않으면 샘플 전체를 버린다.
+        if invalid_records:
+            skipped.extend(invalid_records)
+            stats["skipped_invalid_four_response_sample"] += 1
+            continue
+
+        if len(records_with_meta) != 4:
+            skipped.append({
+                "index": index,
+                "reason": "not_exactly_four_records_extracted",
+                "extracted": len(records_with_meta),
+            })
+            stats["skipped_not_exactly_four_records"] += 1
+            continue
+
+        stats["valid_four_response_samples"] += 1
+
+        for record, meta in records_with_meta:
             category = record["category"]
             attack_prompt = record["attack_prompt"]
             target_response = record["target_response"]
@@ -567,9 +568,6 @@ def convert_dataset(
             category_counter[category] += 1
             judgment_counter[judgment] += 1
             stats["valid_response_records"] += 1
-
-        if not extracted_any:
-            skipped.append({"index": index, "reason": "no_response_block"})
 
     duplicate_removed = 0
     if dedup:
@@ -632,6 +630,8 @@ def convert_dataset(
                 "strict": "backend.agents.judge_agent.build_strict_safe_advocate_messages",
                 "context": "backend.agents.judge_agent.build_context_vulnerable_advocate_messages",
             },
+            "input_policy": "only samples with exactly the four required response blocks are used",
+            "required_response_keys": REQUIRED_FOUR_RESPONSE_KEYS,
             "strict_policy": "strict rows use only safe responses",
             "context_policy": "context rows use only vulnerable responses",
             "consensus_policy": "disabled",
@@ -651,7 +651,7 @@ def convert_dataset(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Convert mixed AgentShield judge data into base/strict/context SFT JSONL."
+        description="Convert four-response AgentShield judge data into base/strict/context SFT JSONL."
     )
 
     parser.add_argument(
