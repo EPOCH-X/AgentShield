@@ -304,10 +304,10 @@ def _extract_consensus_reason(sample: Dict[str, Any], nodes: Dict[str, Dict[str,
     consensus = _as_dict(nodes.get("consensus"))
 
     return clean_text(
-        consensus.get("reason")
-        or judge_output.get("detail")
+        judge_output.get("detail")
         or reason_sources.get("final_reason")
         or reason_sources.get("consensus_reason")
+        or consensus.get("reason")
         or original.get("consensus_detail")
         or "",
         max_len=1000,
