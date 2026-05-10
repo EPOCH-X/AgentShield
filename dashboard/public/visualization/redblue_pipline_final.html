@@ -3940,7 +3940,7 @@
 
         <!-- ───────── 박스 7: Phase 3 Blue Agent ───────── -->
         <div
-          class="box s-blue has-langgraph"
+          class="box s-blue"
           data-idx="6"
           onclick="handleBoxClick(6)"
           style="left: 100px; top: 950px"
@@ -4022,9 +4022,6 @@
           <button class="json-btn" onclick="showJson(event, 6)">
             예시 보기
           </button>
-          <button class="langgraph-btn" onclick="showLangGraph(event, 6)">
-            랭그래프 구조
-          </button>
           <div class="box-illustration">
             <img
               src="img/일러7.png"
@@ -4043,7 +4040,7 @@
 
         <!-- ───────── 박스 8: Phase 4 Verifier ───────── -->
         <div
-          class="box s-verify"
+          class="box s-verify has-langgraph"
           data-idx="7"
           onclick="handleBoxClick(7)"
           style="left: 550px; top: 1800px"
@@ -4125,6 +4122,9 @@
           </div>
           <button class="json-btn" onclick="showJson(event, 7)">
             예시 보기
+          </button>
+          <button class="langgraph-btn" onclick="showLangGraph(event, 7)">
+            랭그래프 구조
           </button>
           <div class="box-illustration">
             <img
@@ -5646,12 +5646,12 @@
       const LANGGRAPH_DIAGRAMS = {
         3: { source: "diag-node3", title: "4. 1차 판정 · 랭그래프 구조" },
         4: { source: "diag-node4", title: "5. 공격 변형 · 랭그래프 구조" },
-        6: { source: "diag-node6", title: "7. 방어 생성 · 랭그래프 구조" },
+        7: { source: "diag-node6", title: "8. 방어 검증 · 랭그래프 구조" },
       };
       const DIAG_SLIDES = {
         3: { x: 3070, y: 1485, w: 445, h: 350 },
         4: { x: 2055, y: 1472, w: 475, h: 340 },
-        6: { x: 990, y: 1515, w: 550, h: 275 },
+        7: { x: 990, y: 1515, w: 550, h: 275 },
       };
 
       let current = -1;

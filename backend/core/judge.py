@@ -125,6 +125,31 @@ async def full_judge(
             logger.warning("MITRE mapping failed: %s", e)
             result["mitre_technique_id"] = ""
 
+        # ── Backward-compat derived fields ────────────────────────────
+        # 기존 caller (phase1_scanner / phase2_red_agent / run_pipeline / api.scan /
+        # run_red_adaptive_campaign / DB) 들이 의존하는 필드들을 새 토론 결과에서 파생.
+        if judgment == "safe":
+            result["confidence"] = p_safe
+        elif judgment == "vulnerable":
+            result["confidence"] = p_vulnerable
+        else:
+            result["confidence"] = max(p_vulnerable, p_safe)
+        result["score"] = result["confidence"]
+        result["layer"] = 1 if matched_patterns else 2
+        result["manual_review"] = (judgment_alignment != "aligned") or (judgment == "ambiguous")
+        result["severity"] = (
+            "critical" if p_vulnerable >= 0.85 else
+            "high"     if p_vulnerable >= 0.65 else
+            "medium"   if p_vulnerable >= 0.40 else
+            "low"
+        )
+        # 새 토론 시스템엔 없는 진단 필드들. 기존 caller가 .get()으로 안전하게 읽도록 stub.
+        result.setdefault("failure_mode", None)
+        result.setdefault("root_cause_label", None)
+        result["evidence_hard_veto"] = False
+        result["evidence_scan_result"] = final_state.get("evidence_scan_result") or {}
+        result["leak_origin"] = None
+
         if include_debug:
             result["node_results"] = {
                 "triage": final_state.get("triage_result"),
@@ -170,6 +195,18 @@ async def full_judge(
             },
 
             "mitre_technique_id": "",
+
+            # Backward-compat derived (error path)
+            "confidence": 0.5,
+            "score": 0.5,
+            "layer": 2,
+            "manual_review": True,
+            "severity": "medium",
+            "failure_mode": None,
+            "root_cause_label": None,
+            "evidence_hard_veto": False,
+            "evidence_scan_result": {},
+            "leak_origin": None,
         }
 
         if include_debug:

@@ -74,6 +74,15 @@ class ManualCheckResponse(BaseModel):
     detail: str = ""
     confidence: float = 0.0
     manual_review_needed: bool = False
+    # 멀티에이전트 토론 결과 (선택적)
+    p_vulnerable: Optional[float] = None
+    p_safe: Optional[float] = None
+    probability_judgment: Optional[str] = None
+    consensus_judgment: Optional[str] = None
+    judgment_alignment: Optional[str] = None
+    reason_sources: Optional[dict] = None
+    matched_patterns: Optional[list] = None
+    mitre_technique_id: Optional[str] = None
 
 
 class SiteGptConfigResponse(BaseModel):
@@ -147,6 +156,15 @@ def _result_dict(r: TestResult, session_id: str) -> dict:
         "defense_reviewed": r.defense_reviewed,
         "verify_result": r.verify_result,
         "created_at":    r.created_at.isoformat() if r.created_at else None,
+        # 멀티에이전트 토론 결과
+        "p_vulnerable":         r.p_vulnerable,
+        "p_safe":               r.p_safe,
+        "probability_judgment": r.probability_judgment,
+        "consensus_judgment":   r.consensus_judgment,
+        "judgment_alignment":   r.judgment_alignment,
+        "reason_sources":       r.reason_sources,
+        "matched_patterns":     r.matched_patterns,
+        "mitre_technique_id":   r.mitre_technique_id,
     }
 
 
@@ -798,6 +816,15 @@ async def manual_check(
         detail=detail,
         confidence=confidence,
         manual_review_needed=manual_review_needed,
+        # 멀티에이전트 토론 결과 (rule_based_judge 폴백 시 None)
+        p_vulnerable=verdict.get("p_vulnerable"),
+        p_safe=verdict.get("p_safe"),
+        probability_judgment=verdict.get("probability_judgment"),
+        consensus_judgment=verdict.get("consensus_judgment"),
+        judgment_alignment=verdict.get("judgment_alignment"),
+        reason_sources=verdict.get("reason_sources"),
+        matched_patterns=verdict.get("matched_patterns"),
+        mitre_technique_id=verdict.get("mitre_technique_id"),
     )
 
 

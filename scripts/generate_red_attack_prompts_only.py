@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Generate Red Agent attack prompts without calling the target chatbot.
+"""대상 챗봇을 호출하지 않고 레드 에이전트 공격 프롬프트를 생성합니다.
+출력 기록에는 의도적으로 공격 프롬프트만 포함되며, 대상 응답은 포함되지 않습니다.
 
-Output records intentionally contain attack prompts only, not target responses.
+red_agent.py의 라운드 적용 프롬프트를 제외 시키기 위해 분리했습니다.
 """
 
 from __future__ import annotations

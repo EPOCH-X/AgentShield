@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""Run the existing adaptive Red Agent campaign for the dashboard demo.
+"""대시보드 데모용 기존 적응형 레드 에이전트 캠페인을 실행합니다.
 
-This wrapper does not duplicate Red Agent logic. It creates a one-seed input
-file from the demo prompt, invokes scripts/run_red_adaptive_campaign.py, then
-returns a compact JSON summary for the frontend.
+이 래퍼는 레드 에이전트 로직을 중복 구현하지 않습니다. 데모 프롬프트에서 시드 하나만 포함된 입력 파일을 생성하고, scripts/run_red_adaptive_campaign.py 스크립트를 실행한 다음,
+프런트엔드에 표시할 간결한 JSON 요약을 반환합니다.
 """
 
 from __future__ import annotations

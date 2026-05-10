@@ -73,6 +73,14 @@ ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_total INTEGER DEFAULT 0;
 ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_false_refusals INTEGER DEFAULT 0;
 ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_rate NUMERIC(5, 4) DEFAULT 0;
 ALTER TABLE test_results ADD COLUMN IF NOT EXISTS mitre_technique_id VARCHAR(20);
+-- 멀티에이전트 토론 판정 결과
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS p_vulnerable DOUBLE PRECISION;
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS p_safe DOUBLE PRECISION;
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS probability_judgment VARCHAR(20);
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS consensus_judgment VARCHAR(20);
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS judgment_alignment VARCHAR(20);
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS reason_sources JSONB;
+ALTER TABLE test_results ADD COLUMN IF NOT EXISTS matched_patterns JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_attack_category ON attack_patterns(category);
 CREATE INDEX IF NOT EXISTS idx_results_session ON test_results(session_id);

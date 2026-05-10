@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-Fine-tuned AgentShield integrated pipeline runner for the local testbed.
+로컬 테스트베드에 최적화된 AgentShield 통합 파이프라인 실행기입니다.
 
-This runs the real multi-agent graph:
-  Phase1 scan -> Phase2 red mutation -> Judge -> Phase3 Blue defense
-  -> Phase4 Judge recheck -> DB/Chroma artifacts -> review logs.
+이 실행기는 실제 멀티 에이전트 그래프를 실행합니다.
 
-Target is intentionally the local testbed URL. This avoids hitting external
-production chatbots while still exercising the real integration surface.
+1단계 스캔 -> 2단계 레드 변이 -> 심판 -> 3단계 블루 방어
+
+-> 4단계 심판 재확인 -> DB/Chroma 아티팩트 -> 로그 검토
+
+대상은 의도적으로 로컬 테스트베드 URL로 설정되었습니다. 이를 통해 외부 프로덕션 챗봇에 접근하지 않으면서도 실제 통합 기능을 활용할 수 있습니다.
 """
 
 from __future__ import annotations
