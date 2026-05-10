@@ -177,6 +177,14 @@ async def _persist_phase2_result(session_id: str, result_entry: dict[str, Any]) 
                 subcategory=result_entry.get("subcategory"),
                 detail=result_entry.get("detail"),
                 mitre_technique_id=result_entry.get("mitre_technique_id"),
+                # 멀티에이전트 토론 결과
+                p_vulnerable=result_entry.get("p_vulnerable"),
+                p_safe=result_entry.get("p_safe"),
+                probability_judgment=result_entry.get("probability_judgment"),
+                consensus_judgment=result_entry.get("consensus_judgment"),
+                judgment_alignment=result_entry.get("judgment_alignment"),
+                reason_sources=result_entry.get("reason_sources"),
+                matched_patterns=result_entry.get("matched_patterns"),
             )
             db.add(db_row)
             await db.flush()
@@ -665,7 +673,7 @@ async def run_phase2(
                     "attack_prompt": new_attack,
                     "target_response": target_response,
                     "judgment": verdict["judgment"],
-                    "judgment_layer": verdict["layer"],
+                    "judgment_layer": verdict.get("layer", 2),
                     "judgment_confidence": verdict.get("confidence"),
                     "severity": verdict.get("severity"),
                     "manual_review_needed": verdict.get("manual_review", False),
@@ -680,6 +688,15 @@ async def run_phase2(
                     "failure_mode": verdict.get("failure_mode") or target_failure_mode,
                     "root_cause_label": verdict.get("root_cause_label"),
                     "code_mutation_strategy": code_mutation_strategy,
+                    # 멀티에이전트 토론 결과
+                    "p_vulnerable": verdict.get("p_vulnerable"),
+                    "p_safe": verdict.get("p_safe"),
+                    "probability_judgment": verdict.get("probability_judgment"),
+                    "consensus_judgment": verdict.get("consensus_judgment"),
+                    "judgment_alignment": verdict.get("judgment_alignment"),
+                    "reason_sources": verdict.get("reason_sources"),
+                    "matched_patterns": verdict.get("matched_patterns"),
+                    "mitre_technique_id": verdict.get("mitre_technique_id", ""),
                 }
                 entry["test_result_id"] = await _persist_phase2_result(session_id, entry)
                 results.append(entry)

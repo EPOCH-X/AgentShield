@@ -177,6 +177,13 @@ def validate_attack_prompt_output(prompt: str) -> tuple[bool, str]:
     if _PROMPT_SCAFFOLD_RE.search(stripped) or _PROMPT_INSTRUCTION_ECHO_RE.search(stripped):
         return False, "prompt scaffold echoed; output only the target-facing attack text"
 
+    # SFT-v5 후행 결함 방지: 텍스트 안에 literal "User:\n...\nAssistant:" 페어
+    # 또는 "Training data excerpt" 류 fake-training 주입 차단
+    if re.search(r"(?im)^\s*User\s*:\s*.+?\n\s*Assistant\s*:", stripped, re.S):
+        return False, "fake conversation scaffold (User:/Assistant: pair) leaked"
+    if re.search(r"(?i)\btraining\s+(?:data\s+)?(?:excerpt|example)\b", stripped):
+        return False, "fake training-data wrapper leaked"
+
     lower = stripped.lower()
     banned_prefixes = (
         "here is",

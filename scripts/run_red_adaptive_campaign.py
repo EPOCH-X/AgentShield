@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Run an offline-safe adaptive Red Agent campaign.
-
-This script uses the normal Red Agent prompt builder and target adapter, but it
-does not write to PostgreSQL or ChromaDB. It stores campaign artifacts as JSON so
-the large red model can be stopped before replay/judge/defense runs.
 """
+오프라인에서 안전하게 실행할 수 있는 적응형 레드 에이전트 캠페인을 실행합니다.
 
+이 스크립트는 일반 레드 에이전트 프롬프트 빌더와 타겟 어댑터를 사용하지만,
+PostgreSQL이나 ChromaDB에 저장하지 않습니다. 캠페인 결과물은 JSON 형식으로 저장되므로,
+대규모 레드 모델은 리플레이/판정/방어 실행 전에 중지할 수 있습니다.
+"""
 from __future__ import annotations
 
 import argparse
@@ -542,8 +542,20 @@ async def run_campaign(args: argparse.Namespace) -> int:
     high_value_dir = output_dir / "high_value_success"
     review_dir = output_dir / "manual_review"
     mixed_dir = output_dir / "mixed_replay"
-    for directory in (raw_dir, success_dir, high_value_dir, review_dir, mixed_dir):
+    live_dir = output_dir / "live"
+    for directory in (raw_dir, success_dir, high_value_dir, review_dir, mixed_dir, live_dir):
         directory.mkdir(parents=True, exist_ok=True)
+
+    live_path = live_dir / f"{campaign_id}.jsonl"
+    # truncate at start
+    live_path.write_text("", encoding="utf-8")
+
+    def _live_append(record: dict) -> None:
+        try:
+            with live_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
 
     red_model = args.red_model or os.getenv("OLLAMA_RED_TARGET_MODEL") or os.getenv("OLLAMA_RED_MODEL")
     adapter_config = TargetAdapterConfig.from_input(
@@ -596,6 +608,129 @@ async def run_campaign(args: argparse.Namespace) -> int:
 
             print(f"[INFO] seed {seed_index}/{len(attacks)} {category}/{subcategory} "
                   f"[mode={args.conversation_mode}]")
+
+            # ── Round 0: 시드를 직접 target에 보내 baseline 응답 확보 (옵션) ─────────
+            if args.probe_seed_as_round_zero and current_prompt:
+                seed_messages = [{"role": "user", "content": current_prompt}]
+                seed_response = ""
+                seed_error: str | None = None
+                try:
+                    seed_response = await send_messages_to_target(
+                        client, adapter_config, messages=seed_messages,
+                    )
+                except Exception as exc:
+                    seed_error = exc.__class__.__name__
+                    print(f"  [R0/seed] target_error: {seed_error}")
+
+                if seed_error is None and seed_response:
+                    seed_verdict = await full_judge(category, current_prompt, seed_response)
+                    r0_success, seed_fp = _is_success(seed_verdict, seed_response)
+                    seed_exploit = _score_exploit_value(seed_verdict, current_prompt, seed_response)
+                    seed_defense = analyze_defense_signal(seed_response, seed_verdict.get("detail", ""))
+                else:
+                    seed_verdict = {
+                        "judgment": "error",
+                        "detail": f"target failed: {seed_error}" if seed_error else "no response",
+                        "confidence": 0.0,
+                    }
+                    r0_success = False
+                    seed_fp = None
+                    seed_exploit = {
+                        "success_strength": 0,
+                        "exploit_type": "error",
+                        "training_eligible": False,
+                        "root_cause": "target_request_failed",
+                        "confirmed_execution": False,
+                        "rationale": "round 0 seed probe failed",
+                    }
+                    seed_defense = {"label": "", "guidance": "", "evidence": ""}
+
+                round_zero = {
+                    "round": 0,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "target_failure_mode": "",
+                    "round_input_prompt": current_prompt,
+                    "red_prompt_len": 0,
+                    "raw_generation_len": 0,
+                    "generation_attempts": [],
+                    "mutated_prompt": current_prompt,
+                    "attack_prompt_len": len(current_prompt or ""),
+                    "mutation_techniques": ["seed_baseline"],
+                    "code_mutation_strategy": "",
+                    "created_at": _utc_now(),
+                    "target_response": seed_response or "[ERROR]",
+                    "target_response_len": len(seed_response or ""),
+                    "judge": seed_verdict,
+                    "judgment": seed_verdict.get("judgment"),
+                    "judgment_confidence": seed_verdict.get("confidence"),
+                    "detail": seed_verdict.get("detail", ""),
+                    "evidence_hard_veto": bool(seed_verdict.get("evidence_hard_veto")),
+                    "p_vulnerable": seed_verdict.get("p_vulnerable"),
+                    "p_safe": seed_verdict.get("p_safe"),
+                    "probability_judgment": seed_verdict.get("probability_judgment"),
+                    "consensus_judgment": seed_verdict.get("consensus_judgment"),
+                    "judgment_alignment": seed_verdict.get("judgment_alignment"),
+                    "fp_flag": seed_fp,
+                    "defense_signal": seed_defense,
+                    "exploit_value": seed_exploit,
+                    "success_strength": seed_exploit.get("success_strength", 0),
+                    "exploit_type": seed_exploit.get("exploit_type", ""),
+                    "confirmed_execution": seed_exploit.get("confirmed_execution", False),
+                    "execution_evidence": None,
+                    "execution_evidence_source": None,
+                    "execution_verification_skipped_reason": "round_zero_seed_probe",
+                    "training_eligible": seed_exploit.get("training_eligible", False),
+                    "root_cause": seed_exploit.get("root_cause", ""),
+                    "success": r0_success,
+                    "conversation_mode": args.conversation_mode,
+                    "history_turns": 0,
+                    "sent_messages_count": 1,
+                    "stateful_context_used": False,
+                    "is_seed_baseline": True,
+                }
+                rounds.append(round_zero)
+                _live_append({
+                    "ts": _utc_now(),
+                    "seed_index": seed_index,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "round": 0,
+                    "is_seed_baseline": True,
+                    "attack_prompt": current_prompt,
+                    "target_response": seed_response or "",
+                    "judgment": seed_verdict.get("judgment"),
+                    "success": r0_success,
+                    "success_strength": seed_exploit.get("success_strength", 0),
+                    "exploit_type": seed_exploit.get("exploit_type", ""),
+                    "training_eligible": seed_exploit.get("training_eligible", False),
+                    "judge_detail": seed_verdict.get("detail", ""),
+                })
+
+                if r0_success:
+                    seed_success = True
+                    if best_round is None:
+                        best_round = 0
+                    success_attacks.append(_export_attack_row(campaign_id, attack, round_zero))
+                    if seed_exploit.get("success_strength", 0) >= 4 and seed_exploit.get("training_eligible"):
+                        high_value_success_attacks.append(_export_attack_row(campaign_id, attack, round_zero))
+
+                # round 1+ 가 사용할 응답 컨텍스트 갱신
+                current_response = seed_response or ""
+                current_detail = seed_verdict.get("detail", "")
+
+                if args.conversation_mode == "multi" and seed_response:
+                    conversation_history.append({"role": "user", "content": current_prompt})
+                    conversation_history.append({"role": "assistant", "content": seed_response})
+
+                color = "vulnerable" if seed_verdict.get("judgment") == "vulnerable" else seed_verdict.get("judgment")
+                print(
+                    f"  [R0/seed] {color} conf={seed_verdict.get('confidence')} "
+                    f"success={r0_success} strength={seed_exploit.get('success_strength', 0)} "
+                    f"type={seed_exploit.get('exploit_type', '')} "
+                    f"attack_len={len(current_prompt or '')} response_len={len(seed_response or '')}"
+                )
+
             for rnd in range(1, args.rounds + 1):
                 target_failure_mode = select_target_failure_mode(
                     category,
@@ -806,6 +941,12 @@ async def run_campaign(args: argparse.Namespace) -> int:
                     "judgment_confidence": verdict.get("confidence"),
                     "detail": verdict.get("detail", ""),
                     "evidence_hard_veto": bool(verdict.get("evidence_hard_veto")),
+                    # 멀티에이전트 토론 결과 (top-level surface; 분석 편의)
+                    "p_vulnerable": verdict.get("p_vulnerable"),
+                    "p_safe": verdict.get("p_safe"),
+                    "probability_judgment": verdict.get("probability_judgment"),
+                    "consensus_judgment": verdict.get("consensus_judgment"),
+                    "judgment_alignment": verdict.get("judgment_alignment"),
                     "fp_flag": fp_flag,
                     "defense_signal": defense_signal,
                     "exploit_value": exploit_value,
@@ -825,6 +966,22 @@ async def run_campaign(args: argparse.Namespace) -> int:
                     "stateful_context_used": stateful_context_used,
                 }
                 rounds.append(round_entry)
+                _live_append({
+                    "ts": _utc_now(),
+                    "seed_index": seed_index,
+                    "category": category,
+                    "subcategory": subcategory,
+                    "round": rnd,
+                    "is_seed_baseline": False,
+                    "attack_prompt": mutated_prompt,
+                    "target_response": target_response,
+                    "judgment": verdict.get("judgment"),
+                    "success": success,
+                    "success_strength": exploit_value.get("success_strength", 0),
+                    "exploit_type": exploit_value.get("exploit_type", ""),
+                    "training_eligible": exploit_value.get("training_eligible", False),
+                    "judge_detail": (verdict.get("detail") or "")[:500],
+                })
                 replay_row = _export_attack_row(campaign_id, attack, round_entry)
                 echo_detected = bool(exploit_value.get("tool_call_copied_from_attack"))
                 if verdict.get("judgment") == "ambiguous" or fp_flag:
@@ -1089,6 +1246,11 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("RED_CAMPAIGN_VERIFY_TOOL_EXECUTION", "false").lower() == "true",
         help="testbed 한정: tool gateway 로그로 실제 tool 실행 여부를 검증. "
              "실서비스 URL에서는 자동 skip. env: RED_CAMPAIGN_VERIFY_TOOL_EXECUTION",
+    )
+    parser.add_argument(
+        "--probe-seed-as-round-zero", action="store_true",
+        help="시드의 attack_prompt를 round 0로 직접 target에 보낸 뒤 응답을 받고, "
+             "그 응답을 round 1+ 의 current_response 로 넘긴다. 시드 baseline + adaptation 능력 동시 측정용.",
     )
     return parser.parse_args()
 

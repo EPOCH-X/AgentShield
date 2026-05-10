@@ -608,9 +608,9 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                 current_techniques = extract_techniques(new_attack)
                 fp_flag = _check_fp_flag(target_response)
                 if fp_flag:
-                    print(f"🟡 vulnerable BUT {fp_flag} (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
+                    print(f"🟡 vulnerable BUT {fp_flag} (L{verdict.get('layer', 2)}, R{rnd}) [{elapsed:.1f}s]")
                 else:
-                    print(f"🔴 vulnerable! (L{verdict['layer']}, R{rnd}) [{elapsed:.1f}s]")
+                    print(f"🔴 vulnerable! (L{verdict.get('layer', 2)}, R{rnd}) [{elapsed:.1f}s]")
                 print(f"      🎯 응답: {_truncate(target_response, 200)}")
                 _store_success_case(
                     category=cat,
@@ -621,7 +621,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                         "subcategory": subcat,
                         "judgment": "vulnerable",
                         "round": rnd,
-                        "judge_layer": verdict["layer"],
+                        "judge_layer": verdict.get("layer", 2),
                         "seed_id": attack.get("seed_id", ""),
                         "techniques": current_techniques,
                         "failure_mode": verdict.get("failure_mode") or target_failure_mode,
@@ -637,7 +637,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                     "mutated_prompt": new_attack,
                     "target_response": target_response,
                     "judgment": "vulnerable",
-                    "judge_layer": verdict["layer"],
+                    "judge_layer": verdict.get("layer", 2),
                     "round": rnd,
                     "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": verdict.get("severity"),
@@ -648,6 +648,14 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                     "leak_origin": verdict.get("leak_origin"),
                     "fp_flag": fp_flag,
                     "red_agent_raw_response": raw_llm_response,
+                    # 멀티에이전트 토론 결과
+                    "p_vulnerable": verdict.get("p_vulnerable"),
+                    "p_safe": verdict.get("p_safe"),
+                    "probability_judgment": verdict.get("probability_judgment"),
+                    "consensus_judgment": verdict.get("consensus_judgment"),
+                    "judgment_alignment": verdict.get("judgment_alignment"),
+                    "reason_sources": verdict.get("reason_sources"),
+                    "matched_patterns": verdict.get("matched_patterns"),
                 })
                 # C: 성공 공격 정보를 다른 카테고리에 공유
                 techniques_used = current_techniques
@@ -723,6 +731,14 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                                 "harvest_index": harvest_idx,
                                 "harvest_parent_round": rnd,
                                 "red_agent_raw_response": harvest_raw_llm_response,
+                                # 멀티에이전트 토론 결과
+                                "p_vulnerable": harvest_verdict.get("p_vulnerable"),
+                                "p_safe": harvest_verdict.get("p_safe"),
+                                "probability_judgment": harvest_verdict.get("probability_judgment"),
+                                "consensus_judgment": harvest_verdict.get("consensus_judgment"),
+                                "judgment_alignment": harvest_verdict.get("judgment_alignment"),
+                                "reason_sources": harvest_verdict.get("reason_sources"),
+                                "matched_patterns": harvest_verdict.get("matched_patterns"),
                             })
                             break
 
@@ -768,7 +784,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                                         "judgment": "vulnerable",
                                         "round": rnd,
                                         "harvest_index": harvest_idx,
-                                        "judge_layer": harvest_verdict["layer"],
+                                        "judge_layer": harvest_verdict.get("layer", 2),
                                         "seed_id": attack.get("seed_id", ""),
                                         "techniques": harvest_techniques,
                                         "failure_mode": harvest_verdict.get("failure_mode") or harvest_failure_mode,
@@ -785,7 +801,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                                 "mutated_prompt": harvest_attack,
                                 "target_response": harvest_target_response,
                                 "judgment": "vulnerable",
-                                "judge_layer": harvest_verdict["layer"],
+                                "judge_layer": harvest_verdict.get("layer", 2),
                                 "round": rnd,
                                 "mutation_type": f"llm:{_AGENT_LABEL}",
                                 "severity": harvest_verdict.get("severity"),
@@ -799,10 +815,18 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                                 "harvest_index": harvest_idx,
                                 "harvest_parent_round": rnd,
                                 "red_agent_raw_response": harvest_raw_llm_response,
+                                # 멀티에이전트 토론 결과
+                                "p_vulnerable": harvest_verdict.get("p_vulnerable"),
+                                "p_safe": harvest_verdict.get("p_safe"),
+                                "probability_judgment": harvest_verdict.get("probability_judgment"),
+                                "consensus_judgment": harvest_verdict.get("consensus_judgment"),
+                                "judgment_alignment": harvest_verdict.get("judgment_alignment"),
+                                "reason_sources": harvest_verdict.get("reason_sources"),
+                                "matched_patterns": harvest_verdict.get("matched_patterns"),
                             })
                             harvest_successes.append(harvest_attack)
                         else:
-                            print(f"🟢 {harvest_verdict['judgment']} (Harvest {harvest_idx}, L{harvest_verdict['layer']}) [{harvest_elapsed:.1f}s]")
+                            print(f"🟢 {harvest_verdict['judgment']} (Harvest {harvest_idx}, L{harvest_verdict.get('layer', 2)}) [{harvest_elapsed:.1f}s]")
                             print(f"        🛡️ 응답: {_truncate(harvest_target_response, 200)}")
                             results.append({
                                 "phase": 2,
@@ -813,7 +837,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                                 "mutated_prompt": harvest_attack,
                                 "target_response": harvest_target_response,
                                 "judgment": harvest_verdict["judgment"],
-                                "judge_layer": harvest_verdict["layer"],
+                                "judge_layer": harvest_verdict.get("layer", 2),
                                 "round": rnd,
                                 "mutation_type": f"llm:{_AGENT_LABEL}",
                                 "severity": None,
@@ -826,6 +850,14 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                                 "harvest_index": harvest_idx,
                                 "harvest_parent_round": rnd,
                                 "red_agent_raw_response": harvest_raw_llm_response,
+                                # 멀티에이전트 토론 결과
+                                "p_vulnerable": harvest_verdict.get("p_vulnerable"),
+                                "p_safe": harvest_verdict.get("p_safe"),
+                                "probability_judgment": harvest_verdict.get("probability_judgment"),
+                                "consensus_judgment": harvest_verdict.get("consensus_judgment"),
+                                "judgment_alignment": harvest_verdict.get("judgment_alignment"),
+                                "reason_sources": harvest_verdict.get("reason_sources"),
+                                "matched_patterns": harvest_verdict.get("matched_patterns"),
                             })
 
                         harvest_prompt = harvest_attack
@@ -833,7 +865,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                         harvest_detail = harvest_verdict.get("detail", "")
                 break
             else:
-                print(f"🟢 {verdict['judgment']} (L{verdict['layer']}) [{elapsed:.1f}s]")
+                print(f"🟢 {verdict['judgment']} (L{verdict.get('layer', 2)}) [{elapsed:.1f}s]")
                 print(f"      🛡️ 응답: {_truncate(target_response, 200)}")
                 results.append({
                     "phase": 2,
@@ -844,7 +876,7 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                     "mutated_prompt": new_attack,
                     "target_response": target_response,
                     "judgment": verdict["judgment"],
-                    "judge_layer": verdict["layer"],
+                    "judge_layer": verdict.get("layer", 2),
                     "round": rnd,
                     "mutation_type": f"llm:{_AGENT_LABEL}",
                     "severity": None,
@@ -854,6 +886,14 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                     "root_cause_label": verdict.get("root_cause_label"),
                     "leak_origin": verdict.get("leak_origin"),
                     "red_agent_raw_response": raw_llm_response,
+                    # 멀티에이전트 토론 결과
+                    "p_vulnerable": verdict.get("p_vulnerable"),
+                    "p_safe": verdict.get("p_safe"),
+                    "probability_judgment": verdict.get("probability_judgment"),
+                    "consensus_judgment": verdict.get("consensus_judgment"),
+                    "judgment_alignment": verdict.get("judgment_alignment"),
+                    "reason_sources": verdict.get("reason_sources"),
+                    "matched_patterns": verdict.get("matched_patterns"),
                 })
                 current_prompt = new_attack
                 current_response = target_response

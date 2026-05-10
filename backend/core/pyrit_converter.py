@@ -1,8 +1,8 @@
 """PyRIT PromptConverter 적용 유틸리티.
 
-_ENCODING_DIRECTIVES의 mechanical 인덱스(2·3·4·9·10)에 대해
+_ENCODING_DIRECTIVES의 mechanical 인덱스(2·3·8·9)에 대해
 PyRIT 컨버터를 programmatic하게 적용한다.
-language 기반 인덱스(0·1·5·6·7·8·11)는 LLM이 처리하므로 건드리지 않는다.
+language 기반 인덱스(0·1·4·5·6·7·10)는 LLM이 처리하므로 건드리지 않는다.
 
 실행 환경: venv_pyrit (Python 3.13 + pyrit 설치됨)
 """
@@ -24,14 +24,13 @@ try:
         Base64Converter,
         ROT13Converter,
         UnicodeConfusableConverter,
-        BinaryConverter,
     )
     _PYRIT_AVAILABLE = True
 except ImportError:
     _PYRIT_AVAILABLE = False
     logger.warning(
         "PyRIT not installed in current interpreter (%s). "
-        "Mechanical encodings (base64/binary/unicode/rot13) will be skipped. "
+        "Mechanical encodings (base64/unicode/rot13) will be skipped. "
         "Run SFT dataset generation with venv_pyrit/bin/python instead.",
         sys.executable,
     )
@@ -44,15 +43,14 @@ _CONVERTER_MAP: dict[int, Optional[str]] = {
     0:  None,          # Korean framing
     1:  None,          # Chinese framing
     2:  "base64",      # base64 payload
-    3:  "binary",      # hex/binary encoding
-    4:  "unicode",     # Unicode homoglyphs
-    5:  None,          # split payload (structure)
-    6:  None,          # Japanese framing
-    7:  None,          # Arabic framing
-    8:  None,          # mixed Korean-English
-    9:  "rot13",       # ROT13/Caesar
-    10: "unicode",     # homoglyphs + base64 (unicode만 적용)
-    11: None,          # Standard English, no encoding
+    3:  "unicode",     # Unicode homoglyphs
+    4:  None,          # split payload (structure)
+    5:  None,          # Japanese framing
+    6:  None,          # Arabic framing
+    7:  None,          # mixed Korean-English
+    8:  "rot13",       # ROT13/Caesar
+    9:  "unicode",     # homoglyphs + base64 (unicode만 적용)
+    10: None,          # Standard English, no encoding
 }
 
 
@@ -63,8 +61,6 @@ async def _apply_async(converter_type: str, text: str) -> str:
         result = await ROT13Converter().convert_async(prompt=text)
     elif converter_type == "unicode":
         result = await UnicodeConfusableConverter().convert_async(prompt=text)
-    elif converter_type == "binary":
-        result = await BinaryConverter().convert_async(prompt=text)
     else:
         return text
     return result.output_text

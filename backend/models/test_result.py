@@ -3,7 +3,7 @@
 """
 
 from sqlalchemy import Column, Integer, String, Text, Float, Boolean, DateTime, ForeignKey, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 
 from backend.database import Base
 
@@ -32,4 +32,12 @@ class TestResult(Base):
     defense_reviewed = Column(Boolean, default=False)
     verify_result = Column(String(20), nullable=True)  # blocked/bypassed/mitigated
     mitre_technique_id = Column(String(20), nullable=True, index=True)  # MITRE ATT&CK T-ID
+    # ── 멀티에이전트 토론 판정 결과 (judge_graph) ──
+    p_vulnerable = Column(Float, nullable=True)        # 확률: vulnerable
+    p_safe = Column(Float, nullable=True)              # 확률: safe
+    probability_judgment = Column(String(20), nullable=True)   # 확률 단독 판정
+    consensus_judgment = Column(String(20), nullable=True)     # 토론 합의 판정
+    judgment_alignment = Column(String(20), nullable=True)     # aligned/conflict/error
+    reason_sources = Column(JSONB, nullable=True)              # {final/consensus/safe_side/vulnerable_side}
+    matched_patterns = Column(JSONB, nullable=True)            # 패턴 매칭 결과 리스트
     created_at = Column(DateTime, server_default=func.now())

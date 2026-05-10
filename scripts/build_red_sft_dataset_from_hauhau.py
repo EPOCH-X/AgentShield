@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Generate clean Red Agent SFT data using a strong Ollama Red model.
+"""강력한 Ollama Red 모델을 사용하여 깨끗한 Red Agent SFT 데이터를 생성합니다.
 
-The generated JSONL is intentionally training-only:
-  {"messages": [{"role": "system", ...}, {"role": "user", ...}, {"role": "assistant", ...}]}
+생성된 JSONL은 의도적으로 학습용으로만 사용됩니다.
 
-No target responses, judge scores, round logs, generation prompts, or domain hints are
-written into the JSONL. Those are saved only in the sidecar raw/report files.
+{"messages": [{"role": "system", ...}, {"role": "user", ...}, {"role": "assistant", ...}]}
+
+대상 응답, 심사자 점수, 라운드 로그, 생성 프롬프트 또는 도메인 힌트는 JSONL에 기록되지 않습니다.
+이러한 정보는 사이드카 raw/report 파일에만 저장됩니다.
 """
 
 from __future__ import annotations
@@ -44,6 +45,35 @@ SFT_SEED_OLLAMA_OPTIONS = {
     "presence_penalty": 1.5,
     "repeat_penalty": 1.1,
 }
+
+_TOKEN_COUNTER_CACHE: dict[str, Any] = {}
+
+
+_TOKEN_COUNTER_FALLBACK = "Qwen/Qwen2.5-3B-Instruct"
+
+
+def _get_token_counter(model_name: str):
+    """토크나이저 lazy-load. 학습 베이스 안 되면 Qwen2.5로 fallback. 둘 다 실패 시 None."""
+    if model_name in _TOKEN_COUNTER_CACHE:
+        return _TOKEN_COUNTER_CACHE[model_name]
+    try:
+        from transformers import AutoTokenizer
+    except ImportError:
+        print("[WARN] transformers not installed. Skipping token-limit enforcement.")
+        _TOKEN_COUNTER_CACHE[model_name] = None
+        return None
+
+    for candidate in [model_name, _TOKEN_COUNTER_FALLBACK]:
+        try:
+            tok = AutoTokenizer.from_pretrained(candidate)
+            _TOKEN_COUNTER_CACHE[model_name] = tok
+            print(f"[token-counter] loaded: {candidate}")
+            return tok
+        except Exception as exc:
+            print(f"[WARN] tokenizer '{candidate}' load failed: {exc}")
+    print("[WARN] all tokenizer candidates failed. Skipping token-limit enforcement.")
+    _TOKEN_COUNTER_CACHE[model_name] = None
+    return None
 
 
 def _utc_stamp() -> str:
@@ -90,6 +120,17 @@ async def main() -> int:
     parser.add_argument("--system-prompt", choices=["runtime", "minimal"], default="runtime", help="Deprecated; SFT seed generation always uses red_sft_seed_agent system prompt.")
     parser.add_argument("--allow-literal-values", action="store_true", help="Deprecated; SFT seed output always rejects hardcoded literal values.")
     parser.add_argument("--allow-stale-timestamps", action="store_true", help="Deprecated; SFT seed output always rejects hardcoded timestamps.")
+    parser.add_argument(
+        "--max-jsonl-tokens", type=int, default=9500,
+        help="JSONL 한 행(messages 전체 ChatML)이 이 토큰 수 초과면 자동 드랍. "
+             "기본 9500 = Qwen3.5 학습 안전 마진 (실제 학습 MAX_LEN 12500 기준 여유).",
+    )
+    parser.add_argument(
+        "--token-counter-model",
+        default="SicariusSicariiStuff/Qwen3.5-2B_Abliterated",
+        help="토큰 카운트용 토크나이저. 학습 베이스와 동일 모델 권장. "
+             "transformers 미지원 시 자동으로 Qwen/Qwen2.5-3B-Instruct로 fallback.",
+    )
     parser.add_argument("--code-mutation", dest="code_mutation", action="store_true", default=settings.RED_SFT_SEED_CODE_MUTATION)
     parser.add_argument("--no-code-mutation", dest="code_mutation", action="store_false")
     parser.add_argument("--seed", type=int, default=None)
@@ -144,6 +185,43 @@ async def main() -> int:
     seen: set[str] = set()
     prior_fingerprints: list[dict[str, Any]] = []
 
+    # 경로를 루프 앞으로 옮겨 매 seed마다 증분 저장 가능하게 함.
+    output_path = _versioned(_resolve(args.output))
+    raw_path = _versioned(_resolve(args.raw_output)) if args.raw_output else output_path.with_suffix(".raw.json")
+    report_path = _versioned(_resolve(args.report_output)) if args.report_output else output_path.with_suffix(".report.json")
+    rejected_path = output_path.with_suffix(".rejected.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def flush_state() -> None:
+        """매 seed 처리 후 호출. 크래시 시 손실은 최대 1 seed 분량."""
+        with output_path.open("w", encoding="utf-8") as fh:
+            for s in accepted:
+                fh.write(json.dumps(s, ensure_ascii=False) + "\n")
+        raw_path.write_text(json.dumps(raw_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        rejected_path.write_text(json.dumps(rejected_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        report_partial = {
+            "model": args.red_model,
+            "output": str(output_path),
+            "raw_output": str(raw_path),
+            "accepted": len(accepted),
+            "rejections": dict(rejection_counts.most_common()),
+            "category_counts": dict(Counter(r["category"] for r in raw_records)),
+            "domain_counts": dict(Counter(r["domain"] for r in raw_records)),
+            "carrier_counts": dict(Counter(r["carrier"] for r in raw_records)),
+            "pyrit_strategy_counts": dict(Counter(r["pyrit_converter_strategy"] for r in raw_records)),
+            "system_prompt_mode": args.system_prompt,
+            "in_progress": True,
+            "jsonl_contract": "messages only; no target_response/judge/score/round logs in JSONL",
+        }
+        report_path.write_text(json.dumps(report_partial, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    print(f"[paths] jsonl:    {output_path}")
+    print(f"[paths] raw:      {raw_path}")
+    print(f"[paths] report:   {report_path}")
+    print(f"[paths] rejected: {rejected_path}")
+
     for seed_index, seed_row in enumerate(seed_rows, 1):
         category = str(seed_row.get("category") or args.category).upper()
         subcategory = str(seed_row.get("subcategory") or "")
@@ -160,7 +238,7 @@ async def main() -> int:
         final_reason = "not generated"
         code_strategy = "none"
         pyrit_converter_strategy = "none"
-        encoding_index = (seed_index - 1) % 12
+        encoding_index = (seed_index - 1) % 11
         carrier = get_carrier_for_seed(seed_index - 1)
         carrier_name = carrier["name"]
 
@@ -194,9 +272,14 @@ async def main() -> int:
                     ok, reason, evidence = False, "duplicate attack prompt", ""
                 else:
                     seen.add(dedup_key)
-                    attack_prompt, pyrit_converter_strategy = await apply_pyrit_converter(
-                        attack_prompt, encoding_index
-                    )
+                    try:
+                        attack_prompt, pyrit_converter_strategy = await apply_pyrit_converter(
+                            attack_prompt, encoding_index
+                        )
+                    except Exception as exc:
+                        # 컨버터 실패해도 원문 그대로 통과 (메인 루프 보호)
+                        pyrit_converter_strategy = f"ERROR: {type(exc).__name__}: {exc}"
+                        print(f"[WARN] seed={seed_index} pyrit converter failed: {pyrit_converter_strategy}")
                     accepted_prompt = attack_prompt
                     final_reason = ""
                     break
@@ -230,6 +313,7 @@ async def main() -> int:
 
         if not accepted_prompt:
             print(f"[SKIP] seed={seed_index}: {final_reason}")
+            flush_state()
             continue
 
         training_user = compact_sft_training_user(
@@ -244,6 +328,20 @@ async def main() -> int:
                 {"role": "assistant", "content": accepted_prompt},
             ]
         }
+
+        # JSONL 토큰 길이 제한 (코랩 학습 시 OOM/MAX_LEN 절단 방지)
+        if args.max_jsonl_tokens > 0:
+            tok = _get_token_counter(args.token_counter_model)
+            if tok is not None:
+                txt = tok.apply_chat_template(sample["messages"], tokenize=False, add_generation_prompt=False)
+                n_tokens = len(tok.encode(txt, add_special_tokens=False))
+                if n_tokens > args.max_jsonl_tokens:
+                    reason = f"jsonl_too_long: {n_tokens} > {args.max_jsonl_tokens}"
+                    rejection_counts[reason] += 1
+                    print(f"[DROP] seed={seed_index} category={category} tokens={n_tokens} > {args.max_jsonl_tokens}")
+                    flush_state()
+                    continue
+
         accepted.append(sample)
         fingerprint = fingerprint_attack_prompt(
             category=category,
@@ -271,39 +369,24 @@ async def main() -> int:
             }
         )
         print(f"[OK] seed={seed_index} category={category} domain={domain} len={len(accepted_prompt)}")
+        flush_state()
 
-    output_path = _versioned(_resolve(args.output))
-    raw_path = _versioned(_resolve(args.raw_output)) if args.raw_output else output_path.with_suffix(".raw.json")
-    report_path = _versioned(_resolve(args.report_output)) if args.report_output else output_path.with_suffix(".report.json")
-    rejected_path = output_path.with_suffix(".rejected.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    raw_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-
-    with output_path.open("w", encoding="utf-8") as f:
-        for sample in accepted:
-            f.write(json.dumps(sample, ensure_ascii=False) + "\n")
-    raw_path.write_text(json.dumps(raw_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    rejected_path.write_text(json.dumps(rejected_records, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-
-    category_counts = Counter(r["category"] for r in raw_records)
-    domain_counts = Counter(r["domain"] for r in raw_records)
-    carrier_counts = Counter(r["carrier"] for r in raw_records)
-    pyrit_strategy_counts = Counter(r["pyrit_converter_strategy"] for r in raw_records)
-    report = {
+    # 최종 report (in_progress=False로 마무리)
+    final_report = {
         "model": args.red_model,
         "output": str(output_path),
         "raw_output": str(raw_path),
         "accepted": len(accepted),
         "rejections": dict(rejection_counts.most_common()),
-        "category_counts": dict(category_counts),
-        "domain_counts": dict(domain_counts),
-        "carrier_counts": dict(carrier_counts),
-        "pyrit_strategy_counts": dict(pyrit_strategy_counts),
+        "category_counts": dict(Counter(r["category"] for r in raw_records)),
+        "domain_counts": dict(Counter(r["domain"] for r in raw_records)),
+        "carrier_counts": dict(Counter(r["carrier"] for r in raw_records)),
+        "pyrit_strategy_counts": dict(Counter(r["pyrit_converter_strategy"] for r in raw_records)),
         "system_prompt_mode": args.system_prompt,
+        "in_progress": False,
         "jsonl_contract": "messages only; no target_response/judge/score/round logs in JSONL",
     }
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    report_path.write_text(json.dumps(final_report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     print(f"[saved] jsonl:    {output_path}")
     print(f"[saved] raw:      {raw_path}")

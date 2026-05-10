@@ -186,6 +186,9 @@ class AgentShieldLLM:
 
     @staticmethod
     def _chatml_prompt(system_prompt: str, user_prompt: str) -> str:
+        # 빈 <think></think> 블록 주입: hauhau-qwen modelfile TEMPLATE의
+        # thinking-off 신호를 raw:true 모드에서 재현. 없으면 모델이 자체 thinking 모드로
+        # 빠져 stale carrier/too-long 출력이 발생.
         return (
             "<|im_start|>system\n"
             f"{system_prompt.strip()}\n"
@@ -194,6 +197,7 @@ class AgentShieldLLM:
             f"{user_prompt.strip()}\n"
             "<|im_end|>\n"
             "<|im_start|>assistant\n"
+            "<think>\n\n</think>\n\n"
         )
 
     async def _call_ollama_with_retries(

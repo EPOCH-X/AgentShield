@@ -664,16 +664,20 @@ export default function DemoPage() {
 
   useEffect(() => {
     let mounted = true;
-    fetch("/api/demo/testbed-context")
-      .then((res) => res.json())
-      .then((data) => {
-        if (mounted) setContext(data);
-      })
-      .catch(() => {
-        if (mounted) setContext(fallbackContext());
-      });
+    const load = () =>
+      fetch("/api/demo/testbed-context", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (mounted) setContext(data);
+        })
+        .catch(() => {
+          if (mounted) setContext(fallbackContext());
+        });
+    load();
+    const id = setInterval(load, 5000);  // 실시간 폴링: 5초마다 DB 스냅샷 갱신
     return () => {
       mounted = false;
+      clearInterval(id);
     };
   }, []);
 

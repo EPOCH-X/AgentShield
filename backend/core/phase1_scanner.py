@@ -314,6 +314,15 @@ async def _execute_attack_pattern(
         "failure_mode": verdict.get("failure_mode"),
         "root_cause_label": verdict.get("root_cause_label"),
         "error_source": "Auditor" if verdict["judgment"] == "error" else None,
+        # 멀티에이전트 토론 결과
+        "p_vulnerable": verdict.get("p_vulnerable"),
+        "p_safe": verdict.get("p_safe"),
+        "probability_judgment": verdict.get("probability_judgment"),
+        "consensus_judgment": verdict.get("consensus_judgment"),
+        "judgment_alignment": verdict.get("judgment_alignment"),
+        "reason_sources": verdict.get("reason_sources"),
+        "matched_patterns": verdict.get("matched_patterns"),
+        "mitre_technique_id": verdict.get("mitre_technique_id", ""),
     }
 
     try:
@@ -472,6 +481,14 @@ async def _persist_result(session_id: str, result_entry: Dict[str, Any]) -> Opti
                 subcategory=result_entry.get("subcategory"),
                 detail=result_entry.get("detail", ""),
                 mitre_technique_id=result_entry.get("mitre_technique_id", ""),
+                # 멀티에이전트 토론 결과
+                p_vulnerable=result_entry.get("p_vulnerable"),
+                p_safe=result_entry.get("p_safe"),
+                probability_judgment=result_entry.get("probability_judgment"),
+                consensus_judgment=result_entry.get("consensus_judgment"),
+                judgment_alignment=result_entry.get("judgment_alignment"),
+                reason_sources=result_entry.get("reason_sources"),
+                matched_patterns=result_entry.get("matched_patterns"),
                 # failure_mode, root_cause_label: TestResult 스키마 미포함 → entry dict에만 보존
             )
             db.add(db_row)
