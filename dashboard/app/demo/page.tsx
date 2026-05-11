@@ -54,6 +54,7 @@ type AdaptiveRound = {
   detail?: string;
   attack_len?: number;
   response_len?: number;
+  generation_attempts?: number;
   generation_failed?: boolean;
 };
 
@@ -804,7 +805,7 @@ export default function DemoPage() {
               status: round.generation_failed || round.judgment === "error" ? "error" : round.judgment === "vulnerable" ? "live" : "loading",
               detail:
                 round.generation_failed
-                  ? `R${round.round ?? ""} Red Agent 생성 실패: ${round.detail || "필터 통과 실패"}`
+                  ? `R${round.round ?? ""} Red Agent 생성 실패 (${round.generation_attempts ?? "?"}회 재시도 후): ${round.detail || "필터 통과 실패"}`
                   : round.judgment === "error"
                     ? `R${round.round ?? ""} 타겟 호출 실패: ${round.detail || "오류"}`
                     : round.judgment === "vulnerable"

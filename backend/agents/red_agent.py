@@ -427,11 +427,13 @@ def detect_chatbot_domain(probe_response: str) -> dict[str, str]:
 
 def _format_domain_context(domain_context: Optional[dict]) -> str:
     """감지된 도메인 컨텍스트를 Red Agent 프롬프트 블록으로 변환한다."""
-    if not domain_context or domain_context.get("domain") == "general":
+    if not domain_context:
         return ""
     domain = domain_context["domain"]
     hint = domain_context.get("hint", "")
     confidence = domain_context.get("confidence", "low")
+    if domain == "general" and not hint:
+        return ""
     return (
         f"\n## Target chatbot domain: {domain.upper()} (confidence: {confidence})\n"
         f"  Domain-specific framing guidance:\n"

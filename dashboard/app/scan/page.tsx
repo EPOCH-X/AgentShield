@@ -479,7 +479,7 @@ export default function ScanPage() {
           } catch (err: unknown) {
             lastError = err;
             if (attempt < 2) {
-              appendDemoLog("info", "[Red 에이전트] 출력 필터 또는 생성 실패 감지. 프론트 재시도 1회 실행.");
+              appendDemoLog("info", "[Red 에이전트] 백엔드 재생성 실패 감지. 프론트 재요청 1회 실행.");
             }
           }
         }

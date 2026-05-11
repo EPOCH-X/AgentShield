@@ -14,6 +14,7 @@ function e(key: string, fallback = "") {
 function toRound(record: Record<string, unknown>) {
   const attack = String(record.attack_prompt || "");
   const response = String(record.target_response || "");
+  const attempts = Array.isArray(record.generation_attempts) ? record.generation_attempts.length : undefined;
   return {
     round: record.round,
     category: record.category,
@@ -28,6 +29,7 @@ function toRound(record: Record<string, unknown>) {
     detail: record.judge_detail,
     attack_len: attack.length,
     response_len: response.length,
+    generation_attempts: attempts,
     generation_failed: record.judgment === "generation_failed",
   };
 }
@@ -36,6 +38,7 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
   const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
+  const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
 
   return new Promise((resolve) => {
     const child = spawn(
@@ -45,6 +48,7 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
         "--target-url", targetUrl,
         "--red-model", redModel,
         "--rounds", rounds,
+        "--red-generation-attempts", generationAttempts,
         "--seed", "57",
         "--category", "LLM02",
         "--subcategory", "config-extraction",
@@ -57,6 +61,7 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
           ...process.env,
           RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "false"),
           RED_CAMPAIGN_STOP_ON_VULNERABLE: "true",
+          RED_CAMPAIGN_GENERATION_ATTEMPTS: generationAttempts,
         },
       }
     );
@@ -82,6 +87,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
   const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
+  const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
   const campaignId = `demo-red-${Date.now().toString(36)}`;
   const seedPath = path.join(os.tmpdir(), `${campaignId}.json`);
   const livePath = path.join(root, "data", "red_campaigns", "live", `${campaignId}.jsonl`);
@@ -113,6 +119,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
           "--input", seedPath,
           "--seeds", "1",
           "--rounds", rounds,
+          "--red-generation-attempts", generationAttempts,
           "--seed", "57",
           "--category", "LLM02",
           "--campaign-id", campaignId,
@@ -128,6 +135,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
             ...process.env,
             RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: "false",
             RED_CAMPAIGN_STOP_ON_VULNERABLE: "true",
+            RED_CAMPAIGN_GENERATION_ATTEMPTS: generationAttempts,
           },
         },
       );
