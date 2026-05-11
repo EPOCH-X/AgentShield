@@ -9,10 +9,19 @@
 -> 4단계 심판 재확인 -> DB/Chroma 아티팩트 -> 로그 검토
 
 대상은 의도적으로 로컬 테스트베드 URL로 설정되었습니다. 이를 통해 외부 프로덕션 챗봇에 접근하지 않으면서도 실제 통합 기능을 활용할 수 있습니다.
+
+로컬 실행
+
+python scripts/run_finetuned_full_pipeline.py ^
+  --target-provider ollama_chat ^
+  --target-url http://localhost:11434/api/chat ^
+  --target-model gemma4:e2b ^
+  --skip-target-health
 """
 
 from __future__ import annotations
 
+import traceback
 import argparse
 import asyncio
 import json
@@ -173,6 +182,15 @@ def _write_integrated_report(
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return path
 
+def debug(title: str, value: Any = None) -> None:
+    print("\n" + "=" * 80)
+    print(f"[DEBUG] {title}")
+    print("=" * 80)
+    if value is not None:
+        try:
+            print(json.dumps(value, ensure_ascii=False, indent=2, default=str)[:8000])
+        except Exception:
+            print(str(value)[:8000])
 
 async def _main(args: argparse.Namespace) -> int:
     if not args.target_url.startswith(("http://localhost", "http://127.0.0.1")) and not args.allow_non_local_target:
@@ -231,27 +249,109 @@ async def _main(args: argparse.Namespace) -> int:
     print(f"[INFO] [{_log_ts()}] session_id={session_id}")
     print("[INFO] Phase1 -> Phase2 -> Phase3 -> Phase4 start")
 
-    await _ensure_test_session(session_id, args.target_url)
-    phase1_result_printer = _make_phase1_result_printer()
+    final_state: dict[str, Any] = {}
+    run_error: str | None = None
 
-    with _patched_phase1_loader(
-        category=args.category,
-        max_attacks=args.max_attacks,
-        shuffle=args.shuffle,
-        seed=args.seed,
-    ):
-        with _patched_phase2_rounds(args.phase2_rounds):
-            with _patched_llm_runtime(args.llm_timeout, verbose=args.verbose_trace):
-                final_state = await run_scan(
-                    session_id=session_id,
-                    target_url=args.target_url,
-                    target_config={
-                        "provider": args.target_provider,
-                        "model": args.target_model,
-                        "api_key": args.target_api_key,
-                    },
-                    phase1_result_callback=phase1_result_printer,
-                )
+    debug("runtime args", vars(args))
+    debug("model_map", model_map)
+    debug("target_config", {
+        "target_url": args.target_url,
+        "target_provider": args.target_provider,
+        "target_model": args.target_model,
+        "target_api_key_exists": bool(args.target_api_key),
+    })
+
+    try:
+        debug("before _ensure_test_session", {
+            "session_id": session_id,
+            "target_url": args.target_url,
+        })
+
+        await _ensure_test_session(session_id, args.target_url)
+
+        debug("after _ensure_test_session")
+
+        phase1_result_printer = _make_phase1_result_printer()
+
+        with _patched_phase1_loader(
+            category=args.category,
+            max_attacks=args.max_attacks,
+            shuffle=args.shuffle,
+            seed=args.seed,
+        ):
+            debug("phase1 loader patched", {
+                "category": args.category,
+                "max_attacks": args.max_attacks,
+                "shuffle": args.shuffle,
+                "seed": args.seed,
+            })
+
+            with _patched_phase2_rounds(args.phase2_rounds):
+                debug("phase2 rounds patched", {
+                    "phase2_rounds": args.phase2_rounds,
+                })
+
+                with _patched_llm_runtime(args.llm_timeout, verbose=args.verbose_trace):
+                    debug("llm runtime patched", {
+                        "llm_timeout": args.llm_timeout,
+                        "verbose_trace": args.verbose_trace,
+                    })
+
+                    debug("before run_scan")
+
+                    final_state = await run_scan(
+                        session_id=session_id,
+                        target_url=args.target_url,
+                        target_config={
+                            "provider": args.target_provider,
+                            "model": args.target_model,
+                            "api_key": args.target_api_key,
+                        },
+                        phase1_result_callback=phase1_result_printer,
+                    )
+
+                    debug("after run_scan")
+                    debug("final_state keys", list(final_state.keys()))
+                    debug("phase1_result", final_state.get("phase1_result"))
+                    debug("phase2_result summary", {
+                        "exists": bool(final_state.get("phase2_result")),
+                        "results_len": len((final_state.get("phase2_result") or {}).get("results", []) or []),
+                    })
+                    debug("phase3_result", final_state.get("phase3_result"))
+                    debug("phase4_result", final_state.get("phase4_result"))
+
+    except Exception as exc:
+        run_error = str(exc)
+        debug("run_scan exception", {
+            "error": str(exc),
+            "traceback": traceback.format_exc(),
+        })
+
+    finally:
+        out_dir = PROJECT_ROOT / args.output_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        debug_path = out_dir / f"debug_integrated_state_{ts}.json"
+        debug_payload = {
+            "ok": run_error is None,
+            "error": run_error,
+            "session_id": session_id,
+            "args": vars(args),
+            "model_map": model_map,
+            "final_state": final_state,
+        }
+
+        debug_path.write_text(
+            json.dumps(debug_payload, ensure_ascii=False, indent=2, default=str) + "\n",
+            encoding="utf-8",
+        )
+
+        print(f"\n[DEBUG SAVED] {debug_path}")
+
+    if run_error:
+        return 1
 
     summary = _short_summary(final_state)
     print(f"\n[INFO] [{_log_ts()}] === SUMMARY ===")
