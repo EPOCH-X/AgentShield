@@ -201,6 +201,34 @@ export async function postSitegptRedMutation(payload: {
   return res.json();
 }
 
+export async function postSitegptBlueDefense(payload: {
+  category: string;
+  attack_prompt: string;
+  target_response: string;
+  judge_detail?: string;
+}): Promise<{
+  defended_response: string;
+  defense_rationale: string;
+  attack_judge: Record<string, unknown>;
+  defense_judge: Record<string, unknown>;
+  raw_blue?: string;
+}> {
+  const res = await apiFetch("/api/v1/scan/sitegpt/blue-defense", {
+    method: "POST",
+    body: JSON.stringify({
+      category: payload.category,
+      attack_prompt: payload.attack_prompt,
+      target_response: payload.target_response,
+      judge_detail: payload.judge_detail ?? "",
+    }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail || "Blue 방어 생성에 실패했습니다.");
+  }
+  return res.json();
+}
+
 export async function manualCheck(payload: {
   attack_prompt: string;
   target_response: string;

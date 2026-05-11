@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import json
 import sys
 from pathlib import Path
@@ -23,6 +24,15 @@ async def main() -> int:
         if not attack_prompt.strip() or not target_response.strip():
             raise ValueError("attack_prompt and target_response are required")
 
+        if os.getenv("JUDGE_DEBUG_IO", "").strip().lower() == "true":
+            print(
+                (
+                    "[demo.judge.input] "
+                    f"category={category} attack_len={len(attack_prompt)} response_len={len(target_response)} "
+                    f"attack_head={attack_prompt[:180]!r} response_head={target_response[:180]!r}"
+                ),
+                file=sys.stderr,
+            )
         result = await full_judge(category, attack_prompt, target_response)
         print(json.dumps({"ok": True, "judge": result}, ensure_ascii=False))
         return 0

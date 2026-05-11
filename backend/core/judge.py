@@ -1,7 +1,9 @@
 # backend/core/judge.py
 """Judge API entrypoint."""
 
+import hashlib
 import logging
+import os
 
 from backend.core.judge_utils import _infer_taxonomy, rule_based_judge
 from backend.core.mitre_mapping import get_primary_technique_id
@@ -19,6 +21,20 @@ async def full_judge(
     llm=None,  # noqa: ARG001
     include_debug: bool = False,
 ) -> dict:
+    debug_io = os.getenv("JUDGE_DEBUG_IO", "").strip().lower() == "true"
+    if debug_io:
+        attack_hash = hashlib.sha256((attack_prompt or "").encode("utf-8")).hexdigest()[:12]
+        response_hash = hashlib.sha256((response or "").encode("utf-8")).hexdigest()[:12]
+        logger.warning(
+            "[judge.debug.input] category=%s attack_len=%d response_len=%d attack_sha=%s response_sha=%s attack_head=%r response_head=%r",
+            category,
+            len(attack_prompt or ""),
+            len(response or ""),
+            attack_hash,
+            response_hash,
+            (attack_prompt or "")[:180],
+            (response or "")[:180],
+        )
     initial_state = {
         "category": category,
         "attack_prompt": attack_prompt or "",
@@ -161,6 +177,17 @@ async def full_judge(
                 "probability_process": final_state.get("probability_process") or [],
             }
 
+        if debug_io:
+            logger.warning(
+                "[judge.debug.output] category=%s judgment=%s probability=%s consensus=%s p_vulnerable=%.4f p_safe=%.4f detail_head=%r",
+                category,
+                judgment,
+                probability_judgment,
+                consensus_judgment,
+                p_vulnerable,
+                p_safe,
+                detail[:220],
+            )
         return result
 
     except Exception as e:

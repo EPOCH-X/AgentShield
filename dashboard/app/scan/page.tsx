@@ -11,6 +11,7 @@ import {
   getPhase1Seeds,
   getSitegptConfig,
   postSitegptRedMutation,
+  postSitegptBlueDefense,
   getToken,
 } from "../../lib/api";
 import { MOCK_RECENT_SCANS } from "../../lib/mockClientData";
@@ -46,6 +47,30 @@ interface DemoLogEntry {
   ts: string;
   level: DemoLogLevel;
   message: string;
+}
+
+type SiteGptJudgeLike = {
+  judgment?: string;
+  severity?: string | null;
+  detail?: string;
+  confidence?: number;
+  p_vulnerable?: number | null;
+  p_safe?: number | null;
+  reason_sources?: {
+    consensus_reason?: string;
+    final_reason?: string;
+  } | null;
+};
+
+interface SiteGptPhaseReport {
+  category: string;
+  attack_prompt: string;
+  target_response: string;
+  attack_judge: SiteGptJudgeLike;
+  defended_response: string;
+  defense_rationale: string;
+  defense_judge: SiteGptJudgeLike;
+  created_at: string;
 }
 
 const DEMO_CATEGORY_BY_VECTOR: Record<string, string> = {
@@ -143,6 +168,7 @@ export default function ScanPage() {
   const [demoSeedPrompts, setDemoSeedPrompts] = useState<string[]>([]);
   const [demoSeedsLoading, setDemoSeedsLoading] = useState(false);
   const [demoSeedsBanner, setDemoSeedsBanner] = useState<DemoSeedsBanner>(null);
+  const [siteGptReport, setSiteGptReport] = useState<SiteGptPhaseReport | null>(null);
   const demoLogPanelRef = useRef<HTMLDivElement | null>(null);
 
   const loadDemoSeedsForVector = useCallback(async (vectorId: string): Promise<string[]> => {
@@ -224,7 +250,7 @@ export default function ScanPage() {
 
   function appendDemoLog(level: DemoLogLevel, message: string) {
     const ts = new Date().toLocaleTimeString("ko-KR", { hour12: false });
-    setDemoLogs((prev) => [...prev, { ts, level, message }].slice(-10));
+    setDemoLogs((prev) => [...prev, { ts, level, message }].slice(-30));
   }
 
   function pickSeedPromptFromPool(pool: string[], vectorId: string, excludedPrompt?: string) {
@@ -266,6 +292,7 @@ export default function ScanPage() {
     setLastSeedPrompt("");
     setDemoCurrentPrompt("");
     setDemoActive(false);
+    setSiteGptReport(null);
 
     try {
       let maxRounds = phase2MaxRounds;
@@ -325,6 +352,7 @@ export default function ScanPage() {
     const pastedResponse = demoResponseInput.trim();
     appendDemoLog("info", `[응답] 타겟 응답 입력 (${pastedResponse.length}자):`);
     appendDemoLog("info", `  └ ${pastedResponse}`);
+    appendDemoLog("info", `[Judge 입력] category=${demoCategory}, attack_len=${demoCurrentPrompt.length}, response_len=${pastedResponse.length}`);
     try {
       let result: Awaited<ReturnType<typeof manualCheck>> | null = null;
       try {
@@ -360,7 +388,7 @@ export default function ScanPage() {
       const translateAndLog = async (text: string) => {
         if (!text.trim()) return;
         try {
-          const tr = await fetch("/api/demo/translate", {
+          const tr = await fetch("/api/v1/scan/sitegpt/translate", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ text, target: "ko" }),
@@ -376,8 +404,35 @@ export default function ScanPage() {
 
       if (verdict === "vulnerable") {
         setDemoActive(false);
-        setSiteGptSdkDetail("공격 성공했습니다. Demo를 종료합니다.");
-        appendDemoLog("success", "공격 성공했습니다.");
+        setSiteGptSdkDetail("취약 판정 감지. Phase3 Blue Agent와 Phase4 검증을 실행합니다.");
+        appendDemoLog("success", "취약 판정 감지. Phase3 Blue Agent 발동.");
+        try {
+          const blue = await postSitegptBlueDefense({
+            category: demoCategory,
+            attack_prompt: demoCurrentPrompt,
+            target_response: pastedResponse,
+            judge_detail: finalDetail,
+          });
+          const defenseJudge = blue.defense_judge as SiteGptJudgeLike;
+          setSiteGptReport({
+            category: demoCategory,
+            attack_prompt: demoCurrentPrompt,
+            target_response: pastedResponse,
+            attack_judge: (result || { judgment: verdict, detail: finalDetail }) as SiteGptJudgeLike,
+            defended_response: blue.defended_response,
+            defense_rationale: blue.defense_rationale,
+            defense_judge: defenseJudge,
+            created_at: new Date().toLocaleString("ko-KR", { hour12: false }),
+          });
+          appendDemoLog("success", "[Phase3] Blue Agent 방어 응답 생성 완료");
+          appendDemoLog("success", `[Phase4] 방어 검증 판정: ${defenseJudge.judgment || "unknown"}`);
+          setSiteGptSdkDetail("Phase3 Blue Agent 및 Phase4 Judge 검증 완료. 하단 리포트를 확인하세요.");
+        } catch (err: unknown) {
+          const msg = err instanceof Error ? err.message : "Blue 방어 생성 실패";
+          appendDemoLog("error", `[Phase3/4] ${msg}`);
+          setSiteGptSdkDetail(`Phase3/4 실패: ${msg}`);
+        }
+        appendDemoLog("success", "SiteGPT Demo 공격 루프 종료.");
         await translateAndLog(finalDetail);
         return;
       }
@@ -407,16 +462,28 @@ export default function ScanPage() {
       appendDemoLog("info", `[Red 에이전트] R${mutationRoundCount + 1} 변형 생성 중...`);
       let red;
       try {
-        red = await postSitegptRedMutation({
-          category: demoCategory,
-          attack_prompt: demoCurrentPrompt,
-          target_response: pastedResponse,
-          round: mutationRoundCount + 1,
-          judge_detail: finalDetail,
-          used_techniques: demoUsedTechniques,
-          used_failure_modes: demoUsedFailureModes,
-          target_url: targetUrl.trim() || undefined,
-        });
+        let lastError: unknown = null;
+        for (let attempt = 1; attempt <= 2; attempt += 1) {
+          try {
+            red = await postSitegptRedMutation({
+              category: demoCategory,
+              attack_prompt: demoCurrentPrompt,
+              target_response: pastedResponse,
+              round: mutationRoundCount + 1,
+              judge_detail: finalDetail,
+              used_techniques: demoUsedTechniques,
+              used_failure_modes: demoUsedFailureModes,
+              target_url: targetUrl.trim() || undefined,
+            });
+            break;
+          } catch (err: unknown) {
+            lastError = err;
+            if (attempt < 2) {
+              appendDemoLog("info", "[Red 에이전트] 백엔드 재생성 실패 감지. 프론트 재요청 1회 실행.");
+            }
+          }
+        }
+        if (!red) throw lastError || new Error("Red 변형 생성 실패");
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "알 수 없는 오류";
         setError(`Red 변형 요청에 실패했습니다: ${msg}`);
@@ -800,11 +867,105 @@ export default function ScanPage() {
           </div>
         </form>
 
+        {siteGptReport && (
+          <section className="glass-panel rounded-[2rem] border border-tertiary/20 p-6">
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="mb-1 flex items-center gap-2 text-tertiary text-xs font-bold uppercase tracking-widest">
+                  <span className="material-symbols-outlined text-sm">verified_user</span>
+                  SITEGPT PHASE 3-4 REPORT
+                </div>
+                <h3 className="font-headline text-2xl font-black text-on-surface">
+                  SiteGPT 방어 리포트
+                </h3>
+                <p className="mt-1 text-xs text-on-surface-variant/70">
+                  `/demo` 테스트베드 경로와 분리된 `/scan/sitegpt` 전용 Phase3/4 결과입니다.
+                </p>
+              </div>
+              <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-right">
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-on-surface-variant/60">생성 시각</p>
+                <p className="mt-1 font-mono text-xs text-on-surface">{siteGptReport.created_at}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-4 xl:grid-cols-4">
+              {[
+                ["Category", siteGptReport.category],
+                ["Attack Judge", siteGptReport.attack_judge.judgment || "-"],
+                ["Defense Judge", siteGptReport.defense_judge.judgment || "-"],
+                [
+                  "Defense Prob.",
+                  siteGptReport.defense_judge.p_vulnerable != null
+                    ? `vuln=${siteGptReport.defense_judge.p_vulnerable.toFixed(2)}`
+                    : "-",
+                ],
+              ].map(([label, value]) => (
+                <div key={label} className="min-w-0 rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-on-surface-variant/60">
+                    {label}
+                  </p>
+                  <p className="mt-2 break-words font-mono text-sm font-black text-on-surface">{String(value)}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              <div className="rounded-2xl border border-error/25 bg-error/10 p-5">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-error">gpp_bad</span>
+                  <p className="font-headline text-lg font-black text-error">공격 판정</p>
+                </div>
+                <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-on-surface-variant/60">
+                  공격 프롬프트
+                </p>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/25 p-3 font-mono text-[11px] leading-5 text-on-surface">
+                  {siteGptReport.attack_prompt}
+                </pre>
+                <p className="mb-2 mt-4 text-[11px] font-black uppercase tracking-[0.16em] text-on-surface-variant/60">
+                  SiteGPT 응답
+                </p>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/25 p-3 font-mono text-[11px] leading-5 text-on-surface">
+                  {siteGptReport.target_response}
+                </pre>
+                <p className="mt-4 whitespace-pre-wrap break-words text-xs leading-6 text-on-surface-variant">
+                  {siteGptReport.attack_judge.reason_sources?.consensus_reason ||
+                    siteGptReport.attack_judge.detail ||
+                    "공격 판정 상세 없음"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-tertiary/25 bg-tertiary/10 p-5">
+                <div className="mb-3 flex items-center gap-2">
+                  <span className="material-symbols-outlined text-tertiary">shield</span>
+                  <p className="font-headline text-lg font-black text-tertiary">방어 및 Phase4 검증</p>
+                </div>
+                <p className="mb-2 text-[11px] font-black uppercase tracking-[0.16em] text-on-surface-variant/60">
+                  Blue Agent 방어 응답
+                </p>
+                <pre className="max-h-44 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/25 p-3 font-mono text-[11px] leading-5 text-on-surface">
+                  {siteGptReport.defended_response}
+                </pre>
+                <p className="mb-2 mt-4 text-[11px] font-black uppercase tracking-[0.16em] text-on-surface-variant/60">
+                  방어 근거
+                </p>
+                <p className="whitespace-pre-wrap break-words rounded-xl bg-black/20 p-3 text-xs leading-6 text-on-surface-variant">
+                  {siteGptReport.defense_rationale || "-"}
+                </p>
+                <p className="mt-4 whitespace-pre-wrap break-words text-xs leading-6 text-on-surface-variant">
+                  {siteGptReport.defense_judge.reason_sources?.consensus_reason ||
+                    siteGptReport.defense_judge.detail ||
+                    "Phase4 검증 상세 없음"}
+                </p>
+              </div>
+            </div>
+          </section>
+        )}
+
         {/* ─── 시스템 스탯 ─── */}
         <div className="grid grid-cols-3 gap-5">
           {[
             { icon: "bug_report", label: "공격 데이터", value: "검수 Seed", color: "text-error", bg: "bg-error/5 border-error/10" },
-            { icon: "layers", label: "통합 검증", value: "Phase 1→2", color: "text-primary", bg: "bg-primary/5 border-primary/10" },
+            { icon: "layers", label: "통합 검증", value: "Phase 1→4", color: "text-primary", bg: "bg-primary/5 border-primary/10" },
             { icon: "verified_user", label: "판정 구조", value: "Judge Multi-Agent", color: "text-tertiary", bg: "bg-tertiary/5 border-tertiary/10" },
           ].map((card) => (
             <div

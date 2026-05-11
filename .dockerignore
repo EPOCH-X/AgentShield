@@ -1,29 +1,76 @@
+# VCS / editor
 .git
 .github
 .idea
 .vscode
+.DS_Store
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# Python environments / caches
 .venv
 venv
-node_modules
-dashboard/node_modules
+venv_*
 __pycache__
-*.pyc
+**/__pycache__
+*.py[cod]
 *.pyo
 *.pyd
 .pycache_compile
+.pycache_tmp
 .pytest_cache
 .mypy_cache
 .ruff_cache
-.next
+.coverage
+htmlcov
+
+# Node / frontend build artifacts
+node_modules
+dashboard
+dashboard/node_modules
 dashboard/.next
+dashboard/out
+dashboard/dist
+dashboard/build
+
+# Build outputs / logs
 dist
 build
 results
-chromadb_data
-models
-data/chroma*
-data/testbed_kb/.chroma
 *.log
 *.sqlite3
 *.db
-.DS_Store
+
+# Local vector DB / persisted stores
+chromadb_data
+data/chroma*
+data/testbed_kb/.chroma
+
+# Generated datasets and campaign outputs
+data/finetuning
+data/red_campaigns
+data/red_prompt_only
+data/phase3_failures
+
+# Local model artifacts. Runtime uses host Ollama, not image-bundled weights.
+models
+gguf
+merged
+adapters
+backend/agents/best_weights
+*.gguf
+*.safetensors
+*.pt
+*.pth
+*.bin
+*.ckpt
+
+# Reports / notebooks / local planning docs not needed in backend images
+notebooks
+기획
+*.pptx
+*.key
+*.pdf
