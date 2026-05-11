@@ -925,6 +925,7 @@ QWEN35_DEFAULT_OPTIONS = {
     "repeat_penalty": 1.03,
     "num_predict": 128,
     "num_ctx": NUM_CTX,
+    "stop": ["<|im_start|>", "<|im_end|>"],
 }
 
 

@@ -30,14 +30,6 @@ services:
       - IS_PERSISTENT=TRUE
       - ALLOW_RESET=TRUE
 
-  chroma-ui:
-    image: fengzhichao/chromadb-admin:latest
-    container_name: agentshield-chroma-ui
-    ports:
-      - "8004:3001" # 이 이미지는 내부적으로 3001 포트를 사용합니다.
-    depends_on:
-      - chromadb
-
   backend:
     build:
       context: .
@@ -85,14 +77,6 @@ services:
       - ./adapters:/app/adapters
       - ./data:/app/data
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
-
-  monitoring-proxy:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    ports:
-      - "8002:8002"
-    command: uvicorn monitoring_proxy.monitor_server:app --host 0.0.0.0 --port 8002 --reload
 
 volumes:
   pgdata:

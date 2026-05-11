@@ -211,6 +211,19 @@ export async function manualCheck(payload: {
   detail?: string;
   confidence?: number;
   manual_review_needed?: boolean;
+  p_vulnerable?: number | null;
+  p_safe?: number | null;
+  probability_judgment?: string | null;
+  consensus_judgment?: string | null;
+  judgment_alignment?: string | null;
+  reason_sources?: {
+    final_reason?: string;
+    consensus_reason?: string;
+    safe_side_reason?: string;
+    vulnerable_side_reason?: string;
+  } | null;
+  matched_patterns?: unknown[];
+  mitre_technique_id?: string | null;
 }> {
   const res = await apiFetch("/api/v1/scan/manual-check", {
     method: "POST",
