@@ -58,6 +58,7 @@ def write_seed_file(prompt: str, args: argparse.Namespace) -> Path:
     tmp = tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
+        errors="replace",
         suffix=".json",
         prefix="agentshield-demo-red-",
         delete=False,
