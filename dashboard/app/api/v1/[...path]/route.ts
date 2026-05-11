@@ -14,7 +14,11 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
   const method = req.method;
   const bodyText = method !== "GET" && method !== "HEAD" ? await req.text() : "";
   const tail = segments.join("/");
-  const timeoutMs = tail.startsWith("scan/sitegpt/") ? 45000 : 8000;
+  const timeoutMs = tail.startsWith("scan/sitegpt/red-mutation")
+    ? 180000
+    : tail.startsWith("scan/sitegpt/")
+      ? 90000
+      : 8000;
 
   // 백엔드로 프록시 시도
   try {
