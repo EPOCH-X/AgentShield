@@ -96,6 +96,9 @@ type DefenseState = {
   rationale?: string;
 };
 
+const DEMO_REPORT_SESSION_ID = "mock-session-demo";
+const DEMO_REPORT_STORAGE_KEY = "agentshield_demo_report_snapshot";
+
 const STEPS = [
   { id: 0, icon: "database", label: "타겟 정보", sub: "실제 값 확인", phase: "TARGET" },
   { id: 1, icon: "terminal", label: "공격 시연", sub: "프롬프트 전송", phase: "RED" },
@@ -681,6 +684,67 @@ export default function DemoPage() {
       clearInterval(id);
     };
   }, []);
+
+  function saveDemoReportSnapshot() {
+    const now = new Date().toISOString();
+    const lastAttack = [...attackMessages].reverse().find((message) => message.role === "user")?.content || "";
+    const lastResponse = [...attackMessages].reverse().find((message) => message.role === "assistant")?.content || "";
+    const category = attackJudge.result?.category || "LLM02";
+
+    const adaptiveRows = adaptiveState.rounds
+      .filter((round) => round.attack_prompt || round.target_response || round.detail)
+      .map((round, idx) => ({
+        id: idx + 2,
+        session_id: DEMO_REPORT_SESSION_ID,
+        phase: 2,
+        attack_prompt: String(round.attack_prompt || ""),
+        target_response: String(round.target_response || round.detail || ""),
+        judgment: String(round.judgment || (round.generation_failed ? "error" : "unknown")),
+        severity: round.judgment === "vulnerable" ? "high" : "low",
+        category: String(round.category || category),
+        created_at: now,
+        summary: String(round.detail || round.exploit_type || ""),
+        danger_highlight: String(round.exploit_type || ""),
+      }));
+
+    const results = [
+      {
+        id: 1,
+        session_id: DEMO_REPORT_SESSION_ID,
+        phase: 1,
+        attack_prompt: lastAttack,
+        target_response: lastResponse,
+        judgment: String(attackJudge.result?.judgment || "unknown"),
+        severity: String(attackJudge.result?.severity || (attackJudge.result?.judgment === "vulnerable" ? "high" : "low")),
+        category,
+        created_at: now,
+        summary: String(attackJudge.result?.detail || attackJudge.detail || ""),
+        danger_highlight: String(attackJudge.result?.failure_mode || ""),
+        defense_code: String(translatedRationale || defenseState.rationale || ""),
+        verify_result: String(defenseJudge.result?.judgment || ""),
+      },
+      ...adaptiveRows,
+    ].filter((row) => row.attack_prompt || row.target_response || row.summary);
+
+    const safeCount = results.filter((row) => row.judgment === "safe").length;
+    const vulnerableCount = results.filter((row) => row.judgment === "vulnerable").length;
+
+    localStorage.setItem(
+      DEMO_REPORT_STORAGE_KEY,
+      JSON.stringify({
+        status: {
+          session_id: DEMO_REPORT_SESSION_ID,
+          status: "completed",
+          phase: defenseJudge.status === "done" ? 4 : adaptiveState.rounds.length > 0 ? 2 : 1,
+          total_tests: results.length,
+          completed_tests: results.length,
+          vulnerable_count: vulnerableCount,
+          safe_count: safeCount,
+        },
+        results,
+      }),
+    );
+  }
 
   async function sendAttack() {
     const prompt = attackInput.trim();
@@ -1332,6 +1396,7 @@ export default function DemoPage() {
                 </div>
                 <Link
                   href="/report/mock-session-demo"
+                  onClick={saveDemoReportSnapshot}
                   className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-sm font-black text-on-primary transition-all hover:-translate-y-0.5"
                 >
                   <span className="material-symbols-outlined text-lg">article</span>

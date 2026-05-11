@@ -3,8 +3,26 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
-import { getScanStatus, getScanResults, ScanResult } from "../../../lib/api";
-import { MOCK_SCAN_STATUS, MOCK_SCAN_RESULTS } from "../../../lib/mockClientData";
+import { getLatestScan, getScanStatus, getScanResults, ScanResult } from "../../../lib/api";
+
+type ReportStatus = {
+  session_id: string;
+  status: string;
+  phase?: number;
+  total_tests?: number;
+  completed_tests?: number;
+  vulnerable_count?: number;
+  safe_count?: number;
+  elapsed_seconds?: number;
+};
+
+type DemoReportSnapshot = {
+  status: ReportStatus;
+  results: ScanResult[];
+};
+
+const DEMO_REPORT_SESSION_ID = "mock-session-demo";
+const DEMO_REPORT_STORAGE_KEY = "agentshield_demo_report_snapshot";
 
 const SEVERITY_CFG = {
   critical: { label: "긴급", color: "#ef4444", bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.35)", glow: "0 0 32px rgba(239,68,68,0.2)" },
@@ -28,32 +46,51 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const router    = useRouter();
   const sessionId = params.id;
 
-  const [status,  setStatus]  = useState<typeof MOCK_SCAN_STATUS | null>(null);
+  const [status,  setStatus]  = useState<ReportStatus | null>(null);
   const [results, setResults] = useState<ScanResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [openSet, setOpenSet] = useState<Set<number>>(new Set());
 
   useEffect(() => {
     async function load() {
       setLoading(true);
+      setError("");
       try {
-        const isMock = sessionId === "mock-session-demo";
+        if (sessionId === DEMO_REPORT_SESSION_ID) {
+          const raw = localStorage.getItem(DEMO_REPORT_STORAGE_KEY);
+          if (!raw) {
+            setStatus(null);
+            setResults([]);
+            setError("데모 리포트 스냅샷이 없습니다. /demo에서 판정 결과 생성 후 전체 리포트를 열어야 합니다.");
+            return;
+          }
+          const snapshot = JSON.parse(raw) as DemoReportSnapshot;
+          setStatus(snapshot.status);
+          setResults(snapshot.results || []);
+          return;
+        }
+        if (sessionId === "latest") {
+          const latest = await getLatestScan();
+          router.replace(`/report/${latest.session_id}`);
+          return;
+        }
         const [s, r] = await Promise.all([
-          isMock
-            ? Promise.resolve({ ...MOCK_SCAN_STATUS, session_id: sessionId })
-            : getScanStatus(sessionId).catch(() => ({ ...MOCK_SCAN_STATUS, session_id: sessionId })),
-          isMock
-            ? Promise.resolve(MOCK_SCAN_RESULTS.map((x) => ({ ...x, session_id: sessionId })))
-            : getScanResults(sessionId).catch(() => MOCK_SCAN_RESULTS.map((x) => ({ ...x, session_id: sessionId }))),
+          getScanStatus(sessionId),
+          getScanResults(sessionId),
         ]);
-        setStatus(s as typeof MOCK_SCAN_STATUS);
+        setStatus(s);
         setResults(r);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "리포트 데이터를 가져올 수 없습니다.");
+        setStatus(null);
+        setResults([]);
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, [sessionId]);
+  }, [router, sessionId]);
 
   function toggleCard(id: number) {
     setOpenSet((prev) => {
@@ -183,7 +220,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
 
         {/* ── 카드 목록 ── */}
         {results.length === 0 ? (
-          <div className="glass-panel rounded-2xl py-20 text-center text-on-surface-variant/40 text-sm">결과 없음</div>
+          <div className="glass-panel rounded-2xl py-20 text-center text-on-surface-variant/40 text-sm">
+            {error || "결과 없음"}
+          </div>
         ) : (
           <div className="space-y-6">
             {results.map((r, i) => {
