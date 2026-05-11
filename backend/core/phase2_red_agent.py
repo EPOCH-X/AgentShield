@@ -34,6 +34,10 @@ from backend.models.test_result import TestResult
 logger = logging.getLogger(__name__)
 
 
+def _adaptive_code_mutation_enabled() -> bool:
+    return os.getenv("RED_ADAPTIVE_CODE_MUTATION", "false").lower() == "true"
+
+
 def _normalize_attack_pattern_id(value: Any) -> Optional[int]:
     try:
         return int(value) if value is not None else None
@@ -295,7 +299,7 @@ async def propose_red_mutation_for_manual_demo(
             invalid_reason = "empty generation" if not _stripped_attack else "LLM error response"
         else:
             is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
-            if is_valid:
+            if is_valid and _adaptive_code_mutation_enabled():
                 new_attack, code_mutation_strategy = apply_code_mutation(new_attack, round_num)
                 new_attack = normalize_attack_prompt_output(new_attack)
                 is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
@@ -533,7 +537,7 @@ async def run_phase2(
                         invalid_reason = "empty generation" if not _stripped_attack else "LLM error response"
                     else:
                         is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
-                        if is_valid:
+                        if is_valid and _adaptive_code_mutation_enabled():
                             # 4-b. 코드 기반 변형 엔진 연결.
                             new_attack, code_mutation_strategy = apply_code_mutation(new_attack, rnd)
                             new_attack = normalize_attack_prompt_output(new_attack)

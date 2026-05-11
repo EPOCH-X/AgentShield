@@ -300,11 +300,11 @@ function ChatBubble({ message }: { message: ChatMessage }) {
       : "mr-auto border-error/25 bg-error/10";
 
   return (
-    <div className={`max-w-[88%] rounded-2xl border p-4 ${toneClass}`}>
+    <div className={`min-w-0 max-w-[min(88%,760px)] overflow-hidden rounded-2xl border p-4 ${toneClass}`}>
       <p className="mb-2 text-[10px] font-black uppercase tracking-[0.18em] text-on-surface-variant/60">
         {isUser ? "사용자" : message.tone === "defense" ? "방어 에이전트" : "테스트베드 챗봇"}
       </p>
-      <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-on-surface">
+      <pre className="max-w-full whitespace-pre-wrap break-words font-mono text-xs leading-6 text-on-surface [overflow-wrap:anywhere]">
         {isUser ? message.content : highlightEvidence(message.content)}
       </pre>
     </div>
@@ -688,7 +688,6 @@ export default function DemoPage() {
     setAttackMessages((prev) => [...prev, { role: "user", content: prompt, tone: "attack" }]);
     setAttackInput("");
     setAttackState({ status: "loading" });
-    void runAdaptiveCampaign(prompt);
 
     try {
       const res = await fetch("/api/demo/testbed-chat", {
@@ -706,7 +705,12 @@ export default function DemoPage() {
 
       setAttackMessages((prev) => [...prev, { role: "assistant", content, tone: "attack" }]);
       setAttackState({ status: "live" });
-      void runJudge(prompt, content, setAttackJudge);
+      const judge = await runJudge(prompt, content, setAttackJudge);
+      if (judge?.judgment === "vulnerable") {
+        setAttackState({ status: "live", detail: "초기 공격 취약 판정. Red Agent 변형 중지" });
+        return;
+      }
+      void runAdaptiveCampaign(prompt, content);
     } catch (error) {
       setAttackState({
         status: "error",
@@ -719,7 +723,7 @@ export default function DemoPage() {
     prompt: string,
     targetResponse: string,
     setter: (value: JudgeState) => void,
-  ) {
+  ): Promise<JudgeResult | null> {
     setter({ status: "loading" });
     try {
       const res = await fetch("/api/demo/judge", {
@@ -734,54 +738,98 @@ export default function DemoPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data.ok) {
         setter({ status: "error", detail: data.detail || data.stderr_tail || "Judge 실행 실패" });
-        return;
+        return null;
       }
       setter({ status: "done", result: data.judge });
+      return data.judge || null;
     } catch (error) {
       setter({ status: "error", detail: error instanceof Error ? error.message : "Judge 연결 실패" });
+      return null;
     }
   }
 
-  async function runAdaptiveCampaign(prompt: string) {
+  async function runAdaptiveCampaign(prompt: string, targetResponse = "") {
     setAdaptiveState({ status: "loading", rounds: [] });
 
     try {
       const res = await fetch("/api/demo/red-adaptive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt, target_response: targetResponse, stream: true }),
       });
-      const data = await res.json().catch(() => ({}));
-      const rounds = Array.isArray(data.rounds) ? data.rounds : [];
-
-      if (!res.ok || !data.ok) {
-        setAdaptiveState({
-          status: "error",
-          rounds,
-          detail: data.detail || data.stderr_tail || "Red Agent 실행 실패",
-          best_round: data.best_round ?? null,
-          raw_path: data.raw_path ?? null,
-          success: Boolean(data.success),
-        });
-        return;
+      if (!res.ok || !res.body) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.detail || "Red Agent 스트림 연결 실패");
       }
 
-      setAdaptiveState({
-        status: "done",
-        rounds,
-        best_round: data.best_round ?? null,
-        raw_path: data.raw_path ?? null,
-        success: Boolean(data.success),
-      });
-      const winningRound =
-        rounds.find((round: AdaptiveRound) => round.success) ||
-        rounds.find((round: AdaptiveRound) => round.round === data.best_round);
-      if (winningRound?.attack_prompt && winningRound?.target_response) {
-        setAttackMessages((prev) =>
-          appendConversation(prev, winningRound.attack_prompt, winningRound.target_response),
-        );
-        setAttackState({ status: "live", detail: `Red Agent R${winningRound.round || ""} 성공 프롬프트 적용` });
-        void runJudge(winningRound.attack_prompt, winningRound.target_response, setAttackJudge);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let lastRound: AdaptiveRound | null = null;
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as {
+            type?: string;
+            detail?: string;
+            round?: AdaptiveRound;
+            ok?: boolean;
+            best_round?: number | null;
+            raw_path?: string | null;
+            success?: boolean;
+            stderr_tail?: string;
+          };
+          if (event.type === "status" && event.detail) {
+            setAttackState({ status: "loading", detail: event.detail });
+          }
+          if (event.type === "round" && event.round) {
+            const round = event.round;
+            lastRound = round;
+            setAdaptiveState((prev) => ({
+              ...prev,
+              rounds: [...prev.rounds, round],
+              success: prev.success || round.judgment === "vulnerable" || Boolean(round.success),
+              best_round: round.judgment === "vulnerable" ? round.round ?? prev.best_round : prev.best_round,
+            }));
+            if (round.attack_prompt && round.target_response && !round.generation_failed) {
+              setAttackMessages((prev) => appendConversation(prev, String(round.attack_prompt), String(round.target_response)));
+            }
+            setAttackState({
+              status: round.generation_failed || round.judgment === "error" ? "error" : round.judgment === "vulnerable" ? "live" : "loading",
+              detail:
+                round.generation_failed
+                  ? `R${round.round ?? ""} Red Agent 생성 실패: ${round.detail || "필터 통과 실패"}`
+                  : round.judgment === "error"
+                    ? `R${round.round ?? ""} 타겟 호출 실패: ${round.detail || "오류"}`
+                    : round.judgment === "vulnerable"
+                  ? `R${round.round ?? ""} 취약 판정. Red Agent 중지`
+                  : `R${round.round ?? ""} 판정 완료. 다음 라운드 준비 중`,
+            });
+            if (round.judgment === "vulnerable" && round.attack_prompt && round.target_response) {
+              void runJudge(String(round.attack_prompt), String(round.target_response), setAttackJudge);
+            }
+          }
+          if (event.type === "done") {
+            setAdaptiveState((prev) => ({
+              ...prev,
+              status: event.ok ? "done" : "error",
+              detail: event.ok ? undefined : event.stderr_tail || "Red Agent 실행 실패",
+              best_round: event.best_round ?? prev.best_round,
+              raw_path: event.raw_path ?? null,
+              success: Boolean(event.success) || prev.success,
+            }));
+            if (lastRound?.attack_prompt && lastRound.target_response && lastRound.judgment !== "vulnerable") {
+              void runJudge(String(lastRound.attack_prompt), String(lastRound.target_response), setAttackJudge);
+              setAttackState({ status: "live", detail: `R${lastRound.round ?? ""}까지 완료. 취약 판정 없음` });
+            }
+          }
+        }
       }
     } catch (error) {
       setAdaptiveState({
@@ -950,8 +998,8 @@ export default function DemoPage() {
         )}
 
         {activeView === "attack" && (
-          <section className="grid gap-5 xl:grid-cols-[1fr_0.42fr]">
-            <div className="glass-panel flex h-[730px] flex-col rounded-[2rem] p-0">
+          <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.42fr)]">
+            <div className="glass-panel flex h-[730px] min-w-0 flex-col overflow-hidden rounded-[2rem] p-0">
               <div className="border-b border-white/10 p-6">
                 <div className="flex items-center gap-3">
                   <span className="material-symbols-outlined text-error">terminal</span>
@@ -968,7 +1016,7 @@ export default function DemoPage() {
                 </div>
               </div>
 
-              <div className="flex-1 space-y-4 overflow-auto p-6">
+              <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overflow-x-hidden p-6">
                 {attackMessages.length === 0 ? (
                   <div className="flex h-full min-h-[360px] items-center justify-center rounded-2xl border border-dashed border-white/10 bg-white/[0.03] text-sm text-on-surface-variant">
                     공격 프롬프트 입력
@@ -1014,7 +1062,7 @@ export default function DemoPage() {
               </div>
             </div>
 
-            <div className="glass-panel rounded-[2rem] p-6">
+            <div className="glass-panel min-w-0 rounded-[2rem] p-6">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <h2 className="font-headline text-xl font-black text-on-surface">Red Agent 변형 공격</h2>
                 <AgentStatusBadge label="Red Agent" status={adaptiveState.status} color="error" />

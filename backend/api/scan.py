@@ -30,6 +30,20 @@ SCAN_TASKS: dict[str, asyncio.Task] = {}
 SCAN_SUMMARIES: dict[str, dict[str, Any]] = {}
 
 
+def _debug_scan_judge_input(source: str, *, category: str, attack_prompt: str, target_response: str) -> None:
+    if os.getenv("JUDGE_DEBUG_IO", "").strip().lower() != "true":
+        return
+    logger.warning(
+        "[scan.%s.judge.input] category=%s attack_len=%d response_len=%d attack_head=%r response_head=%r",
+        source,
+        category,
+        len(attack_prompt or ""),
+        len(target_response or ""),
+        (attack_prompt or "")[:180],
+        (target_response or "")[:180],
+    )
+
+
 class ScanRequest(BaseModel):
     target_url:   str
     project_name: str = ""
@@ -109,6 +123,31 @@ class SiteGptRedMutationResponse(BaseModel):
     techniques: list[str] = []
     failure_mode: Optional[str] = None
     detail: str = ""
+
+
+class SiteGptBlueDefenseRequest(BaseModel):
+    category: str = "LLM01"
+    attack_prompt: str
+    target_response: str
+    judge_detail: str = ""
+
+
+class SiteGptBlueDefenseResponse(BaseModel):
+    defended_response: str
+    defense_rationale: str = ""
+    attack_judge: dict[str, Any]
+    defense_judge: dict[str, Any]
+    raw_blue: str = ""
+
+
+class SiteGptTranslateRequest(BaseModel):
+    text: str
+    target: str = "ko"
+
+
+class SiteGptTranslateResponse(BaseModel):
+    ok: bool = True
+    translated: str = ""
 
 
 def _normalize_phase1_pattern_id(raw: Any) -> Any:
@@ -781,6 +820,105 @@ async def sitegpt_red_mutation(
     )
 
 
+@router.post("/sitegpt/blue-defense", response_model=SiteGptBlueDefenseResponse)
+async def sitegpt_blue_defense(
+    req: SiteGptBlueDefenseRequest,
+    _user: UserInfo = Depends(get_current_user),
+):
+    if not req.attack_prompt.strip() or not req.target_response.strip():
+        raise HTTPException(status_code=422, detail="attack_prompt와 target_response가 필요합니다")
+
+    try:
+        from backend.agents.blue_agent import build_blue_prompt, parse_blue_response
+        from backend.agents.llm_client import AgentShieldLLM
+
+        _debug_scan_judge_input(
+            "sitegpt.blue-defense.attack",
+            category=req.category,
+            attack_prompt=req.attack_prompt,
+            target_response=req.target_response,
+        )
+        attack_judge = await full_judge(req.category, req.attack_prompt, req.target_response)
+        judge_detail = req.judge_detail.strip() or str(attack_judge.get("detail") or "")
+        blue_prompt = build_blue_prompt(
+            category=req.category,
+            attack_prompt=req.attack_prompt,
+            target_response=req.target_response,
+            judge_detail=judge_detail,
+        )
+        raw_blue = await AgentShieldLLM().generate(blue_prompt, role="blue", max_tokens=900)
+        raw_blue_text = str(raw_blue or "").strip()
+        if raw_blue_text.startswith("[Error]"):
+            raise RuntimeError(raw_blue_text)
+
+        bundle = parse_blue_response(raw_blue_text)
+        defended_response = bundle.defended_response.strip()
+        if not defended_response:
+            raise RuntimeError("Blue Agent returned an empty defended_response")
+
+        _debug_scan_judge_input(
+            "sitegpt.blue-defense.phase4",
+            category=req.category,
+            attack_prompt=req.attack_prompt,
+            target_response=defended_response,
+        )
+        defense_judge = await full_judge(req.category, req.attack_prompt, defended_response)
+        return SiteGptBlueDefenseResponse(
+            defended_response=defended_response,
+            defense_rationale=bundle.defense_rationale,
+            attack_judge=attack_judge,
+            defense_judge=defense_judge,
+            raw_blue=raw_blue_text,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
+    except Exception:
+        logger.exception("[scan] sitegpt blue-defense")
+        raise HTTPException(status_code=503, detail="Blue 방어 생성 또는 Phase4 검증에 실패했습니다.") from None
+
+
+@router.post("/sitegpt/translate", response_model=SiteGptTranslateResponse)
+async def sitegpt_translate(
+    req: SiteGptTranslateRequest,
+    _user: UserInfo = Depends(get_current_user),
+):
+    text = req.text.strip()
+    if not text:
+        return SiteGptTranslateResponse(ok=True, translated="")
+
+    base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+    model = os.getenv("OLLAMA_GUARD_MODEL") or os.getenv("OLLAMA_JUDGE_MODEL") or os.getenv("OLLAMA_MODEL")
+    if not model:
+        return SiteGptTranslateResponse(ok=False, translated=text)
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            res = await client.post(
+                f"{base_url}/api/chat",
+                json={
+                    "model": model,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": "Translate the given English security judgment to natural Korean. Output only Korean translation.",
+                        },
+                        {"role": "user", "content": text},
+                    ],
+                    "stream": False,
+                    "options": {"temperature": 0.1, "num_predict": 1024},
+                },
+            )
+        if not res.is_success:
+            return SiteGptTranslateResponse(ok=False, translated=text)
+        data = res.json()
+        content = str(((data.get("message") or {}).get("content")) or "").strip()
+        return SiteGptTranslateResponse(ok=True, translated=content or text)
+    except Exception:
+        return SiteGptTranslateResponse(ok=False, translated=text)
+
+
 @router.post("/manual-check", response_model=ManualCheckResponse)
 async def manual_check(
     req: ManualCheckRequest,
@@ -790,6 +928,12 @@ async def manual_check(
     if use_rules:
         verdict = rule_based_judge(req.category, req.attack_prompt, req.target_response)
     else:
+        _debug_scan_judge_input(
+            "manual-check",
+            category=req.category,
+            attack_prompt=req.attack_prompt,
+            target_response=req.target_response,
+        )
         verdict = await full_judge(req.category, req.attack_prompt, req.target_response)
 
     judgment = str(verdict.get("judgment") or "ambiguous")

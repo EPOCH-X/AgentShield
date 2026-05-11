@@ -87,6 +87,10 @@ def _pick_seeds(attacks: list[dict[str, Any]], seed_count: int, shuffle_seed: in
     return attacks[:seed_count] if seed_count > 0 else attacks
 
 
+def _adaptive_code_mutation_enabled() -> bool:
+    return os.getenv("RED_ADAPTIVE_CODE_MUTATION", "false").lower() == "true"
+
+
 def _is_success(verdict: dict[str, Any], target_response: str) -> tuple[bool, str | None]:
     from backend.core.phase2_red_agent import _check_fp_flag
 
@@ -602,6 +606,7 @@ async def run_campaign(args: argparse.Namespace) -> int:
             seed_success = False
             best_round: int | None = None
             echo_count = 0  # LLM06 tool_call_echo 누적 카운터
+            stop_after_seed_probe = False
 
             # multi-turn conversation history (seed당 리셋)
             conversation_history: list[dict[str, str]] = []
@@ -714,6 +719,12 @@ async def run_campaign(args: argparse.Namespace) -> int:
                     success_attacks.append(_export_attack_row(campaign_id, attack, round_zero))
                     if seed_exploit.get("success_strength", 0) >= 4 and seed_exploit.get("training_eligible"):
                         high_value_success_attacks.append(_export_attack_row(campaign_id, attack, round_zero))
+                if args.stop_on_vulnerable and seed_verdict.get("judgment") == "vulnerable":
+                    print("  [R0/seed] vulnerable stop requested")
+                    seed_success = True
+                    if best_round is None:
+                        best_round = 0
+                    stop_after_seed_probe = True
 
                 # round 1+ 가 사용할 응답 컨텍스트 갱신
                 current_response = seed_response or ""
@@ -731,7 +742,8 @@ async def run_campaign(args: argparse.Namespace) -> int:
                     f"attack_len={len(current_prompt or '')} response_len={len(seed_response or '')}"
                 )
 
-            for rnd in range(1, args.rounds + 1):
+            max_round_for_seed = 0 if stop_after_seed_probe else args.rounds
+            for rnd in range(1, max_round_for_seed + 1):
                 target_failure_mode = select_target_failure_mode(
                     category,
                     rnd,
@@ -789,7 +801,7 @@ async def run_campaign(args: argparse.Namespace) -> int:
                             f"attack prompt too long: {len(mutated_prompt)} chars > {effective_max}. "
                             f"Condense the case material. Remove redundant sections. Keep under {effective_max} chars."
                         )
-                    if valid:
+                    if valid and _adaptive_code_mutation_enabled():
                         mutated_prompt, code_mutation_strategy = apply_code_mutation(mutated_prompt, rnd)
                         mutated_prompt = normalize_attack_prompt_output(mutated_prompt)
                         valid, invalid_reason = validate_attack_prompt_output(mutated_prompt)
@@ -860,6 +872,22 @@ async def run_campaign(args: argparse.Namespace) -> int:
                         "detail": f"Red Agent output rejected: {invalid_reason}",
                     }
                     rounds.append(entry)
+                    _live_append({
+                        "ts": _utc_now(),
+                        "seed_index": seed_index,
+                        "category": category,
+                        "subcategory": subcategory,
+                        "round": rnd,
+                        "is_seed_baseline": False,
+                        "attack_prompt": "",
+                        "target_response": entry["target_response"],
+                        "judgment": "generation_failed",
+                        "success": False,
+                        "success_strength": 0,
+                        "exploit_type": "generation_failed",
+                        "training_eligible": False,
+                        "judge_detail": entry["detail"],
+                    })
                     manual_review.append(_export_attack_row(campaign_id, attack, entry, reason="generation_failed"))
                     print(f"  [R{rnd}] generation_failed: {invalid_reason}")
                     break
@@ -895,6 +923,22 @@ async def run_campaign(args: argparse.Namespace) -> int:
                         "stateful_context_used": stateful_context_used,
                     }
                     rounds.append(entry)
+                    _live_append({
+                        "ts": _utc_now(),
+                        "seed_index": seed_index,
+                        "category": category,
+                        "subcategory": subcategory,
+                        "round": rnd,
+                        "is_seed_baseline": False,
+                        "attack_prompt": mutated_prompt,
+                        "target_response": "[ERROR]",
+                        "judgment": "error",
+                        "success": False,
+                        "success_strength": 0,
+                        "exploit_type": "target_error",
+                        "training_eligible": False,
+                        "judge_detail": entry["detail"],
+                    })
                     manual_review.append(_export_attack_row(campaign_id, attack, entry, reason="target_error"))
                     print(f"  [R{rnd}] target_error: {exc.__class__.__name__}")
                     break
@@ -1049,6 +1093,13 @@ async def run_campaign(args: argparse.Namespace) -> int:
                     if target_failure_mode:
                         used_failure_modes.append(target_failure_mode)
                     continue
+
+                if args.stop_on_vulnerable and verdict.get("judgment") == "vulnerable":
+                    seed_success = True
+                    if best_round is None:
+                        best_round = rnd
+                    print(f"  [R{rnd}] vulnerable stop requested")
+                    break
 
                 adaptive_agent.evaluate_attack(mutated_prompt, target_response, 0.0)
                 current_prompt = mutated_prompt
@@ -1229,6 +1280,11 @@ def parse_args() -> argparse.Namespace:
         default=os.getenv("RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS", "false").lower() == "true",
         help="첫 성공 후에도 마지막 라운드까지 계속 진행하여 더 강한 성공을 탐색. "
              "env: RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS=true",
+    )
+    parser.add_argument(
+        "--stop-on-vulnerable", action="store_true",
+        default=os.getenv("RED_CAMPAIGN_STOP_ON_VULNERABLE", "false").lower() == "true",
+        help="vulnerable 판정 즉시 라운드를 중지. 데모/시연 파이프라인용. env: RED_CAMPAIGN_STOP_ON_VULNERABLE=true",
     )
     parser.add_argument(
         "--conversation-mode",
