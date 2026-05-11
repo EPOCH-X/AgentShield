@@ -42,7 +42,8 @@ services:
       # 프로젝트 루트 .env의 DATABASE_URL을 그대로 쓴다(RDS 등). 미설정 시에만 Compose postgres(db)로 폴백.
       # 고정으로 db:5432를 넣으면 호스트에서 RDS에 넣은 시드와 백엔드가 서로 다른 DB를 보게 된다.
       DATABASE_URL: ${DATABASE_URL:-postgresql+asyncpg://agentshield:agentshield@db:5432/agentshield}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      # 컨테이너 안 localhost ≠ 호스트 Ollama. .env의 OLLAMA_BASE_URL(localhost)과 분리하려면 DOCKER_OLLAMA_BASE_URL 사용.
+      OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       CHROMADB_MODE: http
       CHROMADB_HOST: chromadb
       CHROMADB_PORT: 8000
