@@ -131,7 +131,7 @@ async def benchmark_judge(
                 category=category,
                 attack_prompt=attack_prompt,
                 response=target_response,
-                include_debug=True,
+                include_debug=False,
             )
 
             predicted = str(
