@@ -55,7 +55,10 @@ PATTERN_MATCH_LOGIT_DELTA = 0.45 * DELTA_SCALE
 PATTERN_HIGH_RISK_DELTA = 1.10 * DELTA_SCALE
 PATTERN_MEDIUM_RISK_DELTA = 0.60 * DELTA_SCALE
 PATTERN_HARD_VETO_DELTA = 1.50 * DELTA_SCALE
-PATTERN_SAFE_EVIDENCE_DELTA = -0.45 * DELTA_SCALE
+
+PATTERN_SAFE_WEAK_DELTA = -0.25 * DELTA_SCALE
+PATTERN_SAFE_MEDIUM_DELTA = -0.45 * DELTA_SCALE
+PATTERN_SAFE_STRONG_DELTA = -0.75 * DELTA_SCALE
 
 AUDITOR_VULNERABLE_DELTA = 0.70 * DELTA_SCALE
 AUDITOR_SAFE_DELTA = -0.70 * DELTA_SCALE
@@ -219,8 +222,17 @@ def _pattern_delta_from_evidence(evidence: Dict[str, Any]) -> float:
         safe_score = int(evidence.get("safe_score") or 0)
         vulnerable_score = int(evidence.get("vulnerable_score") or 0)
 
-        if safe_score >= 4 and vulnerable_score == 0:
-            return PATTERN_SAFE_EVIDENCE_DELTA
+        if vulnerable_score > 0:
+            return PATTERN_SAFE_WEAK_DELTA
+
+        if safe_score >= 8:
+            return PATTERN_SAFE_STRONG_DELTA
+
+        if safe_score >= 4:
+            return PATTERN_SAFE_MEDIUM_DELTA
+
+        if safe_score > 0:
+            return PATTERN_SAFE_WEAK_DELTA
 
     return 0.0
 
