@@ -14,7 +14,9 @@ function e(key: string, fallback = "") {
 function toRound(record: Record<string, unknown>) {
   const attack = String(record.attack_prompt || "");
   const response = String(record.target_response || "");
-  const attempts = Array.isArray(record.generation_attempts) ? record.generation_attempts.length : undefined;
+  const attempts = Array.isArray(record.generation_attempts)
+    ? record.generation_attempts.length
+    : undefined;
   return {
     round: record.round,
     category: record.category,
@@ -34,24 +36,39 @@ function toRound(record: Record<string, unknown>) {
   };
 }
 
-function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: string; stderr: string }> {
+function runRedAdaptive(
+  prompt: string,
+): Promise<{ status: number; stdout: string; stderr: string }> {
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
-  const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
+  const targetUrl = e(
+    "TESTBED_CHAT_URL",
+    `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`,
+  );
   const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
-  const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
+  const generationAttempts = e(
+    "DEMO_RED_GENERATION_ATTEMPTS",
+    e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"),
+  );
 
   return new Promise((resolve) => {
     const child = spawn(
       python,
       [
         "scripts/run_demo_red_adaptive_rounds.py",
-        "--target-url", targetUrl,
-        "--red-model", redModel,
-        "--rounds", rounds,
-        "--red-generation-attempts", generationAttempts,
-        "--seed", "57",
-        "--category", "LLM02",
-        "--subcategory", "config-extraction",
+        "--target-url",
+        targetUrl,
+        "--red-model",
+        redModel,
+        "--rounds",
+        rounds,
+        "--red-generation-attempts",
+        generationAttempts,
+        "--seed",
+        "57",
+        "--category",
+        "LLM02",
+        "--subcategory",
+        "config-extraction",
         "--initial-prompt-stdin",
       ],
       {
@@ -59,11 +76,14 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
         stdio: ["pipe", "pipe", "pipe"],
         env: {
           ...process.env,
-          RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "false"),
+          RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: e(
+            "DEMO_RED_CONTINUE_AFTER_SUCCESS",
+            "false",
+          ),
           RED_CAMPAIGN_STOP_ON_VULNERABLE: "true",
           RED_CAMPAIGN_GENERATION_ATTEMPTS: generationAttempts,
         },
-      }
+      },
     );
 
     let stdout = "";
@@ -72,8 +92,12 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
       child.kill("SIGTERM");
     }, 600_000);
 
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
     child.on("close", (code) => {
       clearTimeout(timeout);
       resolve({ status: code ?? 1, stdout, stderr });
@@ -85,45 +109,87 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
 function streamRedAdaptive(prompt: string, targetResponse: string) {
   const encoder = new TextEncoder();
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
-  const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
+  const targetUrl = e(
+    "TESTBED_CHAT_URL",
+    `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`,
+  );
   const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
-  const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
+  const generationAttempts = e(
+    "DEMO_RED_GENERATION_ATTEMPTS",
+    e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"),
+  );
   const campaignId = `demo-red-${Date.now().toString(36)}`;
   const seedPath = path.join(os.tmpdir(), `${campaignId}.json`);
-  const livePath = path.join(root, "data", "red_campaigns", "live", `${campaignId}.jsonl`);
-  const rawPath = path.join(root, "data", "red_campaigns", "raw", `${campaignId}_raw.json`);
-  fs.writeFileSync(seedPath, JSON.stringify([
-    {
-      id: campaignId,
-      seed_id: "demo-ui-seed",
-      category: "LLM02",
-      subcategory: "config-extraction",
-      attack_prompt: prompt,
-      target_response: targetResponse,
-      detail: "Dashboard demo seed prompt",
-    },
-  ], null, 2), "utf8");
+  const livePath = path.join(
+    root,
+    "data",
+    "red_campaigns",
+    "live",
+    `${campaignId}.jsonl`,
+  );
+  const rawPath = path.join(
+    root,
+    "data",
+    "red_campaigns",
+    "raw",
+    `${campaignId}_raw.json`,
+  );
+  fs.writeFileSync(
+    seedPath,
+    JSON.stringify(
+      [
+        {
+          id: campaignId,
+          seed_id: "demo-ui-seed",
+          category: "LLM02",
+          subcategory: "config-extraction",
+          attack_prompt: prompt,
+          target_response: targetResponse,
+          detail: "Dashboard demo seed prompt",
+        },
+      ],
+      null,
+      2,
+    ),
+    "utf8",
+  );
 
-  const send = (controller: ReadableStreamDefaultController<Uint8Array>, event: Record<string, unknown>) => {
+  const send = (
+    controller: ReadableStreamDefaultController<Uint8Array>,
+    event: Record<string, unknown>,
+  ) => {
     controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
   };
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      send(controller, { type: "status", detail: "Red Agent 라운드 실행 시작", campaign_id: campaignId });
+      send(controller, {
+        type: "status",
+        detail: "Red Agent 라운드 실행 시작",
+        campaign_id: campaignId,
+      });
       const child = spawn(
         python,
         [
           "scripts/run_red_adaptive_campaign.py",
-          "--target-url", targetUrl,
-          "--input", seedPath,
-          "--seeds", "1",
-          "--rounds", rounds,
-          "--red-generation-attempts", generationAttempts,
-          "--seed", "57",
-          "--category", "LLM02",
-          "--campaign-id", campaignId,
-          "--conversation-mode", "multi",
+          "--target-url",
+          targetUrl,
+          "--input",
+          seedPath,
+          "--seeds",
+          "1",
+          "--rounds",
+          rounds,
+          "--red-generation-attempts",
+          generationAttempts,
+          "--seed",
+          "57",
+          "--category",
+          "LLM02",
+          "--campaign-id",
+          campaignId,
+          "--conversation-mode",
+          "multi",
           "--verify-tool-execution",
           "--stop-on-vulnerable",
           ...(redModel ? ["--red-model", redModel] : []),
@@ -158,7 +224,10 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
             seenRounds.add(key);
             send(controller, { type: "round", round: toRound(record) });
             if (record.judgment === "vulnerable") {
-              send(controller, { type: "status", detail: `R${record.round} vulnerable 판정. 라운드 중지` });
+              send(controller, {
+                type: "status",
+                detail: `R${record.round} vulnerable 판정. 라운드 중지`,
+              });
             }
           } catch {
             // ignore partial line
@@ -170,13 +239,31 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
       const timeout = setTimeout(() => child.kill("SIGTERM"), 600_000);
 
       child.stdout.on("data", (chunk) => {
-        stdoutTail = `${stdoutTail}${chunk.toString()}`.slice(-4000);
+        const msg = chunk.toString();
+        console.log("[RED STDOUT]", msg);
+        stdoutTail = `${stdoutTail}${msg}`.slice(-4000);
         flushLive();
       });
       child.stderr.on("data", (chunk) => {
-        stderr = `${stderr}${chunk.toString()}`.slice(-4000);
+        const msg = chunk.toString();
+        console.error("[RED STDERR]", msg);
+        stderr = `${stderr}${msg}`.slice(-4000);
       });
       child.on("close", (code) => {
+        console.log("[RED CLOSE]", {
+          code,
+          root,
+          python,
+          redModel,
+          targetUrl,
+          rounds,
+          generationAttempts,
+          seedPath,
+          livePath,
+          rawPath,
+          stderr_tail: stderr,
+          stdout_tail: stdoutTail,
+        });
         clearInterval(timer);
         clearTimeout(timeout);
         flushLive();
@@ -218,31 +305,45 @@ export async function POST(req: NextRequest) {
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ detail: "요청 본문이 올바르지 않습니다." }, { status: 400 });
+    return NextResponse.json(
+      { detail: "요청 본문이 올바르지 않습니다." },
+      { status: 400 },
+    );
   }
 
   const prompt = String(body.prompt || "").trim();
   if (!prompt) {
-    return NextResponse.json({ detail: "프롬프트를 입력해 주세요." }, { status: 400 });
+    return NextResponse.json(
+      { detail: "프롬프트를 입력해 주세요." },
+      { status: 400 },
+    );
   }
 
   if (body.stream) {
-    return new Response(streamRedAdaptive(prompt, String(body.target_response || "")), {
-      headers: {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
+    return new Response(
+      streamRedAdaptive(prompt, String(body.target_response || "")),
+      {
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
       },
-    });
+    );
   }
 
   const result = await runRedAdaptive(prompt);
-  const lastLine = result.stdout.trim().split(/\n/).filter(Boolean).at(-1) || "{}";
+  const lastLine =
+    result.stdout.trim().split(/\n/).filter(Boolean).at(-1) || "{}";
 
   try {
     const payload = JSON.parse(lastLine);
     return NextResponse.json(
-      { ...payload, status: result.status, stderr_tail: payload.stderr_tail || result.stderr.slice(-4000) },
-      { status: payload.ok ? 200 : 502 }
+      {
+        ...payload,
+        status: result.status,
+        stderr_tail: payload.stderr_tail || result.stderr.slice(-4000),
+      },
+      { status: payload.ok ? 200 : 502 },
     );
   } catch {
     return NextResponse.json(
@@ -253,7 +354,7 @@ export async function POST(req: NextRequest) {
         stdout_tail: result.stdout.slice(-4000),
         stderr_tail: result.stderr.slice(-4000),
       },
-      { status: 502 }
+      { status: 502 },
     );
   }
 }
