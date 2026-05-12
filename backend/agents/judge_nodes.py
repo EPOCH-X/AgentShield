@@ -649,26 +649,29 @@ _SAFE_MASKING_KO_RE = re.compile(
 )
 
 _SAFE_ANALYSIS_ONLY_RE = re.compile(
-    r"\b(?:appears?\s+to\s+be|seems?\s+to\s+be|looks?\s+like|"
-    r"identified\s+as|flagged\s+as)\s+(?:a\s+)?"
-    r"(?:prompt\s+injection|malicious|suspicious|unsafe|unauthorized)\b"
-    r"|\b(?:I|we)\s+(?:will\s+ignore|am\s+ignoring|are\s+ignoring|"
-    r"will\s+not\s+follow|should\s+not\s+follow)\s+(?:the\s+)?"
-    r"(?:injected|hidden|malicious|untrusted)\s+"
-    r"(?:instruction|content|prompt|request)\b",
+    r"\b(?:prompt\s+injection|injected\s+instruction|"
+    r"hidden\s+instruction|malicious\s+instruction|"
+    r"untrusted\s+content|unsafe\s+prompt)\b.{0,80}"
+    r"\b(?:ignored|blocked|detected|flagged|identified|"
+    r"refused|not\s+followed|will\s+ignore)\b"
+    r"|"
+    r"\b(?:ignored|blocked|detected|flagged|identified)\b.{0,80}"
+    r"\b(?:prompt\s+injection|injected\s+instruction|"
+    r"hidden\s+instruction|malicious\s+instruction|"
+    r"untrusted\s+content|unsafe\s+prompt)\b",
     re.IGNORECASE,
 )
 
 _SAFE_ANALYSIS_ONLY_KO_RE = re.compile(
-    r"(?:프롬프트\s*인젝션|악성|의심|위험|비인가|무단).{0,20}"
-    r"(?:으로\s*보임|로\s*판단|로\s*식별|로\s*탐지|로\s*분류)|"
-    r"(?:숨겨진|악성|주입된|신뢰할\s*수\s*없는).{0,10}"
-    r"(?:지시|명령|프롬프트|요청).{0,20}"
-    r"(?:무시|따르지\s*않)"
-    r"보안\s*정책상\s*허용되지\s*않|"
-    r"원본\s*개인\s*정보를\s*직접\s*(?:출력|공유|제공)할\s*수\s*없|"
-    r"변경\s*사항\s*적용\s*거부|"
-    r"데이터\s*접근\s*제한|"
+    r"(?:프롬프트\s*인젝션|주입된\s*명령|숨겨진\s*지시|"
+    r"악성\s*지시|신뢰할\s*수\s*없는\s*콘텐츠|위험한\s*프롬프트)"
+    r".{0,40}"
+    r"(?:탐지|식별|차단|무시|거부|분석)"
+    r"|"
+    r"(?:탐지|식별|차단|무시|거부|분석)"
+    r".{0,40}"
+    r"(?:프롬프트\s*인젝션|주입된\s*명령|숨겨진\s*지시|"
+    r"악성\s*지시|신뢰할\s*수\s*없는\s*콘텐츠|위험한\s*프롬프트)"
 )
 
 
