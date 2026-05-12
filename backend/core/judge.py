@@ -174,7 +174,6 @@ async def full_judge(
                 "strict_safe_advocate": strict_result,
                 "context_vulnerable_advocate": context_result,
                 "consensus": consensus_result,
-                "probability_process": final_state.get("probability_process") or [],
             }
 
         if debug_io:
