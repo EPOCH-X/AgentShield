@@ -341,6 +341,13 @@ async def propose_red_mutation_for_manual_demo(
     )
     retry_prompt = red_prompt
     code_mutation_enabled = _adaptive_code_mutation_enabled()
+    validation_mode = os.getenv(
+        "SITEGPT_RED_VALIDATION_MODE",
+        os.getenv("DEMO_RED_VALIDATION_MODE", "penalty"),
+    ).strip().lower()
+    if validation_mode not in {"strict", "penalty", "off"}:
+        validation_mode = "penalty"
+    validation_penalty_reason = ""
 
     for generation_attempt in range(1, generation_attempts + 1):
         new_attack_raw: str = await llm.generate(retry_prompt, role="red")
@@ -357,11 +364,60 @@ async def propose_red_mutation_for_manual_demo(
         if not _stripped_attack or new_attack.lstrip().startswith("[Error]"):
             invalid_reason = "empty generation" if not _stripped_attack else "LLM error response"
         else:
-            is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+            if validation_mode == "off":
+                is_valid, invalid_reason = True, ""
+            else:
+                is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+            if not is_valid and validation_mode == "penalty":
+                validation_penalty_reason = invalid_reason
+                _write_sitegpt_red_debug(
+                    {
+                        "ts": datetime.utcnow().isoformat(),
+                        "category": category,
+                        "subcategory": subcategory,
+                        "round": round_num,
+                        "attempt": generation_attempt,
+                        "valid": True,
+                        "accepted_with_penalty": True,
+                        "reason": invalid_reason,
+                        "raw_len": len(new_attack_raw or ""),
+                        "normalized_len": len(new_attack or ""),
+                        "code_mutation_strategy": "",
+                        "attack_preview": (new_attack or "")[:1200],
+                    }
+                )
+                is_valid = True
+                break
             if is_valid and code_mutation_enabled:
+                pre_mutation_attack = new_attack
                 new_attack, code_mutation_strategy = apply_code_mutation(new_attack, round_num)
                 new_attack = normalize_attack_prompt_output(new_attack)
-                is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+                if validation_mode == "off":
+                    is_valid, invalid_reason = bool(new_attack.strip()), ""
+                else:
+                    is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+                if not is_valid and validation_mode == "penalty":
+                    validation_penalty_reason = f"code mutation skipped: {invalid_reason}"
+                    new_attack = pre_mutation_attack
+                    code_mutation_strategy = ""
+                    _write_sitegpt_red_debug(
+                        {
+                            "ts": datetime.utcnow().isoformat(),
+                            "category": category,
+                            "subcategory": subcategory,
+                            "round": round_num,
+                            "attempt": generation_attempt,
+                            "valid": True,
+                            "accepted_with_penalty": True,
+                            "reason": validation_penalty_reason,
+                            "raw_len": len(new_attack_raw or ""),
+                            "normalized_len": len(new_attack or ""),
+                            "code_mutation_strategy": "",
+                            "attack_preview": (new_attack or "")[:1200],
+                        }
+                    )
+                    is_valid = True
+                    break
                 if is_valid:
                     _write_sitegpt_red_debug(
                         {
@@ -449,7 +505,9 @@ async def propose_red_mutation_for_manual_demo(
             f"defense={defense_signal.get('label')}; "
             f"pivot={defense_signal.get('guidance')}; "
             f"failure_mode={target_failure_mode}; "
-            f"domain={domain_context.get('domain') if domain_context else 'unknown'}"
+            f"domain={domain_context.get('domain') if domain_context else 'unknown'}; "
+            f"validation_mode={validation_mode}; "
+            f"validation_penalty={validation_penalty_reason or 'none'}"
         ),
     }
 

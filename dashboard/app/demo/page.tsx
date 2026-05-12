@@ -1390,7 +1390,7 @@ export default function DemoPage() {
                 </div>
               )}
               {attackJudge.result && (() => {
-                const cat = resolveDemoCategory(attackJudge.result!.category);
+                const cat = normalizeCategory(attackJudge.result!.category);
                 const danger = CATEGORY_DANGER[cat];
                 if (!danger) return null;
                 const catColor = CATEGORY_COLORS[cat] ?? "text-error";
@@ -1528,10 +1528,10 @@ export default function DemoPage() {
                       {attackJudge.status === "done" ? "Judge Result" : "Judge 대기"}
                     </p>
                     {(() => {
-                      const category = resolveDemoCategory(attackJudge.result?.category);
+                      const category = normalizeCategory(attackJudge.result?.category);
                       return (
                         <h2 className={`mt-1 break-words font-headline text-3xl font-black ${CATEGORY_COLORS[category] ?? "text-on-surface"}`}>
-                          {category} · {CATEGORY_LABELS[category] ?? "판정"}
+                          {category ? `${category} · ${CATEGORY_LABELS[category]}` : "카테고리 판정 대기"}
                         </h2>
                       );
                     })()}

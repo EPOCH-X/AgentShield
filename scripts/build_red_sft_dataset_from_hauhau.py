@@ -38,7 +38,6 @@ from backend.config import settings
 
 SFT_SEED_OLLAMA_OPTIONS = {
     "num_ctx": 131072,
-    "num_predict": 8192,
     "temperature": 1,
     "top_p": 0.95,
     "top_k": 20,
@@ -139,6 +138,7 @@ async def main() -> int:
     )
     parser.add_argument("--code-mutation", dest="code_mutation", action="store_true", default=settings.RED_SFT_SEED_CODE_MUTATION)
     parser.add_argument("--no-code-mutation", dest="code_mutation", action="store_false")
+    parser.add_argument("--pyrit-converter", action="store_true", help="Apply PyRIT mechanical converters after validation. Default off for clean SFT data.")
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args()
 
@@ -157,11 +157,14 @@ async def main() -> int:
         validate_sft_seed_output,
     )
     from backend.core.mutation_engine import apply_code_mutation
-    from backend.core.pyrit_converter import apply_pyrit_converter
     from scripts.generate_red_attack_prompts_only import (
         _load_items,
         _raw_seed_rows,
     )
+    if args.pyrit_converter:
+        from backend.core.pyrit_converter import apply_pyrit_converter
+    else:
+        apply_pyrit_converter = None
 
     if args.seed is not None:
         random.seed(args.seed)
@@ -247,6 +250,7 @@ async def main() -> int:
         encoding_index = (seed_index - 1) % 11
         carrier = get_carrier_for_seed(seed_index - 1)
         carrier_name = carrier["name"]
+        seed_ollama_options = {**SFT_SEED_OLLAMA_OPTIONS, "num_predict": args.red_max_tokens}
 
         for attempt in range(1, args.generation_attempts + 1):
             raw = await llm.generate(
@@ -254,7 +258,7 @@ async def main() -> int:
                 role="red",
                 max_tokens=args.red_max_tokens,
                 system_prompt_override=system_prompt,
-                options_override=SFT_SEED_OLLAMA_OPTIONS,
+                options_override=seed_ollama_options,
             )
             if isinstance(raw, str) and raw.startswith("[Error]"):
                 final_reason = raw
@@ -278,14 +282,53 @@ async def main() -> int:
                     ok, reason, evidence = False, "duplicate attack prompt", ""
                 else:
                     seen.add(dedup_key)
-                    try:
-                        attack_prompt, pyrit_converter_strategy = await apply_pyrit_converter(
-                            attack_prompt, encoding_index
+                    if apply_pyrit_converter is not None:
+                        try:
+                            attack_prompt, pyrit_converter_strategy = await apply_pyrit_converter(
+                                attack_prompt, encoding_index
+                            )
+                        except Exception as exc:
+                            # 컨버터 실패해도 원문 그대로 통과 (메인 루프 보호)
+                            pyrit_converter_strategy = f"ERROR: {type(exc).__name__}: {exc}"
+                            print(f"[WARN] seed={seed_index} pyrit converter failed: {pyrit_converter_strategy}")
+                        ok_after_pyrit, pyrit_reason, pyrit_evidence = validate_sft_seed_output(
+                            attack_prompt,
+                            min_chars=args.min_attack_chars,
+                            max_chars=args.max_attack_chars,
+                            carrier=carrier_name,
                         )
-                    except Exception as exc:
-                        # 컨버터 실패해도 원문 그대로 통과 (메인 루프 보호)
-                        pyrit_converter_strategy = f"ERROR: {type(exc).__name__}: {exc}"
-                        print(f"[WARN] seed={seed_index} pyrit converter failed: {pyrit_converter_strategy}")
+                        if not ok_after_pyrit:
+                            seen.discard(dedup_key)
+                            ok, reason, evidence = False, f"pyrit output rejected: {pyrit_reason}", pyrit_evidence
+                            pyrit_converter_strategy = f"{pyrit_converter_strategy}|REJECTED"
+                            final_reason = reason
+                            rejection_counts[reason] += 1
+                            rejected_records.append(
+                                {
+                                    "seed_index": seed_index,
+                                    "attempt": attempt,
+                                    "category": category,
+                                    "subcategory": subcategory,
+                                    "domain": domain,
+                                    "carrier": carrier_name,
+                                    "encoding_index": encoding_index,
+                                    "rejection_reason": reason,
+                                    "rejection_evidence": evidence,
+                                    "raw_output": str(raw or ""),
+                                    "raw_output_len": len(str(raw or "")),
+                                    "normalized_output": attack_prompt,
+                                    "normalized_output_len": len(attack_prompt),
+                                    "pyrit_converter_strategy": pyrit_converter_strategy,
+                                }
+                            )
+                            print(f"[RETRY] seed={seed_index} attempt={attempt} rejected after pyrit: {pyrit_reason}")
+                            retry_prompt = build_sft_retry_prompt(
+                                base_prompt=generation_prompt,
+                                rejection_reason=pyrit_reason,
+                                attempt=attempt,
+                                evidence=pyrit_evidence,
+                            )
+                            continue
                     accepted_prompt = attack_prompt
                     final_reason = ""
                     break
@@ -379,7 +422,7 @@ async def main() -> int:
                 "source_seed_id": seed_row.get("id") or seed_row.get("seed_id") or "",
                 "code_mutation_strategy": code_strategy,
                 "pyrit_converter_strategy": pyrit_converter_strategy,
-                "ollama_options": SFT_SEED_OLLAMA_OPTIONS,
+                "ollama_options": seed_ollama_options,
                 "fingerprint": fingerprint,
                 "attack_prompt": accepted_prompt,
                 "attack_prompt_len": len(accepted_prompt),

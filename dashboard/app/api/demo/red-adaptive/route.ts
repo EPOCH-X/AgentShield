@@ -51,6 +51,7 @@ function runRedAdaptive(prompt: string, category: string): Promise<{ status: num
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
   const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
   const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
+  const validationMode = e("DEMO_RED_VALIDATION_MODE", "penalty");
 
   return new Promise((resolve) => {
     const child = spawn(
@@ -74,6 +75,7 @@ function runRedAdaptive(prompt: string, category: string): Promise<{ status: num
           RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "false"),
           RED_CAMPAIGN_STOP_ON_VULNERABLE: "true",
           RED_CAMPAIGN_GENERATION_ATTEMPTS: generationAttempts,
+          RED_CAMPAIGN_VALIDATION_MODE: validationMode,
         },
       }
     );
@@ -100,6 +102,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
   const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
   const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
+  const validationMode = e("DEMO_RED_VALIDATION_MODE", "penalty");
   const campaignId = `demo-red-${Date.now().toString(36)}`;
   const seedPath = path.join(os.tmpdir(), `${campaignId}.json`);
   const livePath = path.join(root, "data", "red_campaigns", "live", `${campaignId}.jsonl`);
@@ -139,6 +142,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
           "--no-probe-seed-as-round-zero",
           "--verify-tool-execution",
           "--stop-on-vulnerable",
+          "--validation-mode", validationMode,
           ...(redModel ? ["--red-model", redModel] : []),
         ],
         {
@@ -149,6 +153,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
             RED_CAMPAIGN_CONTINUE_AFTER_SUCCESS: "false",
             RED_CAMPAIGN_STOP_ON_VULNERABLE: "true",
             RED_CAMPAIGN_GENERATION_ATTEMPTS: generationAttempts,
+            RED_CAMPAIGN_VALIDATION_MODE: validationMode,
           },
         },
       );
