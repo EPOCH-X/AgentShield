@@ -84,7 +84,7 @@ def _versioned(path: Path) -> Path:
     if not path.exists():
         return path
     i = 2
-    stem = re.sub(r"_v\d+$", "", path.stem)
+    stem = path.stem
     while True:
         candidate = path.with_name(f"{stem}_v{i}{path.suffix}")
         if not candidate.exists():
@@ -310,6 +310,18 @@ async def main() -> int:
                 }
             )
             print(f"[RETRY] seed={seed_index} attempt={attempt} rejected: {reason}")
+            if "stale" in reason or "generic" in reason:
+                retry_seed_index = (seed_index - 1) + attempt
+                generation_prompt = build_sft_seed_prompt(
+                    category=category,
+                    subcategory=subcategory,
+                    domain=domain,
+                    prior_fingerprints=prior_fingerprints,
+                    seed_index=retry_seed_index,
+                )
+                carrier = get_carrier_for_seed(retry_seed_index)
+                carrier_name = carrier["name"]
+                encoding_index = retry_seed_index % 11
             retry_prompt = build_sft_retry_prompt(
                 base_prompt=generation_prompt,
                 rejection_reason=reason,
