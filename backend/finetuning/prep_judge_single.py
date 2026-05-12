@@ -615,7 +615,7 @@ class ConsensusOnlySFTProcessor:
             # - 일반 vulnerable은 2x
             # - vulnerable_compliance / vulnerable_data_exposure는 3x
             if expected == "vulnerable":
-                repeat = 1
+                repeat = 2
 
             if response_type in {
                 "vulnerable_compliance_response",
