@@ -309,6 +309,7 @@ async def propose_red_mutation_for_manual_demo(
     target_failure_mode = select_target_failure_mode(
         category, round_num, prev_failure_modes=ufm
     )
+    defense_signal = analyze_defense_signal(target_response, judge_detail)
 
     prev_techniques_for_prompt = ut if not adaptive_agent._detect_stagnation() else []
 
@@ -442,7 +443,14 @@ async def propose_red_mutation_for_manual_demo(
         "mutated_prompt": new_attack.strip(),
         "techniques": round_techniques,
         "failure_mode": target_failure_mode,
-        "detail": "",
+        "detail": (
+            f"response_driven={bool(target_response.strip())}; "
+            f"prompt_round={round_num}; "
+            f"defense={defense_signal.get('label')}; "
+            f"pivot={defense_signal.get('guidance')}; "
+            f"failure_mode={target_failure_mode}; "
+            f"domain={domain_context.get('domain') if domain_context else 'unknown'}"
+        ),
     }
 
 

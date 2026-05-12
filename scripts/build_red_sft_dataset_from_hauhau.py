@@ -84,7 +84,7 @@ def _versioned(path: Path) -> Path:
     if not path.exists():
         return path
     i = 2
-    stem = re.sub(r"_v\d+$", "", path.stem)
+    stem = path.stem
     while True:
         candidate = path.with_name(f"{stem}_v{i}{path.suffix}")
         if not candidate.exists():
@@ -109,7 +109,13 @@ async def main() -> int:
     parser.add_argument("--report-output", default="")
     parser.add_argument("--category", default="ALL")
     parser.add_argument("--seed-mode", choices=["raw", "file", "hybrid"], default="raw")
-    parser.add_argument("--domains", default="finance,healthcare,rag,hr,government,ecommerce")
+    parser.add_argument(
+        "--domains",
+        default=os.getenv(
+            "RED_SFT_DOMAINS",
+            "general_assistant,finance,healthcare,rag,hr,government,ecommerce",
+        ),
+    )
     parser.add_argument("--seeds", type=int, default=20)
     parser.add_argument("--rounds", type=int, default=1, help="Deprecated for SFT seed generation; one standalone prompt per seed is generated.")
     parser.add_argument("--generation-attempts", type=int, default=3)
@@ -304,6 +310,18 @@ async def main() -> int:
                 }
             )
             print(f"[RETRY] seed={seed_index} attempt={attempt} rejected: {reason}")
+            if "stale" in reason or "generic" in reason:
+                retry_seed_index = (seed_index - 1) + attempt
+                generation_prompt = build_sft_seed_prompt(
+                    category=category,
+                    subcategory=subcategory,
+                    domain=domain,
+                    prior_fingerprints=prior_fingerprints,
+                    seed_index=retry_seed_index,
+                )
+                carrier = get_carrier_for_seed(retry_seed_index)
+                carrier_name = carrier["name"]
+                encoding_index = retry_seed_index % 11
             retry_prompt = build_sft_retry_prompt(
                 base_prompt=generation_prompt,
                 rejection_reason=reason,

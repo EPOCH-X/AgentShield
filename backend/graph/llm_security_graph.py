@@ -170,8 +170,18 @@ async def run_scan(
     target_url: str,
     target_config: Optional[dict[str, Any]] = None,
     phase1_result_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
+    max_phase: Optional[int] = None,
+    max_failed_attempts: Optional[int] = None,
 ) -> ScanState:
     """전체 스캔 실행 진입점"""
+    if max_phase is not None or max_failed_attempts is not None:
+        logger.info(
+            "[scan:%s] run_scan compatibility args max_phase=%s max_failed_attempts=%s",
+            session_id,
+            max_phase,
+            max_failed_attempts,
+        )
+
     effective_target_config = target_config or {}
     adapter_config = TargetAdapterConfig.from_input(
         target_url=target_url,

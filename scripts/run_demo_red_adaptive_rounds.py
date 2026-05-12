@@ -163,6 +163,7 @@ def main() -> int:
         campaign_id,
         "--conversation-mode",
         "multi",
+        "--no-probe-seed-as-round-zero",
         "--verify-tool-execution",
     ]
     if args.red_model:
