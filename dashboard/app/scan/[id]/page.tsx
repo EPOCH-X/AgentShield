@@ -219,15 +219,15 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
       if (isMock) {
         s = { ...MOCK_SCAN_STATUS, session_id: sessionId };
       } else {
-        try {
-          s = await getScanStatus(sessionId);
-        } catch {
-          s = { ...MOCK_SCAN_STATUS, session_id: sessionId };
-        }
+        s = await getScanStatus(sessionId);
       }
       setStatus(s);
       elapsedRef.current = s.elapsed_seconds || elapsedRef.current;
       setElapsed(formatElapsed(elapsedRef.current));
+
+      if (s.status === "queued") {
+        addLog("INFO", "스캔 작업이 백그라운드 큐에 등록되었습니다.");
+      }
 
       if (s.status === "running") {
         const phaseLabel = PHASE_LABELS[s.phase] || `Phase ${s.phase}`;
@@ -243,11 +243,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
             const last = partial.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
             if (last) setLatestAttackPrompt(last);
           } catch {
-            const mockPartial = MOCK_SCAN_RESULTS.slice(0, Math.min(
-              Math.ceil((s.completed_tests / s.total_tests) * MOCK_SCAN_RESULTS.length),
-              MOCK_SCAN_RESULTS.length
-            )).map((r) => ({ ...r, session_id: sessionId }));
-            enqueueNewResults(mockPartial);
+            addLog("ERROR", "실시간 결과를 아직 불러오지 못했습니다.");
           }
         }
       }
@@ -267,9 +263,6 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
           } catch {
             r = [];
           }
-          if (r.length === 0) {
-            r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
-          }
         }
         const fresh = r.filter((x) => !seenIds.current.has(x.id));
         fresh.forEach((x) => seenIds.current.add(x.id));
@@ -278,7 +271,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
         }
         if (pollRef.current) clearInterval(pollRef.current);
       } else if (s.status === "failed") {
-        addLog("ERROR", "스캔 중 오류가 발생했습니다.");
+        addLog("ERROR", s.error_message || "스캔 중 오류가 발생했습니다.");
         if (pollRef.current) clearInterval(pollRef.current);
       }
     } catch (err) {
@@ -334,7 +327,8 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
     : 0;
 
   const strokeDash = (progress / 100) * 100.53;
-  const isRunning = status?.status === "running" || status?.status === "pending";
+  const isRunning =
+    status?.status === "queued" || status?.status === "running" || status?.status === "pending";
   const isDone = status?.status === "completed";
 
   return (
