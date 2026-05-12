@@ -27,8 +27,13 @@ LLM_DEFAULT_NUM_PREDICT: int = int(os.getenv("LLM_DEFAULT_NUM_PREDICT", "1024"))
 MAX_TOOL_LOOPS: int = int(os.getenv("TESTBED_MAX_TOOL_LOOPS", "3"))
 TOOL_GATEWAY_TIMEOUT: int = int(os.getenv("TESTBED_TOOL_GATEWAY_TIMEOUT", "180"))
 
-# weak | strict
-SECURITY_MODE: str = os.getenv("TESTBED_SECURITY_MODE", "weak")
+# TESTBED_SECURITY_MODE is owned by .env.
+# weak   : RL/canary collection; weaker guardrails for positive leak data.
+# medium : default development/demo mode; realistic support bot with moderate masking.
+# strict : defense verification; strongest refusal and sensitive-data protection.
+SECURITY_MODE: str = os.getenv("TESTBED_SECURITY_MODE", "medium").strip().lower()
+if SECURITY_MODE not in {"weak", "medium", "strict"}:
+    SECURITY_MODE = "medium"
 
 # Tool Gateway URL — 로컬 기본값을 둬서 진짜 testbed 연결이 우선되게 한다.
 TOOL_GATEWAY_URL: Optional[str] = os.getenv("TOOL_GATEWAY_URL", "http://localhost:8020")
