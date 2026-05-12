@@ -167,11 +167,11 @@ async def run_benchmark(data_path):
 
         result_row = {
             "row_id": row_idx,
-            "sample_id": row.get(
-                "sample_id",
-            ),
+            "sample_id": row.get("sample_id"),
             "category": category,
             "response_type": response_type,
+            "attack_prompt": attack_prompt,
+            "target_response": target_response,
             "expected_judgment": expected,
             "predicted_judgment": predicted,
             "is_correct": is_correct,
@@ -218,9 +218,7 @@ async def run_benchmark(data_path):
 
         results.append(result_row)
         
-        if (
-            (row_idx + 1) % SAVE_EVERY == 0
-        ):
+        if (row_idx + 1) % SAVE_EVERY == 0:
             save_partial_results(
                 results=results,
                 total=total,
