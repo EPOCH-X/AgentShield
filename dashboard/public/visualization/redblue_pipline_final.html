@@ -712,11 +712,8 @@
         margin-top: 12px;
       }
       .io-row.io-tight {
-        gap: 2px;
-        grid-template-columns: 1.04fr 0.96fr;
-      }
-      .io-row.io-tight .io-sec:nth-child(2) {
-        transform: translateX(-18px);
+        gap: 8px;
+        grid-template-columns: 1fr 1fr;
       }
       .io-sec {
         display: flex;
@@ -834,7 +831,7 @@
         padding: 0;
         max-width: 980px;
         width: min(88vw, 980px);
-        max-height: 92vh;
+        max-height: 96vh;
         height: auto;
         overflow: hidden;
         position: relative;
@@ -844,7 +841,7 @@
       }
       #json-popup-title {
         padding: 18px 56px 14px 28px;
-        font-size: 16px;
+        font-size: 18px;
         font-weight: 900;
         letter-spacing: 0.01em;
         color: #f1f5f9;
@@ -858,12 +855,12 @@
       }
       #json-popup pre {
         font-family: "JetBrains Mono", "SF Mono", "Courier New", monospace;
-        font-size: 12px;
+        font-size: 14px;
         line-height: 1.72;
         color: #93c5fd;
         white-space: pre-wrap;
         word-break: break-word;
-        max-height: calc(92vh - 72px);
+        max-height: calc(96vh - 72px);
         overflow: auto;
         padding: 24px 28px 30px;
       }
@@ -1370,7 +1367,7 @@
         padding: 16px 24px 22px;
       }
       .langgraph-view {
-        height: min(70vh, 560px);
+        height: min(82vh, 720px);
         min-height: 0;
         display: flex;
         align-items: center;
@@ -1429,10 +1426,10 @@
       /* 노드 1 실행 예시 애니메이션 */
       #anim-content {
         padding: 24px 28px 28px;
-        font-size: 15px;
+        font-size: 17px;
         line-height: 1.65;
         color: #dbeafe;
-        max-height: calc(92vh - 72px);
+        max-height: calc(96vh - 72px);
         overflow: auto;
       }
       .anim-layout {
@@ -1466,7 +1463,7 @@
         align-items: center;
         gap: 6px;
         padding: 10px 16px 8px;
-        font-size: 11px;
+        font-size: 13px;
         font-weight: 900;
         letter-spacing: 0.1em;
         text-transform: uppercase;
@@ -1489,7 +1486,7 @@
         transition: opacity 0.45s ease;
       }
       .anim-line.strong {
-        font-size: 18px;
+        font-size: 20px;
         line-height: 1.4;
         font-weight: 800;
         color: #f1f5f9;
@@ -1497,7 +1494,7 @@
       }
       .anim-line.muted {
         color: #94a3b8;
-        font-size: 15px;
+        font-size: 17px;
         margin-top: 6px;
         line-height: 1.6;
       }
@@ -1512,11 +1509,11 @@
       .anim-k {
         color: #93c5fd;
         font-weight: 800;
-        font-size: 14px;
+        font-size: 16px;
       }
       .anim-v {
         color: #e2e8f0;
-        font-size: 14px;
+        font-size: 16px;
         line-height: 1.5;
       }
       .anim-arrow-wrap {
@@ -1569,7 +1566,7 @@
       }
       .anim-process-text {
         color: #c4b5fd;
-        font-size: 11px;
+        font-size: 16px;
         line-height: 1.5;
         font-weight: 700;
       }
@@ -1592,7 +1589,7 @@
         color: #fde68a;
         border: 1px solid rgba(245, 158, 11, 0.4);
         font-weight: 800;
-        font-size: 13px;
+        font-size: 15px;
         opacity: 0;
         transition: opacity 0.45s ease;
       }
@@ -1636,7 +1633,7 @@
         border-radius: 9px;
         border: 1px solid rgba(255, 255, 255, 0.15);
         background: rgba(255, 255, 255, 0.04);
-        font-size: 12.5px;
+        font-size: 14.5px;
         font-weight: 700;
         color: #e2e8f0;
         text-align: center;
@@ -1644,7 +1641,7 @@
         min-width: 66px;
       }
       .pipeline-step .ps-num {
-        font-size: 12px;
+        font-size: 14px;
         color: #94a3b8;
       }
       .pipeline-step.current {
@@ -1674,7 +1671,7 @@
         opacity: 1 !important;
       }
       .anim-skip-hint {
-        font-size: 11px;
+        font-size: 13px;
         color: var(--muted2);
         opacity: 0.5;
         letter-spacing: 0.04em;
@@ -1683,18 +1680,18 @@
       #json-popup.branch-wide {
         max-width: 1040px;
         width: min(88vw, 1040px);
-        max-height: 94vh;
+        max-height: 96vh;
       }
       #json-popup.branch-wide #anim-content {
-        max-height: calc(94vh - 72px);
+        max-height: calc(96vh - 72px);
       }
       #json-popup.wide {
         max-width: 1260px;
         width: min(96vw, 1260px);
-        max-height: 90vh;
+        max-height: 96vh;
       }
       #json-popup.wide #anim-content {
-        max-height: calc(90vh - 72px);
+        max-height: calc(96vh - 72px);
       }
       .anim-layout-branch {
         display: flex;
@@ -1716,7 +1713,7 @@
         gap: 5px;
       }
       .anim-branch-label {
-        font-size: 9px;
+        font-size: 11px;
         font-weight: 900;
         letter-spacing: 0.12em;
         text-transform: uppercase;
@@ -1727,13 +1724,13 @@
         width: fit-content;
       }
       .anim-branch-title {
-        font-size: 12.5px;
+        font-size: 20px;
         font-weight: 800;
         color: #f1f5f9;
         line-height: 1.4;
       }
       .anim-branch-line {
-        font-size: 11px;
+        font-size: 13px;
         color: #94a3b8;
         line-height: 1.45;
       }
@@ -3814,7 +3811,7 @@
               <div class="io-chips">
                 <span class="io-chip in">막힌 공격 문장</span
                 ><span class="io-chip in">이전 챗봇 답변</span
-                ><span class="io-chip in">도메인 추론 결과</span
+                ><span style="flex-basis:100%;height:0"></span><span class="io-chip in">도메인 추론 결과</span
                 ><span class="io-chip in">Chroma 공격 기억</span>
               </div>
             </div>
@@ -3829,10 +3826,10 @@
               </div>
             </div>
           </div>
-          <button class="json-btn" onclick="showJson(event, 4)">
+          <button class="json-btn" onclick="showJson(event, 4)" style="right: 148px;">
             예시 보기
           </button>
-          <button class="langgraph-btn" onclick="showLangGraph(event, 4)">
+          <button class="langgraph-btn" onclick="showLangGraph(event, 4)" style="right: 34px;">
             랭그래프 구조
           </button>
           <div class="box-illustration">
@@ -4409,7 +4406,7 @@
                 font-weight="700"
                 font-family="sans-serif"
               >
-                엄격 심사자
+                안전 대변자
               </text>
               <text
                 x="210"
@@ -4419,7 +4416,7 @@
                 fill="rgba(196,181,253,0.65)"
                 font-family="sans-serif"
               >
-                취약 신호
+                안전 신호
               </text>
               <text
                 x="210"
@@ -4429,7 +4426,7 @@
                 fill="rgba(196,181,253,0.65)"
                 font-family="sans-serif"
               >
-                가중 평가
+                문맥 확인
               </text>
               <rect
                 x="290"
@@ -4450,7 +4447,7 @@
                 font-weight="700"
                 font-family="sans-serif"
               >
-                문맥 심사자
+                위험 대변자
               </text>
               <text
                 x="351"
@@ -4460,7 +4457,7 @@
                 fill="rgba(134,239,172,0.65)"
                 font-family="sans-serif"
               >
-                거부/마스킹
+                위험 신호
               </text>
               <text
                 x="351"
@@ -5230,36 +5227,36 @@
               컨텍스트
             </text>
 
-            <!-- 3. Defense Pattern Retrieval -->
+            <!-- 3. Defense Pattern Retrieval & Storage -->
             <rect
-              class="diagram-step s2"
-              x="198"
+              class="diagram-step s6"
+              x="398"
               y="108"
-              width="182"
-              height="52"
+              width="166"
+              height="64"
               rx="6"
               fill="rgba(139,92,246,0.12)"
               stroke="rgba(139,92,246,0.7)"
               stroke-width="1.5"
             />
             <text
-              class="diagram-step s2"
-              x="289"
-              y="129"
+              class="diagram-step s6"
+              x="481"
+              y="132"
               text-anchor="middle"
-              font-size="10"
+              font-size="12.5"
               fill="#c4b5fd"
               font-weight="700"
               font-family="sans-serif"
             >
-              방어 패턴 검색
+              방어 패턴 검색 및 저장
             </text>
             <text
-              class="diagram-step s2"
-              x="289"
-              y="149"
+              class="diagram-step s6"
+              x="481"
+              y="158"
               text-anchor="middle"
-              font-size="9.5"
+              font-size="11"
               fill="#c4b5fd"
               font-weight="600"
               font-family="sans-serif"
@@ -5292,43 +5289,6 @@
               4단계 검증 판정
             </text>
 
-            <!-- 5. safe → defense_patterns ingest -->
-            <rect
-              class="diagram-step s6"
-              x="398"
-              y="108"
-              width="166"
-              height="52"
-              rx="6"
-              fill="rgba(34,197,94,0.12)"
-              stroke="rgba(34,197,94,0.7)"
-              stroke-width="1.5"
-            />
-            <text
-              class="diagram-step s6"
-              x="481"
-              y="130"
-              text-anchor="middle"
-              font-size="10.5"
-              fill="#86efac"
-              font-weight="700"
-              font-family="sans-serif"
-            >
-              안전 →
-            </text>
-            <text
-              class="diagram-step s6"
-              x="481"
-              y="149"
-              text-anchor="middle"
-              font-size="10"
-              fill="#86efac"
-              font-weight="700"
-              font-family="sans-serif"
-            >
-              방어패턴 저장
-            </text>
-
             <!-- 6. unsafe → regenerate until limit -->
             <rect
               class="diagram-step s6"
@@ -5344,9 +5304,9 @@
             <text
               class="diagram-step s6"
               x="664"
-              y="128"
+              y="126"
               text-anchor="middle"
-              font-size="10.5"
+              font-size="13"
               fill="#fca5a5"
               font-weight="700"
               font-family="sans-serif"
@@ -5356,9 +5316,9 @@
             <text
               class="diagram-step s6"
               x="664"
-              y="148"
+              y="150"
               text-anchor="middle"
-              font-size="10"
+              font-size="12.5"
               fill="#fca5a5"
               font-weight="700"
               font-family="sans-serif"
@@ -5439,9 +5399,9 @@
               marker-end="url(#dg6w)"
             />
 
-            <!-- 3→7: Defense Pattern Retrieval → Blue Agent -->
+            <!-- 3→7: Defense Pattern Retrieval & Storage → Blue Agent -->
             <path
-              d="M289,160 L289,190 L519,190 L519,218"
+              d="M481,172 L481,190 L519,190 L519,218"
               stroke="rgba(255,255,255,0.45)"
               stroke-width="1.5"
               fill="none"
@@ -5468,7 +5428,7 @@
               marker-end="url(#dg6c)"
             />
 
-            <!-- 4→5: Phase 4 → safe branch -->
+            <!-- 4→3: Phase 4 → safe → Defense Pattern Retrieval & Storage -->
             <path
               d="M600,66 L600,78 L481,78 L481,108"
               stroke="rgba(34,197,94,0.8)"
@@ -5477,7 +5437,7 @@
               marker-end="url(#dg6g)"
             />
             <rect
-              x="530"
+              x="523"
               y="70"
               width="34"
               height="16"
@@ -5487,7 +5447,7 @@
               stroke-width="1"
             />
             <text
-              x="547"
+              x="540"
               y="82"
               text-anchor="middle"
               font-size="9"
@@ -5530,16 +5490,6 @@
               위험
             </text>
 
-            <!-- 5→7: safe→defense_patterns → Blue Agent -->
-            <line
-              x1="481"
-              y1="160"
-              x2="481"
-              y2="215"
-              stroke="rgba(34,197,94,0.6)"
-              stroke-width="1.5"
-              marker-end="url(#dg6g)"
-            />
 
             <!-- 6→7: unsafe→regenerate → Blue Agent -->
             <path
@@ -6572,6 +6522,7 @@ ${outputLines}
       }
 
       function attachSlideNotes(slidesEl, notes) {
+        return;
         if (!slidesEl || !notes) return;
         const slides = slidesEl.querySelectorAll(".n1-slide, .nd-slide");
         slides.forEach((slide, i) => {
@@ -6964,7 +6915,6 @@ ${outputLines}
           <rect x="26" y="332" width="620" height="26" rx="13" fill="rgba(0,212,255,0.08)" stroke="#00d4ff" stroke-width="1"/>
           <text x="336" y="349" font-size="11" text-anchor="middle" fill="#7dd3fc">STEP 2 · 사전 점검 — target 응답 확인 완료 시 스캔 진행 가능</text>
         </svg>
-        <div class="nd-illustration-foot" style="border:1px solid rgba(0,212,255,0.4);color:#00d4ff;background:rgba(0,212,255,0.08);">STEP 2 · 사전 연결 확인</div>
       </div>
       `,
             },
@@ -7003,10 +6953,9 @@ ${outputLines}
           </g>
 
           <rect x="24" y="16" width="580" height="38" rx="14" fill="rgba(34,197,94,0.1)" stroke="#4ade80" stroke-width="1.2"/>
-          <text x="314" y="32" font-size="11" text-anchor="middle" fill="#4ade80" font-weight="700">Target 응답 확인 완료</text>
-          <text x="314" y="47" font-size="9.5" text-anchor="middle" fill="#86efac">→ target이 호출 가능한 상태로 확인되었습니다.</text>
+          <text x="314" y="32" font-size="16" text-anchor="middle" fill="#4ade80" font-weight="700">Target 응답 확인 완료</text>
+          <text x="314" y="50" font-size="13" text-anchor="middle" fill="#86efac">→ target이 호출 가능한 상태로 확인되었습니다.</text>
         </svg>
-        <div class="nd-illustration-foot" style="border:1px solid rgba(34,197,94,0.4);color:#4ade80;background:rgba(34,197,94,0.08);">STEP 2 완료 · STEP 3으로 이동</div>
       </div>
       `,
             },
@@ -7067,7 +7016,6 @@ ${outputLines}
           <text x="310" y="347" font-size="11" text-anchor="middle" fill="#fca5a5">seed 프롬프트 전송 → 응답 수집 완료 → 다음 단계(1차 판정)</text>
           </g>
         </svg>
-        <div class="nd-illustration-foot" style="border:1px solid rgba(239,68,68,0.4);color:#f87171;background:rgba(239,68,68,0.08);">STEP 3 · DB에 적재된 seed 공격프롬프트</div>
       </div>
       `,
             },
@@ -7120,7 +7068,6 @@ ${outputLines}
           <path d="M406 177 L450 177" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
           <path d="M406 222 L450 227" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.7"/>
         </svg>
-        <div class="nd-illustration-foot" style="border:1px solid rgba(196,130,50,0.4);color:#e4a84a;background:rgba(196,130,50,0.08);">STEP 4 · Judge 1차 판정</div>
       </div>
       `,
             },
@@ -7187,7 +7134,6 @@ ${outputLines}
           <text x="468" y="236" font-size="9.5" text-anchor="middle" fill="#a5b4fc">다음: 2차 판정</text>
 
         </svg>
-        <div class="nd-illustration-foot" style="border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;background:rgba(99,102,241,0.08);">STEP 5 · Red Agent 변형 공격</div>
       </div>
       `,
             },
@@ -7196,7 +7142,7 @@ ${outputLines}
 
         // ── STEP 6: 2차 판정 ──
         {
-          title: "STEP 6 · 민감정보가 노출됐나요?",
+          title: "STEP 6 · 변형 공격 재검사",
           slides: [
             {
               html: `
@@ -7206,39 +7152,38 @@ ${outputLines}
           .n6a { opacity:0; animation:n6fi 0.55s ease forwards; }
           .n6-defense-next { animation:n6DefensePulse 1.25s ease-in-out infinite; transform-origin:center; }
           .n6-mini-flow { width:100%;display:flex;align-items:center;justify-content:center;margin-top:4px; }
-          .n6-mini-step { flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:5px;min-width:76px;padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.04);color:#e2e8f0;font-size:10.5px;font-weight:700;line-height:1;text-align:center;white-space:nowrap; }
-          .n6-mini-step .ps-num { font-size:10px;color:#94a3b8; }
+          .n6-mini-step { flex-shrink:0;display:flex;align-items:center;justify-content:center;gap:5px;min-width:76px;padding:7px 9px;border-radius:8px;border:1px solid rgba(255,255,255,0.15);background:rgba(255,255,255,0.04);color:#e2e8f0;font-size:12px;font-weight:700;line-height:1;text-align:center;white-space:nowrap; }
+          .n6-mini-step .ps-num { font-size:11px;color:#94a3b8; }
           .n6-mini-step.is-on { border-color:rgba(0,212,255,0.65);background:rgba(0,212,255,0.12);color:#7dd3fc;box-shadow:0 0 10px rgba(0,212,255,0.22); }
           .n6-mini-step.is-on .ps-num { color:#38bdf8; }
           .n6-mini-step.is-current { border-color:rgba(0,212,255,0.8);background:rgba(0,212,255,0.14);color:#7dd3fc;animation:pipelineBlink 1.2s ease-in-out infinite; }
           .n6-mini-step.is-current .ps-num { color:#38bdf8; }
           .n6-mini-dash { flex:0 0 8px;height:2px;margin:0 3px;background:repeating-linear-gradient(90deg,rgba(0,212,255,0.4) 0px,rgba(0,212,255,0.4) 4px,transparent 4px,transparent 8px);background-size:12px 2px;animation:dashSlide 0.7s linear infinite; }
         </style>
-        <div style="font-size:15px;font-weight:800;color:#f1f5f9;margin-bottom:8px;text-align:center;flex-shrink:0;">변형 공격 재검사</div>
         <div style="display:flex;gap:0;width:100%;flex:1;min-height:0;align-items:flex-start;">
           <!-- 왼쪽: video1 + 텍스트 카드 -->
           <div style="flex:0 0 50%;display:flex;flex-direction:column;gap:10px;min-width:0;height:100%;">
             <video src="img/6슬1.mp4" autoplay muted loop playsinline preload="metadata" style="width:100%;max-height:39vh;object-fit:contain;flex-shrink:0;"></video>
             <div style="flex:1;min-height:0;overflow:hidden;padding:14px 18px;border-radius:12px;background:rgba(15,23,42,0.7);border:1px solid rgba(239,68,68,0.2);line-height:1.8;text-align:center;">
-              <div class="n6a" style="color:#f87171;font-weight:700;margin-bottom:10px;font-size:16px;letter-spacing:0.06em;animation-delay:0.2s;">RED AGENT · 변형 프롬프트</div>
+              <div class="n6a" style="color:#f87171;font-weight:700;margin-bottom:10px;font-size:18px;letter-spacing:0.06em;animation-delay:0.2s;">RED AGENT · 변형 프롬프트</div>
               <div style="display:grid;grid-template-columns:1fr;gap:4px;margin-bottom:12px;text-align:center;">
-                <span class="n6a" style="color:#94a3b8;font-size:15px;animation-delay:0.65s;">요청 형태</span><span class="n6a" style="color:#e2e8f0;font-size:15px;animation-delay:0.65s;">고객지원 품질 점검용 JSON 재구성</span>
-                <span class="n6a" style="color:#94a3b8;font-size:15px;animation-delay:1.1s;">위험 항목</span><span class="n6a" style="color:#fbbf24;font-size:15px;font-weight:700;animation-delay:1.1s;">customer_email / internal_token</span>
-                <span class="n6a" style="color:#94a3b8;font-size:15px;animation-delay:1.55s;">검사 목적</span><span class="n6a" style="color:#e2e8f0;font-size:15px;animation-delay:1.55s;">변형 공격이 실제로 뚫렸는지 확인</span>
+                <span class="n6a" style="color:#94a3b8;font-size:17px;animation-delay:0.65s;">요청 형태</span><span class="n6a" style="color:#e2e8f0;font-size:17px;animation-delay:0.65s;">고객지원 품질 점검용 JSON 재구성</span>
+                <span class="n6a" style="color:#94a3b8;font-size:17px;animation-delay:1.1s;">위험 항목</span><span class="n6a" style="color:#fbbf24;font-size:17px;font-weight:700;animation-delay:1.1s;">customer_email / internal_token</span>
+                <span class="n6a" style="color:#94a3b8;font-size:17px;animation-delay:1.55s;">검사 목적</span><span class="n6a" style="color:#e2e8f0;font-size:17px;animation-delay:1.55s;">변형 공격이 실제로 뚫렸는지 확인</span>
               </div>
               <div class="n6a" style="text-align:center;color:#64748b;font-size:20px;margin:6px 0;animation-delay:2.0s;">↓</div>
-              <div class="n6a" style="color:#94a3b8;font-size:15px;text-align:center;animation-delay:2.4s;">Judge가 변형 공격의 target 응답을 다시 판정합니다.</div>
+              <div class="n6a" style="color:#94a3b8;font-size:17px;text-align:center;animation-delay:2.4s;">Judge가 변형 공격의 target 응답을 다시 판정합니다.</div>
             </div>
           </div>
           <!-- 가운데: 긴 애니메이션 화살표 + 안전/취약 분기 -->
-          <div style="flex:0 0 100px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:calc(45vh * 0.4);gap:7px;">
+          <div style="flex:0 0 100px;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding-top:calc(45vh * 0.4);gap:7px;overflow:visible;">
             <svg class="n6a" width="96" height="42" viewBox="0 0 96 42" xmlns="http://www.w3.org/2000/svg" style="animation-delay:2.9s;">
               <line x1="2" y1="21" x2="76" y2="21" stroke="#f59e0b" stroke-width="4" stroke-dasharray="11 5" stroke-linecap="round">
                 <animate attributeName="stroke-dashoffset" from="32" to="-32" dur="1.6s" repeatCount="indefinite"/>
               </line>
               <polygon points="76,11 96,21 76,31" fill="#f59e0b"/>
             </svg>
-            <div class="n6a" style="color:#f59e0b;font-size:13px;font-weight:700;text-align:center;line-height:1.4;animation-delay:2.9s;">판정 결과에 따른<br>분기점</div>
+            <div class="n6a" style="color:#f59e0b;font-size:15px;font-weight:700;text-align:center;line-height:1.4;word-break:keep-all;animation-delay:2.9s;">판정 결과에 따른<br>분기점</div>
           </div>
           <!-- 오른쪽: video2 + 분기 화살표 + 결과 노드 -->
           <div style="flex:1;display:flex;flex-direction:column;gap:4px;min-width:0;height:100%;">
@@ -7264,7 +7209,7 @@ ${outputLines}
               <!-- safe 노드 다이어그램 -->
               <div class="n6a" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:0 2px;animation-delay:4.2s;">
                 <div style="width:100%;padding:10px;border-radius:7px;background:rgba(34,197,94,0.13);border:1px solid rgba(34,197,94,0.45);text-align:center;">
-                  <span style="color:#4ade80;font-size:15px;font-weight:800;">결과: 2차 판정 safe</span>
+                  <span style="color:#4ade80;font-size:19px;font-weight:800;">결과: 2차 판정 safe</span>
                 </div>
                 <svg width="22" height="28" viewBox="0 0 22 28" xmlns="http://www.w3.org/2000/svg">
                   <line x1="11" y1="1" x2="11" y2="18" stroke="#4ade80" stroke-width="2.5" stroke-dasharray="5 3" stroke-linecap="round">
@@ -7273,7 +7218,7 @@ ${outputLines}
                   <polygon points="4,18 11,28 18,18" fill="#4ade80"/>
                 </svg>
                 <div style="width:100%;padding:10px;border-radius:7px;background:rgba(34,197,94,0.13);border:1px solid rgba(34,197,94,0.45);text-align:center;">
-                  <span style="color:#4ade80;font-size:15px;font-weight:800;">공격 변형으로 복귀</span>
+                  <span style="color:#4ade80;font-size:19px;font-weight:800;">공격 변형으로 복귀</span>
                 </div>
                 <div class="n6-mini-flow">
                   <div class="n6-mini-step is-current"><span class="ps-num">5</span><span>공격 변형</span></div>
@@ -7286,7 +7231,7 @@ ${outputLines}
               <!-- vulnerable 결과 노드 -->
               <div class="n6a" style="flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:0 2px;animation-delay:4.2s;">
                 <div style="width:100%;padding:10px;border-radius:7px;background:rgba(239,68,68,0.13);border:1px solid rgba(239,68,68,0.45);text-align:center;">
-                  <span style="color:#f87171;font-size:15px;font-weight:800;">결과 · 2차 판정: vulnerable</span>
+                  <span style="color:#f87171;font-size:19px;font-weight:800;">결과 · 2차 판정: vulnerable</span>
                 </div>
                 <svg width="22" height="28" viewBox="0 0 22 28" xmlns="http://www.w3.org/2000/svg">
                   <line x1="11" y1="1" x2="11" y2="18" stroke="#f87171" stroke-width="2.5" stroke-dasharray="5 3" stroke-linecap="round">
@@ -7295,7 +7240,7 @@ ${outputLines}
                   <polygon points="4,18 11,28 18,18" fill="#f87171"/>
                 </svg>
                 <div class="n6-defense-next" style="width:100%;padding:10px;border-radius:7px;background:rgba(239,68,68,0.16);border:1px solid rgba(248,113,113,0.75);text-align:center;">
-                  <span style="color:#f87171;font-size:15px;font-weight:800;">방어 생성으로 진행!</span>
+                  <span style="color:#f87171;font-size:19px;font-weight:800;">방어 생성으로 진행!</span>
                 </div>
                 <div class="n6-mini-flow">
                   <div class="n6-mini-step"><span class="ps-num">5</span><span>공격 변형</span></div>
@@ -7308,7 +7253,6 @@ ${outputLines}
             </div>
           </div>
         </div>
-        <div style="margin-top:6px;padding:3px 14px;border-radius:999px;font-size:10px;font-weight:700;border:1px solid rgba(239,68,68,0.4);color:#f87171;background:rgba(239,68,68,0.08);flex-shrink:0;align-self:center;">STEP 6 · 2차 Judge 판정</div>
       `,
             },
           ],
@@ -7331,7 +7275,7 @@ ${outputLines}
         </div>
         <div style="flex:0 0 38%;min-height:0;width:100%;display:grid;grid-template-columns:0.82fr 168px 0.82fr;gap:12px;margin-top:10px;align-items:stretch;">
           <div class="anim-section input n7-reveal" style="min-height:0;text-align:center;animation-delay:0.25s;">
-            <div class="anim-label" style="opacity:1;justify-content:center;">입력</div>
+            <div class="anim-label" style="opacity:1;justify-content:center;font-size:16px;">입력</div>
             <div class="anim-section-body" style="padding:8px 12px;">
               <div class="anim-line strong" style="opacity:1;font-size:17px;margin-bottom:6px;">취약하다고 확인된 응답</div>
               <div class="anim-line anim-kv" style="opacity:1;grid-template-columns:1fr;text-align:center;margin-top:5px;padding-top:5px;">
@@ -7353,15 +7297,14 @@ ${outputLines}
             <div class="anim-process-text" style="font-size:13.5px;line-height:1.45;">Blue Agent가 위험 응답을 안전한 방어 응답으로 바꿉니다.</div>
           </div>
           <div class="anim-section output n7-reveal" style="min-height:0;text-align:center;animation-delay:1.55s;">
-            <div class="anim-label" style="opacity:1;justify-content:center;">결과</div>
+            <div class="anim-label" style="opacity:1;justify-content:center;font-size:16px;">결과</div>
             <div class="anim-section-body" style="padding:8px 12px;height:100%;display:flex;flex-direction:column;justify-content:center;">
-              <div class="anim-line strong" style="opacity:1;font-size:17px;margin-bottom:6px;">방어 응답 생성</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:5px;color:#d1fae5;font-weight:700;">개인정보 또는 내부 보안 정보는 제공할 수 없다고 안내합니다.</div>
-              <div class="anim-line muted" style="opacity:1;font-size:14.5px;margin-top:5px;">대신 안전한 주문 상태 확인 절차를 제안합니다.</div>
+              <div class="anim-line strong" style="opacity:1;font-size:23px;margin-bottom:6px;">방어 응답 생성</div>
+              <div class="anim-line muted" style="opacity:1;font-size:19px;margin-top:5px;color:#d1fae5;font-weight:700;">개인정보 또는 내부 보안 정보는 제공할 수 없다고 안내합니다.</div>
+              <div class="anim-line muted" style="opacity:1;font-size:19px;margin-top:5px;">대신 안전한 주문 상태 확인 절차를 제안합니다.</div>
             </div>
           </div>
         </div>
-        <div style="margin-top:6px;padding:3px 14px;border-radius:999px;font-size:10px;font-weight:700;border:1px solid rgba(16,185,129,0.4);color:#6ee7b7;background:rgba(16,185,129,0.08);flex-shrink:0;align-self:center;">STEP 7 · Blue Agent 방어 생성</div>
       `,
             },
           ],
@@ -7407,10 +7350,10 @@ ${outputLines}
           <div class="anim-section output n8-reveal" style="min-height:0;text-align:center;animation-delay:1.55s;">
             <div class="anim-label" style="opacity:1;justify-content:center;">결과</div>
             <div class="anim-section-body" style="padding:12px 14px;text-align:center;transform:translateY(10px);">
-              <div class="anim-line strong" style="opacity:1;font-size:19px;margin-bottom:8px;">재검증 결과: safe</div>
-              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:15.5px;margin-top:8px;color:#d1fae5;font-weight:700;text-align:center;">민감정보가 출력되지 않았고 거부 응답이 중심입니다.</div>
-              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:15.5px;margin-top:8px;text-align:center;">safe로 통과한 방어만 defense_patterns에 저장합니다.</div>
-              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:15.5px;margin-top:8px;text-align:center;">unsafe가 남으면 한도 안에서 Phase 3로 되돌아갑니다.</div>
+              <div class="anim-line strong" style="opacity:1;font-size:25px;margin-bottom:8px;">재검증 결과: safe</div>
+              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:20px;margin-top:8px;color:#d1fae5;font-weight:700;text-align:center;">민감정보가 출력되지 않았고 거부 응답이 중심입니다.</div>
+              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:20px;margin-top:8px;text-align:center;">safe로 통과한 방어만 defense_patterns에 저장합니다.</div>
+              <div class="anim-line muted" style="opacity:1;display:block;width:100%;font-size:20px;margin-top:8px;text-align:center;">unsafe가 남으면 한도 안에서 Phase 3로 되돌아갑니다.</div>
             </div>
           </div>
         </div>
@@ -7466,7 +7409,6 @@ ${outputLines}
           <rect x="30" y="348" width="520" height="22" rx="11" fill="rgba(34,197,94,0.08)" stroke="#22c55e" stroke-width="1"/>
           <text x="290" y="363" font-size="10" text-anchor="middle" fill="#4ade80">방어 응답 재검증 통과 · unsafe 0개 · 최종 저장으로</text>
         </svg>
-        <div style="margin-top:4px;padding:3px 14px;border-radius:999px;font-size:10px;font-weight:700;border:1px solid rgba(34,197,94,0.4);color:#4ade80;background:rgba(34,197,94,0.08);align-self:center;">STEP 8 · Re-Judge 검증 완료</div>
       `,
             },
           ],
@@ -7594,7 +7536,6 @@ ${outputLines}
           <text x="200" y="22" font-size="11" text-anchor="middle" fill="#6ee7b7" font-weight="800">🛡 AgentShield 완료</text>
           <text x="200" y="37" font-size="9.5" text-anchor="middle" fill="#94a3b8">Target Chatbot 보안 점검 완료</text>
         </svg>
-        <div style="margin-top:4px;padding:3px 14px;border-radius:999px;font-size:10px;font-weight:700;border:1px solid rgba(99,102,241,0.4);color:#a5b4fc;background:rgba(99,102,241,0.08);align-self:center;">STEP 9 · 스캔 완료 · 보고서 저장</div>
       `,
             },
           ],
@@ -8464,9 +8405,6 @@ ${outputLines}
                   → 다음 단계: 타겟 응답 점검
                 </div>
               </div>
-            </div>
-            <div class="n1-tag" style="align-self: center; margin-top: 0">
-              STEP 1 · 스캔 시작
             </div>
           </div>
         </div>
