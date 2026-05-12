@@ -174,6 +174,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
   const logRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
   const elapsedRef = useRef(0);
   const [elapsed, setElapsed] = useState("00:00:00");
 
@@ -201,6 +202,17 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
       ...prev.slice(-100),
       { time, level, levelCls: levelCls[level] || "text-on-surface-variant", msg, alert },
     ]);
+  }
+
+  function stopLiveIntervals() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
   }
 
   // 새 결과를 큐에 추가
@@ -269,10 +281,13 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
         if (fresh.length > 0) {
           setDisplayedResults(fresh.slice().reverse());
         }
-        if (pollRef.current) clearInterval(pollRef.current);
+        stopLiveIntervals();
       } else if (s.status === "failed") {
         addLog("ERROR", s.error_message || "스캔 중 오류가 발생했습니다.");
-        if (pollRef.current) clearInterval(pollRef.current);
+        stopLiveIntervals();
+      } else if (s.status === "cancelled") {
+        addLog("INFO", "스캔이 취소되었습니다.");
+        stopLiveIntervals();
       }
     } catch (err) {
       addLog("ERROR", err instanceof Error ? err.message : "상태를 가져올 수 없습니다.");
@@ -284,7 +299,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
     addLog("OK", "원격 엔드포인트 핸드셰이크 설정 완료");
     fetchStatus();
 
-    const timer = setInterval(() => {
+    timerRef.current = setInterval(() => {
       elapsedRef.current += 1;
       setElapsed(formatElapsed(elapsedRef.current));
     }, 1000);
@@ -292,8 +307,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
     pollRef.current = setInterval(fetchStatus, 3000);
 
     return () => {
-      clearInterval(timer);
-      if (pollRef.current) clearInterval(pollRef.current);
+      stopLiveIntervals();
     };
   }, [fetchStatus, sessionId]);
 
@@ -390,9 +404,10 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
             ) : (
               <button
                 onClick={async () => {
-                  if (pollRef.current) clearInterval(pollRef.current);
+                  stopLiveIntervals();
                   try {
-                    await cancelScan(sessionId);
+                    const cancelled = await cancelScan(sessionId);
+                    setStatus((prev) => prev ? { ...prev, status: cancelled.status === "cancelling" ? "cancelled" : cancelled.status } : prev);
                     addLog("INFO", "스캔 취소 요청 전송됨");
                   } catch {
                     addLog("ERROR", "스캔 취소 요청 실패");

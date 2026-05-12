@@ -32,6 +32,7 @@ type DemoContext = {
 type ChatMessage = {
   role: "user" | "assistant";
   content: string;
+  displayContent?: string;
   tone?: "attack" | "defense" | "sample" | "error";
 };
 
@@ -46,6 +47,7 @@ type AdaptiveRound = {
   subcategory?: string;
   attack_prompt?: string;
   target_response?: string;
+  target_response_ko?: string;
   judgment?: string;
   confidence?: number;
   success?: boolean;
@@ -98,6 +100,9 @@ type DefenseState = {
 
 const DEMO_REPORT_SESSION_ID = "mock-session-demo";
 const DEMO_REPORT_STORAGE_KEY = "agentshield_demo_report_snapshot";
+const DEMO_STATE_STORAGE_KEY = "agentshield_demo_page_state";
+const DEMO_RESTORE_FLAG_KEY = "agentshield_demo_restore_requested";
+const DEFAULT_DEMO_CATEGORY = "LLM02";
 
 const STEPS = [
   { id: 0, icon: "database", label: "타겟 정보", sub: "실제 값 확인", phase: "TARGET" },
@@ -240,6 +245,7 @@ function appendConversation(
   previous: ChatMessage[],
   userContent: string,
   assistantContent: string,
+  assistantDisplayContent?: string,
 ): ChatMessage[] {
   const additions: ChatMessage[] = [];
   const lastUser = [...previous].reverse().find((message) => message.role === "user")?.content;
@@ -249,7 +255,7 @@ function appendConversation(
     additions.push({ role: "user", content: userContent, tone: "attack" });
   }
   if (assistantContent && assistantContent !== lastAssistant) {
-    additions.push({ role: "assistant", content: assistantContent, tone: "attack" });
+    additions.push({ role: "assistant", content: assistantContent, displayContent: assistantDisplayContent, tone: "attack" });
   }
 
   return additions.length ? [...previous, ...additions] : previous;
@@ -297,6 +303,7 @@ function PipelineNode({
 
 function ChatBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
+  const displayContent = !isUser && message.displayContent ? message.displayContent : message.content;
   const toneClass = isUser
     ? "ml-auto border-primary/30 bg-primary/10"
     : message.tone === "defense"
@@ -309,7 +316,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
         {isUser ? "사용자" : message.tone === "defense" ? "방어 에이전트" : "테스트베드 챗봇"}
       </p>
       <pre className="max-w-full whitespace-pre-wrap break-words font-mono text-xs leading-6 text-on-surface [overflow-wrap:anywhere]">
-        {isUser ? message.content : highlightEvidence(message.content)}
+        {isUser ? message.content : highlightEvidence(displayContent)}
       </pre>
     </div>
   );
@@ -507,10 +514,45 @@ function judgeFacts(judge?: JudgeResult) {
     ["판정", judge.judgment || "-"],
     ["점수", judge.score ?? judge.confidence ?? "-"],
     ["심각도", judge.severity || "-"],
-    ["카테고리", judge.category || "LLM02"],
+    ["카테고리", judge.category || "-"],
     ["공격 유형", judge.failure_mode || "-"],
     ["MITRE", judge.mitre_technique_id || "-"],
   ];
+}
+
+function normalizeCategory(value?: string | null) {
+  const category = String(value || "").trim().toUpperCase();
+  return CATEGORY_LABELS[category] ? category : "";
+}
+
+function inferDemoCategory(prompt: string, response = "") {
+  const text = `${prompt}\n${response}`.toLowerCase();
+  if (/(tool_call|customer_db|internal_api|modify_permissions|execute_command|delete_records|rm -rf|도구 호출|권한|삭제|수정)/i.test(text)) {
+    return "LLM06";
+  }
+  if (/(system prompt|시스템 프롬프트|internal instruction|developer message|hidden instruction|운영 지침|역할 정의)/i.test(text)) {
+    return "LLM07";
+  }
+  if (/(ignore (all )?previous|jailbreak|developer override|prompt injection|이전 지시|무시|탈옥|우회)/i.test(text)) {
+    return "LLM01";
+  }
+  return DEFAULT_DEMO_CATEGORY;
+}
+
+async function translateToKorean(text: string) {
+  const source = String(text || "").trim();
+  if (!source) return "";
+  try {
+    const res = await fetch("/api/demo/translate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text: source }),
+    });
+    const data = await res.json().catch(() => ({})) as { translated?: string };
+    return String(data.translated || source).trim();
+  } catch {
+    return source;
+  }
 }
 
 function AgentStatusBadge({
@@ -633,36 +675,92 @@ export default function DemoPage() {
   const [translatedDetail, setTranslatedDetail] = useState<string | null>(null);
   const [isTranslatingDetail, setIsTranslatingDetail] = useState(false);
   const [translatedRationale, setTranslatedRationale] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState(DEFAULT_DEMO_CATEGORY);
+
+  function resolveDemoCategory(...candidates: Array<string | undefined | null>) {
+    return (
+      candidates.map(normalizeCategory).find(Boolean) ||
+      normalizeCategory(attackJudge.result?.category) ||
+      normalizeCategory(defenseJudge.result?.category) ||
+      normalizeCategory([...adaptiveState.rounds].reverse().find((round) => round.category)?.category) ||
+      activeCategory
+    );
+  }
+
+  function setResolvedCategory(category?: string | null) {
+    const normalized = normalizeCategory(category);
+    if (normalized) setActiveCategory(normalized);
+    return normalized || activeCategory;
+  }
 
   useEffect(() => {
-    if (attackJudge.status !== "done" || defenseJudge.status !== "done") return;
+    localStorage.removeItem(DEMO_STATE_STORAGE_KEY);
+    const shouldRestore = sessionStorage.getItem(DEMO_RESTORE_FLAG_KEY) === "1";
+    sessionStorage.removeItem(DEMO_RESTORE_FLAG_KEY);
+    if (!shouldRestore) return;
+
+    const raw = sessionStorage.getItem(DEMO_STATE_STORAGE_KEY);
+    if (!raw) return;
+    try {
+      const saved = JSON.parse(raw);
+      setStep(Number.isInteger(saved.step) ? saved.step : 0);
+      setAttackInput(String(saved.attackInput || ""));
+      setDefenseInput(String(saved.defenseInput || ""));
+      setAttackMessages(Array.isArray(saved.attackMessages) ? saved.attackMessages : []);
+      setDefenseMessages(Array.isArray(saved.defenseMessages) ? saved.defenseMessages : []);
+      setAttackState(saved.attackState || { status: "idle" });
+      setAdaptiveState(saved.adaptiveState || { status: "idle", rounds: [] });
+      setAttackJudge(saved.attackJudge || { status: "idle" });
+      setDefenseJudge(saved.defenseJudge || { status: "idle" });
+      setDefenseState(saved.defenseState || { status: "idle" });
+      setTranslatedDetail(saved.translatedDetail || null);
+      setTranslatedRationale(saved.translatedRationale || null);
+      setActiveCategory(normalizeCategory(saved.activeCategory) || DEFAULT_DEMO_CATEGORY);
+    } catch {
+      sessionStorage.removeItem(DEMO_STATE_STORAGE_KEY);
+    }
+  }, []);
+
+  function saveDemoPageStateForReturn() {
+    sessionStorage.setItem(
+      DEMO_STATE_STORAGE_KEY,
+      JSON.stringify({
+        step,
+        attackInput,
+        defenseInput,
+        attackMessages,
+        defenseMessages,
+        attackState,
+        adaptiveState,
+        attackJudge,
+        defenseJudge,
+        defenseState,
+        translatedDetail,
+        translatedRationale,
+        activeCategory,
+      }),
+    );
+  }
+
+  useEffect(() => {
+    if (attackJudge.status !== "done") return;
     const detail = attackJudge.result?.detail;
     if (!detail) return;
     setTranslatedDetail(null);
     setIsTranslatingDetail(true);
-    fetch("/api/demo/translate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: detail }),
-    })
-      .then((res) => res.json())
-      .then((data: { translated?: string }) => { if (data.translated) setTranslatedDetail(data.translated); })
+    translateToKorean(detail)
+      .then((translated) => { if (translated) setTranslatedDetail(translated); })
       .catch(() => {})
       .finally(() => setIsTranslatingDetail(false));
-  }, [attackJudge.status, defenseJudge.status, attackJudge.result?.detail]);
+  }, [attackJudge.status, attackJudge.result?.detail]);
 
   useEffect(() => {
     if (defenseJudge.status !== "done") return;
     const rationale = defenseState.rationale;
     if (!rationale) return;
     setTranslatedRationale(null);
-    fetch("/api/demo/translate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: rationale }),
-    })
-      .then((res) => res.json())
-      .then((data: { translated?: string }) => { if (data.translated) setTranslatedRationale(data.translated); })
+    translateToKorean(rationale)
+      .then((translated) => { if (translated) setTranslatedRationale(translated); })
       .catch(() => {});
   }, [defenseJudge.status, defenseState.rationale]);
 
@@ -686,44 +784,66 @@ export default function DemoPage() {
   }, []);
 
   function saveDemoReportSnapshot() {
+    saveDemoPageStateForReturn();
     const now = new Date().toISOString();
-    const lastAttack = [...attackMessages].reverse().find((message) => message.role === "user")?.content || "";
-    const lastResponse = [...attackMessages].reverse().find((message) => message.role === "assistant")?.content || "";
-    const category = attackJudge.result?.category || "LLM02";
+    const firstAttack = attackMessages.find((message) => message.role === "user")?.content || "";
+    const firstAssistant = attackMessages.find((message) => message.role === "assistant");
+    const firstResponse = firstAssistant?.displayContent || firstAssistant?.content || "";
+    const category = resolveDemoCategory(attackJudge.result?.category, adaptiveState.rounds.find((round) => round.category)?.category);
 
-    const adaptiveRows = adaptiveState.rounds
-      .filter((round) => round.attack_prompt || round.target_response || round.detail)
-      .map((round, idx) => ({
-        id: idx + 2,
+    const adaptiveRounds = adaptiveState.rounds.filter((round) => round.attack_prompt || round.target_response || round.detail);
+    const primaryRound =
+      [...adaptiveRounds].reverse().find((round) => round.judgment === "vulnerable") ||
+      [...adaptiveRounds].reverse().find((round) => round.attack_prompt || round.target_response || round.detail) ||
+      null;
+
+    const adaptiveRow = (round: AdaptiveRound, id: number, primary = false) => {
+      const judgment = String(round.judgment || (round.generation_failed ? "error" : "unknown"));
+      return {
+        id,
         session_id: DEMO_REPORT_SESSION_ID,
         phase: 2,
         attack_prompt: String(round.attack_prompt || ""),
-        target_response: String(round.target_response || round.detail || ""),
-        judgment: String(round.judgment || (round.generation_failed ? "error" : "unknown")),
-        severity: round.judgment === "vulnerable" ? "high" : "low",
+        target_response: String(round.target_response_ko || round.target_response || round.detail || ""),
+        judgment,
+        severity: judgment === "vulnerable" ? "high" : judgment === "safe" ? "low" : "medium",
         category: String(round.category || category),
         created_at: now,
-        summary: String(round.detail || round.exploit_type || ""),
+        summary: String(primary ? translatedDetail || round.detail || round.exploit_type || "" : round.detail || round.exploit_type || ""),
         danger_highlight: String(round.exploit_type || ""),
-      }));
+        defense_code: primary ? String(translatedRationale || defenseState.rationale || "") : "",
+        verify_result: primary ? String(defenseJudge.result?.judgment || "") : "",
+      };
+    };
+
+    const adaptiveRows = primaryRound
+      ? [
+          adaptiveRow(primaryRound, 1, true),
+          ...adaptiveRounds
+            .filter((round) => round !== primaryRound)
+            .map((round, idx) => adaptiveRow(round, idx + 2)),
+        ]
+      : [];
+
+    const baselineRow = {
+      id: adaptiveRows.length + 1,
+      session_id: DEMO_REPORT_SESSION_ID,
+      phase: 1,
+      attack_prompt: firstAttack,
+      target_response: firstResponse,
+      judgment: adaptiveRows.length > 0 ? "baseline" : String(attackJudge.result?.judgment || "unknown"),
+      severity: adaptiveRows.length > 0 ? "medium" : String(attackJudge.result?.severity || (attackJudge.result?.judgment === "vulnerable" ? "high" : "low")),
+      category,
+      created_at: now,
+      summary: adaptiveRows.length > 0 ? "초기 사용자 프롬프트와 테스트베드 응답" : String(attackJudge.result?.detail || attackJudge.detail || ""),
+      danger_highlight: adaptiveRows.length > 0 ? "" : String(attackJudge.result?.failure_mode || ""),
+      defense_code: adaptiveRows.length > 0 ? "" : String(translatedRationale || defenseState.rationale || ""),
+      verify_result: adaptiveRows.length > 0 ? "" : String(defenseJudge.result?.judgment || ""),
+    };
 
     const results = [
-      {
-        id: 1,
-        session_id: DEMO_REPORT_SESSION_ID,
-        phase: 1,
-        attack_prompt: lastAttack,
-        target_response: lastResponse,
-        judgment: String(attackJudge.result?.judgment || "unknown"),
-        severity: String(attackJudge.result?.severity || (attackJudge.result?.judgment === "vulnerable" ? "high" : "low")),
-        category,
-        created_at: now,
-        summary: String(attackJudge.result?.detail || attackJudge.detail || ""),
-        danger_highlight: String(attackJudge.result?.failure_mode || ""),
-        defense_code: String(translatedRationale || defenseState.rationale || ""),
-        verify_result: String(defenseJudge.result?.judgment || ""),
-      },
       ...adaptiveRows,
+      baselineRow,
     ].filter((row) => row.attack_prompt || row.target_response || row.summary);
 
     const safeCount = results.filter((row) => row.judgment === "safe").length;
@@ -768,14 +888,17 @@ export default function DemoPage() {
         return;
       }
 
-      setAttackMessages((prev) => [...prev, { role: "assistant", content, tone: "attack" }]);
+      const displayContent = await translateToKorean(content);
+      setAttackMessages((prev) => [...prev, { role: "assistant", content, displayContent, tone: "attack" }]);
       setAttackState({ status: "live" });
-      const judge = await runJudge(prompt, content, setAttackJudge);
+      const category = setResolvedCategory(inferDemoCategory(prompt, content));
+      const judge = await runJudge(prompt, content, setAttackJudge, category);
       if (judge?.judgment === "vulnerable") {
+        setResolvedCategory(judge.category || category);
         setAttackState({ status: "live", detail: "초기 공격 취약 판정. Red Agent 변형 중지" });
         return;
       }
-      void runAdaptiveCampaign(prompt, content);
+      void runAdaptiveCampaign(prompt, content, resolveDemoCategory(judge?.category, category));
     } catch (error) {
       setAttackState({
         status: "error",
@@ -788,6 +911,7 @@ export default function DemoPage() {
     prompt: string,
     targetResponse: string,
     setter: (value: JudgeState) => void,
+    category = activeCategory,
   ): Promise<JudgeResult | null> {
     setter({ status: "loading" });
     try {
@@ -795,7 +919,7 @@ export default function DemoPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          category: "LLM02",
+          category: normalizeCategory(category) || inferDemoCategory(prompt, targetResponse),
           attack_prompt: prompt,
           target_response: targetResponse,
         }),
@@ -806,6 +930,7 @@ export default function DemoPage() {
         return null;
       }
       setter({ status: "done", result: data.judge });
+      setResolvedCategory(data.judge?.category || category);
       return data.judge || null;
     } catch (error) {
       setter({ status: "error", detail: error instanceof Error ? error.message : "Judge 연결 실패" });
@@ -813,14 +938,14 @@ export default function DemoPage() {
     }
   }
 
-  async function runAdaptiveCampaign(prompt: string, targetResponse = "") {
+  async function runAdaptiveCampaign(prompt: string, targetResponse = "", category = activeCategory) {
     setAdaptiveState({ status: "loading", rounds: [] });
 
     try {
       const res = await fetch("/api/demo/red-adaptive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, target_response: targetResponse, stream: true }),
+        body: JSON.stringify({ prompt, target_response: targetResponse, category: normalizeCategory(category) || inferDemoCategory(prompt, targetResponse), stream: true }),
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
@@ -851,10 +976,18 @@ export default function DemoPage() {
             stderr_tail?: string;
           };
           if (event.type === "status" && event.detail) {
-            setAttackState({ status: "loading", detail: event.detail });
+            const detail = String(event.detail);
+            const stopped = /vulnerable|취약|중지|완료/.test(detail);
+            setAttackState({ status: stopped ? "live" : "loading", detail });
           }
           if (event.type === "round" && event.round) {
-            const round = event.round;
+            let round = event.round;
+            setResolvedCategory(round.category || category);
+            if (round.attack_prompt && round.target_response && !round.generation_failed) {
+              const displayContent = await translateToKorean(String(round.target_response));
+              round = { ...round, target_response_ko: displayContent };
+              setAttackMessages((prev) => appendConversation(prev, String(round.attack_prompt), String(round.target_response), displayContent));
+            }
             lastRound = round;
             setAdaptiveState((prev) => ({
               ...prev,
@@ -862,9 +995,6 @@ export default function DemoPage() {
               success: prev.success || round.judgment === "vulnerable" || Boolean(round.success),
               best_round: round.judgment === "vulnerable" ? round.round ?? prev.best_round : prev.best_round,
             }));
-            if (round.attack_prompt && round.target_response && !round.generation_failed) {
-              setAttackMessages((prev) => appendConversation(prev, String(round.attack_prompt), String(round.target_response)));
-            }
             setAttackState({
               status: round.generation_failed || round.judgment === "error" ? "error" : round.judgment === "vulnerable" ? "live" : "loading",
               detail:
@@ -877,7 +1007,7 @@ export default function DemoPage() {
                   : `R${round.round ?? ""} 판정 완료. 다음 라운드 준비 중`,
             });
             if (round.judgment === "vulnerable" && round.attack_prompt && round.target_response) {
-              void runJudge(String(round.attack_prompt), String(round.target_response), setAttackJudge);
+              void runJudge(String(round.attack_prompt), String(round.target_response), setAttackJudge, resolveDemoCategory(round.category, category));
             }
           }
           if (event.type === "done") {
@@ -890,7 +1020,7 @@ export default function DemoPage() {
               success: Boolean(event.success) || prev.success,
             }));
             if (lastRound?.attack_prompt && lastRound.target_response && lastRound.judgment !== "vulnerable") {
-              void runJudge(String(lastRound.attack_prompt), String(lastRound.target_response), setAttackJudge);
+              void runJudge(String(lastRound.attack_prompt), String(lastRound.target_response), setAttackJudge, resolveDemoCategory(lastRound.category, category));
               setAttackState({ status: "live", detail: `R${lastRound.round ?? ""}까지 완료. 취약 판정 없음` });
             }
           }
@@ -919,11 +1049,12 @@ export default function DemoPage() {
     setDefenseJudge({ status: "loading" });
 
     try {
+      const category = resolveDemoCategory(attackJudge.result?.category, inferDemoCategory(prompt, targetResponse));
       const res = await fetch("/api/demo/blue-defense", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          category: "LLM02",
+          category,
           attack_prompt: prompt,
           target_response: targetResponse,
         }),
@@ -938,10 +1069,12 @@ export default function DemoPage() {
       }
 
       const defended = String(data.defended_response || "").trim();
-      setDefenseMessages((prev) => [...prev, { role: "assistant", content: defended, tone: "defense" }]);
+      const defendedDisplay = await translateToKorean(defended);
+      setDefenseMessages((prev) => [...prev, { role: "assistant", content: defended, displayContent: defendedDisplay, tone: "defense" }]);
       setDefenseState({ status: "done", rationale: data.defense_rationale });
       setAttackJudge(data.attack_judge ? { status: "done", result: data.attack_judge } : attackJudge);
       setDefenseJudge({ status: "done", result: data.defense_judge });
+      setResolvedCategory(data.attack_judge?.category || data.defense_judge?.category || category);
     } catch (error) {
       const detail = error instanceof Error ? error.message : "Blue Agent 연결 실패";
       setDefenseState({ status: "error", detail });
@@ -952,9 +1085,14 @@ export default function DemoPage() {
 
   const lastAttackResponse =
     [...attackMessages].reverse().find((message) => message.role === "assistant")?.content || "";
+  const lastAttackResponseDisplay =
+    [...attackMessages].reverse().find((message) => message.role === "assistant")?.displayContent || lastAttackResponse;
   const lastDefenseResponse =
     [...defenseMessages].reverse().find((message) => message.role === "assistant" && message.tone === "defense")?.content || "";
+  const lastDefenseResponseDisplay =
+    [...defenseMessages].reverse().find((message) => message.role === "assistant" && message.tone === "defense")?.displayContent || lastDefenseResponse;
   const shownResponse = lastAttackResponse;
+  const shownResponseDisplay = lastAttackResponseDisplay;
   const activeView = viewForStep(step);
   // Judge badge on page 2: only activate after Red Agent completes
   const page2JudgeStatus: "idle" | "loading" | "done" | "error" =
@@ -1252,7 +1390,7 @@ export default function DemoPage() {
                 </div>
               )}
               {attackJudge.result && (() => {
-                const cat = attackJudge.result!.category || "LLM02";
+                const cat = resolveDemoCategory(attackJudge.result!.category);
                 const danger = CATEGORY_DANGER[cat];
                 if (!danger) return null;
                 const catColor = CATEGORY_COLORS[cat] ?? "text-error";
@@ -1281,7 +1419,7 @@ export default function DemoPage() {
               <h2 className="font-headline text-xl font-black text-on-surface">응답 근거 로그</h2>
               <div className="mt-4 max-h-[560px] overflow-auto rounded-2xl border border-error/20 bg-[#07101A] p-4">
                 <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-6 text-on-surface">
-                  {shownResponse ? highlightEvidence(shownResponse) : "공격 응답 없음"}
+                  {shownResponseDisplay ? highlightEvidence(shownResponseDisplay) : "공격 응답 없음"}
                 </pre>
               </div>
             </div>
@@ -1389,9 +1527,14 @@ export default function DemoPage() {
                     <p className={`text-xs font-black uppercase tracking-[0.18em] ${verdictClass(attackJudge.result?.judgment)}`}>
                       {attackJudge.status === "done" ? "Judge Result" : "Judge 대기"}
                     </p>
-                    <h2 className={`mt-1 break-words font-headline text-3xl font-black ${CATEGORY_COLORS[attackJudge.result?.category || "LLM02"] ?? "text-on-surface"}`}>
-                      {attackJudge.result?.category || "LLM02"} · {CATEGORY_LABELS[attackJudge.result?.category || "LLM02"] ?? "판정"}
-                    </h2>
+                    {(() => {
+                      const category = resolveDemoCategory(attackJudge.result?.category);
+                      return (
+                        <h2 className={`mt-1 break-words font-headline text-3xl font-black ${CATEGORY_COLORS[category] ?? "text-on-surface"}`}>
+                          {category} · {CATEGORY_LABELS[category] ?? "판정"}
+                        </h2>
+                      );
+                    })()}
                   </div>
                 </div>
                 <Link
@@ -1476,7 +1619,7 @@ export default function DemoPage() {
                     ))}
                   </div>
                   <pre className="max-h-[270px] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-error/20 bg-black/25 p-4 font-mono text-xs leading-6 text-on-surface">
-                    {shownResponse ? highlightEvidence(shownResponse) : "공격 응답 없음"}
+                    {shownResponseDisplay ? highlightEvidence(shownResponseDisplay) : "공격 응답 없음"}
                   </pre>
                 </div>
 
@@ -1498,7 +1641,7 @@ export default function DemoPage() {
                     ))}
                   </div>
                   <pre className="max-h-[270px] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-tertiary/20 bg-black/20 p-4 font-mono text-xs leading-6 text-on-surface">
-                    {lastDefenseResponse || "방어 응답 없음"}
+                    {lastDefenseResponseDisplay || "방어 응답 없음"}
                   </pre>
                 </div>
               </div>

@@ -23,6 +23,7 @@ type DemoReportSnapshot = {
 
 const DEMO_REPORT_SESSION_ID = "mock-session-demo";
 const DEMO_REPORT_STORAGE_KEY = "agentshield_demo_report_snapshot";
+const DEMO_RESTORE_FLAG_KEY = "agentshield_demo_restore_requested";
 
 const SEVERITY_CFG = {
   critical: { label: "긴급", color: "#ef4444", bg: "rgba(239,68,68,0.10)", border: "rgba(239,68,68,0.35)", glow: "0 0 32px rgba(239,68,68,0.2)" },
@@ -66,8 +67,15 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             return;
           }
           const snapshot = JSON.parse(raw) as DemoReportSnapshot;
+          const orderedResults = [...(snapshot.results || [])].sort((a, b) => {
+            const priority = (result: ScanResult) =>
+              result.phase === 2 && result.judgment === "vulnerable" ? 0 :
+              result.phase === 2 ? 1 :
+              2;
+            return priority(a) - priority(b);
+          });
           setStatus(snapshot.status);
-          setResults(snapshot.results || []);
+          setResults(orderedResults);
           return;
         }
         if (sessionId === "latest") {
@@ -99,6 +107,15 @@ export default function ReportPage({ params }: { params: { id: string } }) {
       else next.add(id);
       return next;
     });
+  }
+
+  function goBack() {
+    if (sessionId === DEMO_REPORT_SESSION_ID) {
+      sessionStorage.setItem(DEMO_RESTORE_FLAG_KEY, "1");
+      router.push("/demo");
+      return;
+    }
+    router.push(`/scan/${sessionId}`);
   }
 
   const total      = results.length;
@@ -209,7 +226,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               <span className="text-[10px] text-tertiary/60 font-bold uppercase tracking-wide">안전</span>
             </div>
             <button
-              onClick={() => router.push(`/scan/${sessionId}`)}
+              onClick={goBack}
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-on-surface-variant hover:text-white hover:border-primary/30 transition-all font-medium text-sm"
             >
               <span className="material-symbols-outlined text-base">arrow_back</span>

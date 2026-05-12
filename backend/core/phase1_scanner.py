@@ -157,6 +157,19 @@ async def load_phase1_attack_patterns(
     return await _self._load_attacks(category, max_attacks)
 
 
+async def estimate_phase1_total(category: str = "ALL") -> int:
+    """Return the number of Phase 1 attacks visible to the scanner.
+
+    The status API uses this for progress before rows are persisted. Keep this
+    on the same loader path as run_phase1 so DB/file fallback cannot diverge.
+    """
+    try:
+        return len(await load_phase1_attack_patterns(category))
+    except Exception as exc:
+        logger.warning("[Phase1] total estimate failed: %s", exc)
+        return 0
+
+
 async def _load_attack_patterns_from_file(
     category: str, max_attacks: int = None
 ) -> List[Dict[str, Any]]:

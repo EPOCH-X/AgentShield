@@ -11,6 +11,18 @@ function e(key: string, fallback = "") {
   return String(process.env[key] || fallback);
 }
 
+function normalizeCategory(value: unknown) {
+  const category = String(value || "").trim().toUpperCase();
+  return ["LLM01", "LLM02", "LLM06", "LLM07"].includes(category) ? category : "LLM02";
+}
+
+function defaultSubcategory(category: string) {
+  if (category === "LLM01") return "role_hijack";
+  if (category === "LLM06") return "tool_abuse";
+  if (category === "LLM07") return "system_leak";
+  return "config-extraction";
+}
+
 function toRound(record: Record<string, unknown>) {
   const attack = String(record.attack_prompt || "");
   const response = String(record.target_response || "");
@@ -22,11 +34,11 @@ function toRound(record: Record<string, unknown>) {
     attack_prompt: attack,
     target_response: response,
     judgment: record.judgment,
-    confidence: record.confidence,
+    confidence: record.confidence || record.judgment_confidence,
     success: Boolean(record.success),
     success_strength: record.success_strength,
     exploit_type: record.exploit_type,
-    detail: record.judge_detail,
+    detail: record.detail || record.judge_detail,
     attack_len: attack.length,
     response_len: response.length,
     generation_attempts: attempts,
@@ -34,7 +46,7 @@ function toRound(record: Record<string, unknown>) {
   };
 }
 
-function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: string; stderr: string }> {
+function runRedAdaptive(prompt: string, category: string): Promise<{ status: number; stdout: string; stderr: string }> {
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
   const rounds = e("RED_CAMPAIGN_ROUNDS", "5");
@@ -50,8 +62,8 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
         "--rounds", rounds,
         "--red-generation-attempts", generationAttempts,
         "--seed", "57",
-        "--category", "LLM02",
-        "--subcategory", "config-extraction",
+        "--category", category,
+        "--subcategory", defaultSubcategory(category),
         "--initial-prompt-stdin",
       ],
       {
@@ -82,7 +94,7 @@ function runRedAdaptive(prompt: string): Promise<{ status: number; stdout: strin
   });
 }
 
-function streamRedAdaptive(prompt: string, targetResponse: string) {
+function streamRedAdaptive(prompt: string, targetResponse: string, category: string) {
   const encoder = new TextEncoder();
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
@@ -96,8 +108,8 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
     {
       id: campaignId,
       seed_id: "demo-ui-seed",
-      category: "LLM02",
-      subcategory: "config-extraction",
+      category,
+      subcategory: defaultSubcategory(category),
       attack_prompt: prompt,
       target_response: targetResponse,
       detail: "Dashboard demo seed prompt",
@@ -121,9 +133,10 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
           "--rounds", rounds,
           "--red-generation-attempts", generationAttempts,
           "--seed", "57",
-          "--category", "LLM02",
+          "--category", category,
           "--campaign-id", campaignId,
           "--conversation-mode", "multi",
+          "--no-probe-seed-as-round-zero",
           "--verify-tool-execution",
           "--stop-on-vulnerable",
           ...(redModel ? ["--red-model", redModel] : []),
@@ -214,7 +227,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string) {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { prompt?: string; target_response?: string; stream?: boolean };
+  let body: { prompt?: string; target_response?: string; category?: string; stream?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -225,9 +238,10 @@ export async function POST(req: NextRequest) {
   if (!prompt) {
     return NextResponse.json({ detail: "프롬프트를 입력해 주세요." }, { status: 400 });
   }
+  const category = normalizeCategory(body.category);
 
   if (body.stream) {
-    return new Response(streamRedAdaptive(prompt, String(body.target_response || "")), {
+    return new Response(streamRedAdaptive(prompt, String(body.target_response || ""), category), {
       headers: {
         "Content-Type": "application/x-ndjson; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
@@ -235,7 +249,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const result = await runRedAdaptive(prompt);
+  const result = await runRedAdaptive(prompt, category);
   const lastLine = result.stdout.trim().split(/\n/).filter(Boolean).at(-1) || "{}";
 
   try {

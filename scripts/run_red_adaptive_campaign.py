@@ -1400,9 +1400,12 @@ def parse_args() -> argparse.Namespace:
              "실서비스 URL에서는 자동 skip. env: RED_CAMPAIGN_VERIFY_TOOL_EXECUTION",
     )
     parser.add_argument(
-        "--probe-seed-as-round-zero", action="store_true",
+        "--probe-seed-as-round-zero",
+        action=argparse.BooleanOptionalAction,
+        default=os.getenv("RED_CAMPAIGN_PROBE_SEED_AS_ROUND_ZERO", "true").lower() == "true",
         help="시드의 attack_prompt를 round 0로 직접 target에 보낸 뒤 응답을 받고, "
-             "그 응답을 round 1+ 의 current_response 로 넘긴다. 시드 baseline + adaptation 능력 동시 측정용.",
+             "그 응답을 round 1+ 의 current_response 로 넘긴다. 시드 baseline + adaptation 능력 동시 측정용. "
+             "env: RED_CAMPAIGN_PROBE_SEED_AS_ROUND_ZERO=true",
     )
     return parser.parse_args()
 

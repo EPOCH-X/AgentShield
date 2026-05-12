@@ -109,7 +109,13 @@ async def main() -> int:
     parser.add_argument("--report-output", default="")
     parser.add_argument("--category", default="ALL")
     parser.add_argument("--seed-mode", choices=["raw", "file", "hybrid"], default="raw")
-    parser.add_argument("--domains", default="finance,healthcare,rag,hr,government,ecommerce")
+    parser.add_argument(
+        "--domains",
+        default=os.getenv(
+            "RED_SFT_DOMAINS",
+            "general_assistant,finance,healthcare,rag,hr,government,ecommerce",
+        ),
+    )
     parser.add_argument("--seeds", type=int, default=20)
     parser.add_argument("--rounds", type=int, default=1, help="Deprecated for SFT seed generation; one standalone prompt per seed is generated.")
     parser.add_argument("--generation-attempts", type=int, default=3)
