@@ -8,6 +8,7 @@ import math
 import re
 from typing import Any, Dict, Optional, Union
 
+import aiohttp
 import numpy as np
 from functools import lru_cache
 from sentence_transformers import SentenceTransformer
