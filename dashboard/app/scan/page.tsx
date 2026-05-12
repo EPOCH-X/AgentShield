@@ -8,15 +8,12 @@ import ChatbotTestModal from "../../components/ChatbotTestModal";
 import {
   startScan,
   manualCheck,
-  getPhase1Seeds,
   getSitegptConfig,
   postSitegptRedMutation,
   postSitegptBlueDefense,
   getToken,
 } from "../../lib/api";
 import { MOCK_RECENT_SCANS } from "../../lib/mockClientData";
-
-const MOCK_SESSION_ID = "mock-session-demo";
 
 const ATTACK_VECTORS = [
   { id: "jailbreak", icon: "gavel", label: "탈옥 (Jailbreak)", fill: true },
@@ -142,7 +139,7 @@ function statusMeta(status: string) {
 export default function ScanPage() {
   const router = useRouter();
   const [projectName, setProjectName] = useState("Enterprise-LLM-Production");
-  const [targetUrl, setTargetUrl] = useState("https://api.internal.llm/v1/chat");
+  const [targetUrl, setTargetUrl] = useState("http://localhost:8010/chat");
   const [targetApiKey, setTargetApiKey] = useState("");
   const [selectedVectors, setSelectedVectors] = useState<string[]>(["jailbreak", "prompt_injection"]);
   const [loading, setLoading] = useState(false);
@@ -536,27 +533,24 @@ export default function ScanPage() {
     setError("");
     setLoading(true);
     try {
-      let data: { session_id: string; status: string };
-      try {
-        data = await startScan(
-          targetUrl.trim(),
-          projectName.trim(),
-          targetApiKey.trim() || undefined,
-          2,
-        );
-      } catch {
-        data = { session_id: MOCK_SESSION_ID, status: "running" };
-      }
+      const data = await startScan(
+        targetUrl.trim(),
+        projectName.trim(),
+        targetApiKey.trim() || undefined,
+        4,
+      );
       const newScan: RecentScan = {
         session_id: data.session_id,
         project_name: projectName,
         target_api_url: targetUrl,
-        status: data.status,
+        status: data.status || "queued",
         created_at: new Date().toISOString(),
       };
       const updated = [newScan, ...recentScans].slice(0, 10);
       localStorage.setItem("recent_scans", JSON.stringify(updated));
+      setRecentScans(updated);
       setError("");
+      router.push(`/scan/${data.session_id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "스캔을 시작할 수 없습니다.");
     } finally {
