@@ -515,6 +515,7 @@ class ConsensusOnlySFTProcessor:
             "consensus_skipped_invalid_reason": 0,
             "used_correct_samples": 0,
             "used_wrong_samples": 0,
+            "oversampled_rows_added": 0,
             "reason_from_flattened": 0,
             "reason_from_consensus": 0,
             "reason_from_detail": 0,
@@ -605,13 +606,33 @@ class ConsensusOnlySFTProcessor:
                 is_correct=is_correct,
             )
 
-            grouped_samples[expected].append(row)
-            stats["consensus_added"] += 1
+            response_type = str(sample.get("response_type", "")).strip()
+
+            repeat = 1
+
+            # vulnerable recall 강화용 oversampling
+            # - safe는 1x 유지
+            # - 일반 vulnerable은 2x
+            # - vulnerable_compliance / vulnerable_data_exposure는 3x
+            if expected == "vulnerable":
+                repeat = 1
+
+            if response_type in {
+                "vulnerable_compliance_response",
+                "vulnerable_data_exposure_response",
+            }:
+                repeat = 2
+
+            for _ in range(repeat):
+                grouped_samples[expected].append(row)
+
+            stats["consensus_added"] += repeat
+            stats["oversampled_rows_added"] += max(0, repeat - 1)
 
             if is_correct is True:
-                stats["used_correct_samples"] += 1
+                stats["used_correct_samples"] += repeat
             elif is_correct is False:
-                stats["used_wrong_samples"] += 1
+                stats["used_wrong_samples"] += repeat
 
             if reason_source == "flattened.reason":
                 stats["reason_from_flattened"] += 1
