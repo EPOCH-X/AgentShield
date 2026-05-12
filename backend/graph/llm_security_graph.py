@@ -5,7 +5,7 @@
 Phase 4에서 unsafe > 0이면 Phase 3으로 재순환 (최대 3회).
 """
 
-from typing import TypedDict, Any, Optional, Callable, Awaitable
+from typing import TypedDict, Any, Optional, Callable, Awaitable, cast
 
 from langgraph.graph import StateGraph, END
 
@@ -28,6 +28,13 @@ class ScanState(TypedDict):
     phase3_result: dict[str, Any]  # [R3] Phase 3 출력
     phase4_result: dict[str, Any]  # [R3] Phase 4 출력
     iteration: int                 # Phase 4 재검증 재시도 카운터
+    phase3_failed_total: int       # 모든 Phase3 라운드 failed 누적
+    phase3_defenses_generated_first: Optional[int]  # 첫 Phase3의 defenses_generated만 고정
+    # 첫 Phase3에서 고정 — 재시도 후에도 요약/리뷰는 전체 방어 코호트 기준
+    phase3_cohort_defense_ids: list[str]
+    phase3_cohort_snapshot: list[dict[str, Any]]
+    # 매 Phase4마다 details 병합 — 마지막 라운드만 보면 부분 집계되는 문제 방지
+    phase4_verdict_by_defense_id: dict[str, str]
 
 
 # ── 노드 함수 ────────────────────────────────────────────────────
@@ -55,7 +62,30 @@ async def phase3_node(state: ScanState) -> dict:
         phase2_result=state["phase2_result"],
         phase4_result=state.get("phase4_result"),
     )
-    return {"phase3_result": result}
+    failed_inc = int(result.get("failed") or 0)
+    prev_failed_total = int(state.get("phase3_failed_total") or 0)
+    first_gen = state.get("phase3_defenses_generated_first")
+    if first_gen is None:
+        first_gen = int(result.get("defenses_generated") or 0)
+    updates: dict[str, Any] = {
+        "phase3_result": result,
+        "phase3_failed_total": prev_failed_total + failed_inc,
+        "phase3_defenses_generated_first": first_gen,
+    }
+    if not state.get("phase3_cohort_defense_ids"):
+        sv = result.get("source_vulnerabilities") or []
+        cohort_ids: list[str] = []
+        snapshot: list[dict[str, Any]] = []
+        for row in sv:
+            if not isinstance(row, dict):
+                continue
+            did = str(row.get("defense_id") or "").strip()
+            if did:
+                cohort_ids.append(did)
+                snapshot.append(dict(row))
+        updates["phase3_cohort_defense_ids"] = cohort_ids
+        updates["phase3_cohort_snapshot"] = snapshot
+    return updates
 
 
 async def phase4_node(state: ScanState) -> dict:
@@ -66,7 +96,18 @@ async def phase4_node(state: ScanState) -> dict:
         session_id=state["session_id"],
         phase3_result=state["phase3_result"],
     )
-    return {"phase4_result": result, "iteration": state["iteration"] + 1}
+    merged_verdicts = dict(state.get("phase4_verdict_by_defense_id") or {})
+    for item in result.get("details") or []:
+        if not isinstance(item, dict):
+            continue
+        did = str(item.get("defense_id") or "").strip()
+        if did:
+            merged_verdicts[did] = str(item.get("verdict") or "").strip()
+    return {
+        "phase4_result": result,
+        "iteration": state["iteration"] + 1,
+        "phase4_verdict_by_defense_id": merged_verdicts,
+    }
 
 
 # ── 조건부 엣지 ──────────────────────────────────────────────────
@@ -150,16 +191,24 @@ async def run_scan(
 
     app = build_security_graph(phase1_result_callback=phase1_result_callback)
 
-    initial_state: ScanState = {
-        "session_id": session_id,
-        "target_url": target_url,
-        "target_config": effective_target_config,
-        "phase1_result": {},
-        "phase2_result": {},
-        "phase3_result": {},
-        "phase4_result": {},
-        "iteration": 0,
-    }
+    initial_state: ScanState = cast(
+        ScanState,
+        {
+            "session_id": session_id,
+            "target_url": target_url,
+            "target_config": effective_target_config,
+            "phase1_result": {},
+            "phase2_result": {},
+            "phase3_result": {},
+            "phase4_result": {},
+            "iteration": 0,
+            "phase3_failed_total": 0,
+            "phase3_defenses_generated_first": None,
+            "phase3_cohort_defense_ids": [],
+            "phase3_cohort_snapshot": [],
+            "phase4_verdict_by_defense_id": {},
+        },
+    )
 
     final_state = await app.ainvoke(initial_state)
-    return final_state
+    return cast(ScanState, final_state)

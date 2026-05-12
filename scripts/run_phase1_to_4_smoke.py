@@ -387,11 +387,73 @@ def _patched_llm_runtime(timeout_sec: float | None, verbose: bool = True):
 
 # ── 결과 요약 / 저장 ──────────────────────────────────────────────────────────
 
+def _phase4_counts_from_state(final_state: dict, p3: dict, p4: dict) -> tuple[int, int, int]:
+    """코호트(첫 Phase3) 기준 total/safe/unsafe. 재시도 라운드 판정은 누적 맵으로 합산."""
+    cohort = final_state.get("phase3_cohort_defense_ids") or []
+    verdicts = final_state.get("phase4_verdict_by_defense_id") or {}
+    if cohort:
+        total = len(cohort)
+        safe_n = sum(1 for d in cohort if verdicts.get(d) == "safe")
+        unsafe_n = total - safe_n
+        return total, safe_n, unsafe_n
+    source_fallback = p3.get("source_vulnerabilities", []) or []
+    total = len(source_fallback)
+    unsafe_raw = int(p4.get("unsafe", 0) or 0)
+    unsafe_n = max(0, min(unsafe_raw, total)) if total else 0
+    safe_n = total - unsafe_n if total else 0
+    return total, safe_n, unsafe_n
+
+
+def _load_defense_map_session(
+    project_root: Path,
+    session_id: str,
+    rel_paths: list,
+) -> dict[str, dict]:
+    """세션 방어 JSON: phase3가 준 경로 + 디렉터리 glob로 코호트 전체 로드."""
+    defense_map: dict[str, dict] = {}
+    for rel in rel_paths:
+        path = project_root / str(rel)
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            did = str(payload.get("defense_id") or "")
+            if did:
+                defense_map[did] = payload
+        except Exception:
+            continue
+    def_dir = project_root / "data" / "phase3_defenses" / str(session_id)
+    if def_dir.is_dir():
+        for path in sorted(def_dir.glob("defense_*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                did = str(payload.get("defense_id") or "")
+                if did:
+                    defense_map[did] = payload
+            except Exception:
+                continue
+    return defense_map
+
+
 def _short_summary(final_state: dict) -> dict:
     p1 = final_state.get("phase1_result", {}) or {}
     p2 = final_state.get("phase2_result", {}) or {}
     p3 = final_state.get("phase3_result", {}) or {}
     p4 = final_state.get("phase4_result", {}) or {}
+    phase4_total_tested, phase4_safe, phase4_unsafe = _phase4_counts_from_state(
+        final_state, p3, p4
+    )
+
+    phase3_first_gen = final_state.get("phase3_defenses_generated_first")
+    phase3_gen_display = (
+        phase3_first_gen
+        if phase3_first_gen is not None
+        else p3.get("defenses_generated")
+    )
+    phase3_failed_display = final_state.get(
+        "phase3_failed_total",
+        p3.get("failed", 0),
+    )
 
     return {
         "session_id": final_state.get("session_id"),
@@ -402,13 +464,17 @@ def _short_summary(final_state: dict) -> dict:
         "phase2_vulnerable": len(
             [r for r in (p2.get("results", []) or []) if isinstance(r, dict) and r.get("judgment") == "vulnerable"]
         ),
-        "phase3_defenses_generated": p3.get("defenses_generated"),
-        "phase3_failed": p3.get("failed"),
-        "phase4_total_tested": p4.get("total_tested"),
-        "phase4_safe": p4.get("safe"),
-        "phase4_unsafe": p4.get("unsafe"),
+        "phase3_defenses_generated": phase3_gen_display,
+        "phase3_failed": phase3_failed_display,
+        "phase4_total_tested": phase4_total_tested,
+        "phase4_safe": phase4_safe,
+        "phase4_unsafe": phase4_unsafe,
         "phase4_mode": p4.get("mode"),
-        "phase4_passed_threshold": p4.get("passed_threshold"),
+        "phase4_passed_threshold": (
+            phase4_unsafe == 0
+            if phase4_total_tested > 0
+            else bool(p4.get("passed_threshold"))
+        ),
     }
 
 
@@ -461,20 +527,21 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
     """요청 포맷: 공격성공 프롬프트/응답값/방어코드/방어 후 응답값을 한눈에 저장."""
     phase3 = final_state.get("phase3_result", {}) or {}
     phase4 = final_state.get("phase4_result", {}) or {}
-    source_rows = phase3.get("source_vulnerabilities", []) or []
+    source_rows = (
+        final_state.get("phase3_cohort_snapshot")
+        or phase3.get("source_vulnerabilities")
+        or []
+    )
+    phase4_total_tested, phase4_safe, phase4_unsafe = _phase4_counts_from_state(
+        final_state, phase3, phase4
+    )
     defense_files = phase3.get("defense_json_files", []) or []
     phase4_details = phase4.get("details", []) or []
-
-    defense_map: dict[str, dict] = {}
-    for rel in defense_files:
-        path = PROJECT_ROOT / str(rel)
-        if not path.exists():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            defense_map[str(payload.get("defense_id") or "")] = payload
-        except Exception:
-            continue
+    session_id = str(final_state.get("session_id") or "")
+    defense_map = _load_defense_map_session(
+        PROJECT_ROOT, session_id, defense_files
+    )
+    verdict_accum = final_state.get("phase4_verdict_by_defense_id") or {}
 
     phase4_map = {
         str(d.get("defense_id") or ""): d
@@ -493,20 +560,31 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
             if isinstance(r, dict) and r.get("judgment") == "vulnerable"
         ]
     )
+    phase3_first_gen = final_state.get("phase3_defenses_generated_first")
+    phase3_gen_display = (
+        phase3_first_gen
+        if phase3_first_gen is not None
+        else phase3.get("defenses_generated", 0)
+    )
+    phase3_failed_display = final_state.get(
+        "phase3_failed_total",
+        phase3.get("failed", 0),
+    )
+
     lines.append(f"- session_id: {final_state.get('session_id')}")
     lines.append(f"- phase2_vulnerable_count: {p2_vuln_n}")
-    lines.append(f"- phase3_defenses_generated: {phase3.get('defenses_generated', 0)}")
-    lines.append(f"- phase3_failed: {phase3.get('failed', 0)}")
+    lines.append(f"- phase3_defenses_generated: {phase3_gen_display}")
+    lines.append(f"- phase3_failed: {phase3_failed_display}")
     for fd in phase3.get("failed_details") or []:
         if isinstance(fd, dict):
             lines.append(
                 f"  - phase3_fail: defense_id={fd.get('defense_id')} "
                 f"category={fd.get('category') or '-'} error={fd.get('error')}"
             )
-    lines.append(f"- phase4_total_tested: {phase4.get('total_tested', 0)}")
+    lines.append(f"- phase4_total_tested: {phase4_total_tested}")
     lines.append(f"- phase4_mode: {phase4.get('mode', '')}")
-    lines.append(f"- phase4_safe: {phase4.get('safe', 0)}")
-    lines.append(f"- phase4_unsafe: {phase4.get('unsafe', 0)}")
+    lines.append(f"- phase4_safe: {phase4_safe}")
+    lines.append(f"- phase4_unsafe: {phase4_unsafe}")
     if "benign_total" in phase4:
         lines.append(f"- phase4_benign_total: {phase4.get('benign_total', 0)}")
         lines.append(f"- phase4_false_positives: {phase4.get('false_positives', 0)}")
@@ -532,6 +610,8 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
             lines.append(f"- judgment_confidence: {row.get('judgment_confidence')}")
             lines.append(f"- failure_mode: {row.get('failure_mode') or ''}")
             lines.append(f"- mitre_technique_id: {row.get('mitre_technique_id') or ''}")
+            fv = verdict_accum.get(defense_id, "")
+            lines.append(f"- phase4_final_verdict (accumulated): {fv or '(unknown)'}")
             lines.append("")
             original_attack_prompt = str(row.get("original_attack_prompt") or "").strip()
             round_input_prompt = str(row.get("round_input_prompt") or "").strip()
@@ -562,7 +642,11 @@ def _write_review_log(final_state: dict, out_dir: Path, ts: str) -> Path:
                 lines.append("(방어코드 없음)")
             lines.append("")
             lines.append("### 3.5) 방어 응답(defended_response)")
-            defended_response = str(row.get("defended_response") or "").strip()
+            defended_response = str(
+                (defense_payload.get("defended_response") if defense_payload else "")
+                or row.get("defended_response")
+                or ""
+            ).strip()
             if defended_response:
                 lines.append(_response_body_for_review(defended_response))
             else:
