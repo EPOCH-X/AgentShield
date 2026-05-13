@@ -1,11 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 const TRANSLATE_MODEL =
   process.env.OLLAMA_TRANSLATE_MODEL ||
   process.env.OLLAMA_MODEL ||
   process.env.OLLAMA_GUARD_MODEL ||
   "qwen3.5:4b";
+const GOOGLE_TIMEOUT_MS = Number(process.env.TRANSLATE_GOOGLE_TIMEOUT_MS || 2500);
+const OLLAMA_TIMEOUT_MS = Number(process.env.TRANSLATE_OLLAMA_TIMEOUT_MS || 25_000);
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("translation timeout")), ms);
+    promise
+      .then(resolve, reject)
+      .finally(() => clearTimeout(timer));
+  });
+}
 
 function cleanTranslation(text: string) {
   return String(text || "")
@@ -47,7 +61,7 @@ async function translateWithOllama(text: string) {
       stream: false,
       options: { temperature: 0.1, num_predict: 1024 },
     }),
-    signal: AbortSignal.timeout(30_000),
+    signal: AbortSignal.timeout(OLLAMA_TIMEOUT_MS),
   });
 
   if (!res.ok) return "";
@@ -67,7 +81,7 @@ export async function POST(req: NextRequest) {
   if (!text) return NextResponse.json({ ok: true, translated: "" });
 
   try {
-    const translated = await translateWithGoogle(text);
+    const translated = await withTimeout(translateWithGoogle(text), GOOGLE_TIMEOUT_MS);
     if (!needsFallback(text, translated)) {
       return NextResponse.json({ ok: true, translated, provider: "google" });
     }

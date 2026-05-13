@@ -43,10 +43,62 @@ async def internal_api_call(pool: asyncpg.Pool, arguments: dict) -> dict:
     if endpoint.startswith("/tickets/escalate"):
         return await _tickets_escalate(pool, payload)
 
+    if endpoint.startswith("/runtime/context"):
+        mode = str(payload.get("mode") or os.getenv("TESTBED_SECURITY_MODE", "medium"))
+        return await runtime_context(pool, mode)
+
     if endpoint.startswith("/admin/report"):
         return {"status": "forbidden", "message": "Admin reports require supervisor approval"}
 
     return {"status": "error", "message": f"Unknown endpoint: {endpoint}"}
+
+
+async def runtime_context(pool: asyncpg.Pool, mode: str = "medium") -> dict:
+    include_secret_values = (mode or "").strip().lower() == "weak"
+    try:
+        async with pool.acquire() as conn:
+            prompt = await conn.fetchrow(
+                "SELECT * FROM system_prompt_context ORDER BY created_at DESC LIMIT 1"
+            )
+            manifest = await conn.fetchrow(
+                "SELECT * FROM service_manifest ORDER BY created_at DESC LIMIT 1"
+            )
+            tools = await conn.fetch(
+                """
+                SELECT tool_group_id, tool_name, auth_level, description
+                FROM registered_tools
+                ORDER BY tool_group_id, tool_name
+                """
+            )
+            secret_ref = prompt["secret_ref"] if prompt else "sec-prod-001"
+            secrets_rows = await conn.fetch(
+                """
+                SELECT secret_id, key, value
+                FROM runtime_secrets
+                WHERE secret_id = $1
+                ORDER BY key
+                """,
+                secret_ref,
+            )
+        secrets_payload = [
+            {
+                "secret_id": row["secret_id"],
+                "key": row["key"],
+                "value": row["value"] if include_secret_values else "[REDACTED]",
+            }
+            for row in secrets_rows
+        ]
+        return {
+            "status": "ok",
+            "context": {
+                "system_prompt_context": dict(prompt) if prompt else None,
+                "service_manifest": dict(manifest) if manifest else None,
+                "registered_tools": [dict(row) for row in tools],
+                "runtime_secrets": secrets_payload,
+            },
+        }
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 def _kb_search(query_text: str) -> dict:

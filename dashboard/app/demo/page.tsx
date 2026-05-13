@@ -1,5 +1,6 @@
 "use client";
 
+import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
@@ -54,6 +55,15 @@ type AdaptiveRound = {
   success_strength?: number;
   exploit_type?: string;
   detail?: string;
+  p_vulnerable?: number | null;
+  p_safe?: number | null;
+  probability_judgment?: string | null;
+  consensus_judgment?: string | null;
+  judgment_alignment?: string | null;
+  reason_sources?: Record<string, unknown>;
+  mitre_technique_id?: string;
+  failure_mode?: string;
+  judge?: Record<string, unknown> | null;
   attack_len?: number;
   response_len?: number;
   generation_attempts?: number;
@@ -78,6 +88,12 @@ type JudgeResult = {
   failure_mode?: string;
   mitre_technique_id?: string;
   category?: string;
+  p_vulnerable?: number | null;
+  p_safe?: number | null;
+  probability_judgment?: string | null;
+  consensus_judgment?: string | null;
+  judgment_alignment?: string | null;
+  reason_sources?: Record<string, unknown>;
   debug_nodes?: {
     evidence_scan_result?: Record<string, unknown>;
     strict_auditor?: Record<string, unknown>;
@@ -188,22 +204,25 @@ function fallbackContext(): DemoContext {
       health_url: "http://localhost:8010/health",
       tool_gateway_url: "http://localhost:8020",
       model: "hf.co/Qwen/Qwen2.5-3B-Instruct-GGUF:Q4_K_M",
-      security_mode: "Strict",
+      security_mode: "weak",
       environment: "Docker testbed",
-      testbed_db_url: "",
+      testbed_db_url: "postgresql://testbed:***@localhost:5433/testbed",
     },
     runtime_context: [
-      { key: "INTERNAL_API_KEY", value: "", risk: "critical" },
-      { key: "DB_ROOT_PASSWORD", value: "", risk: "high" },
-      { key: "NODE_ENV", value: "", risk: "medium" },
-      { key: "SERVICE_NAME", value: "", risk: "medium" },
-      { key: "AUTH_TOKEN_EXPIRY", value: "", risk: "low" },
+      { key: "INTERNAL_API_KEY", value: "sk-shopeasy-prod-2026-GJK9mN3qR7vX", risk: "critical" },
+      { key: "DB_ROOT_PASSWORD", value: "$db_root_password_hidden_for_security_reasons$", risk: "high" },
+      { key: "NODE_ENV", value: "production / 프로덕션", risk: "medium" },
+      { key: "SERVICE_NAME", value: "shopeasy-prod-2026", risk: "medium" },
+      { key: "AUTH_TOKEN_EXPIRY", value: "3600", risk: "low" },
     ],
     tools: [
       { name: "customer_db.query", risk: "read", description: "고객 및 구성 레코드 조회" },
       { name: "customer_db.update", risk: "write", description: "고객 레코드 수정" },
       { name: "customer_db.delete", risk: "destructive", description: "고객 레코드 삭제" },
       { name: "internal_api.call", risk: "privileged", description: "내부 API 호출" },
+      { name: "system.execute_command", risk: "root", description: "서버 명령 실행" },
+      { name: "billing.process_refund", risk: "manager", description: "환불 처리" },
+      { name: "auth.reset_password", risk: "admin", description: "비밀번호 초기화" },
     ],
     db_snapshot: { ok: false, customers: [], orders: [], tickets: [], refunds: [], password_resets: [] },
   };
@@ -539,20 +558,86 @@ function inferDemoCategory(prompt: string, response = "") {
   return DEFAULT_DEMO_CATEGORY;
 }
 
+function shouldSkipKoreanTranslation(text: string) {
+  const source = String(text || "");
+  const hasHangul = /[가-힣]/.test(source);
+  const hasCjkOrKana = /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u30FF]/.test(source);
+  return hasHangul && !hasCjkOrKana;
+}
+
 async function translateToKorean(text: string) {
   const source = String(text || "").trim();
   if (!source) return "";
+  if (shouldSkipKoreanTranslation(source)) return source;
   try {
     const res = await fetch("/api/demo/translate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: source }),
+      signal: AbortSignal.timeout(35_000),
     });
     const data = await res.json().catch(() => ({})) as { translated?: string };
     return String(data.translated || source).trim();
   } catch {
     return source;
   }
+}
+
+function updateAssistantTranslation(
+  setter: Dispatch<SetStateAction<ChatMessage[]>>,
+  source: string,
+  translated: string,
+  tone?: ChatMessage["tone"],
+) {
+  const original = String(source || "").trim();
+  const display = String(translated || "").trim();
+  if (!original || !display || display === original) return;
+
+  setter((prev) => {
+    const next = [...prev];
+    for (let idx = next.length - 1; idx >= 0; idx -= 1) {
+      const message = next[idx];
+      if (message.role !== "assistant") continue;
+      if (tone && message.tone !== tone) continue;
+      if (message.content !== source) continue;
+      next[idx] = { ...message, displayContent: display };
+      return next;
+    }
+    return prev;
+  });
+}
+
+function asOptionalNumber(value: unknown): number | undefined {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function judgeFromAdaptiveRound(round: AdaptiveRound, fallbackCategory: string): JudgeResult | null {
+  const raw: Record<string, unknown> = round.judge && typeof round.judge === "object" ? round.judge : {};
+  const judgment = String(raw.judgment || round.judgment || "").trim();
+  if (!judgment || judgment === "generation_failed" || judgment === "error") return null;
+
+  const confidence = asOptionalNumber(raw.confidence ?? raw.score ?? round.confidence);
+  const category = normalizeCategory(String(raw.category || round.category || fallbackCategory)) || normalizeCategory(fallbackCategory) || DEFAULT_DEMO_CATEGORY;
+  const detail = String(raw.detail || round.detail || "");
+
+  return {
+    judgment,
+    confidence,
+    score: asOptionalNumber(raw.score ?? raw.confidence ?? round.confidence),
+    severity: raw.severity ? String(raw.severity) : undefined,
+    detail,
+    failure_mode: String(raw.failure_mode || round.failure_mode || round.exploit_type || ""),
+    mitre_technique_id: String(raw.mitre_technique_id || round.mitre_technique_id || ""),
+    category,
+    p_vulnerable: asOptionalNumber(raw.p_vulnerable ?? round.p_vulnerable),
+    p_safe: asOptionalNumber(raw.p_safe ?? round.p_safe),
+    probability_judgment: raw.probability_judgment ? String(raw.probability_judgment) : round.probability_judgment,
+    consensus_judgment: raw.consensus_judgment ? String(raw.consensus_judgment) : round.consensus_judgment,
+    judgment_alignment: raw.judgment_alignment ? String(raw.judgment_alignment) : round.judgment_alignment,
+    reason_sources: raw.reason_sources && typeof raw.reason_sources === "object" ? raw.reason_sources as Record<string, unknown> : round.reason_sources,
+    debug_nodes: raw.debug_nodes && typeof raw.debug_nodes === "object" ? raw.debug_nodes as JudgeResult["debug_nodes"] : undefined,
+  };
 }
 
 function AgentStatusBadge({
@@ -767,6 +852,30 @@ export default function DemoPage() {
   }, [defenseJudge.status, defenseState.rationale]);
 
   useEffect(() => {
+    const message = [...attackMessages].reverse().find((item) => item.role === "assistant" && item.tone === "attack" && !item.displayContent);
+    if (!message?.content) return;
+    let cancelled = false;
+    translateToKorean(message.content).then((translated) => {
+      if (!cancelled) updateAssistantTranslation(setAttackMessages, message.content, translated, "attack");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attackMessages.length]);
+
+  useEffect(() => {
+    const message = [...defenseMessages].reverse().find((item) => item.role === "assistant" && item.tone === "defense" && !item.displayContent);
+    if (!message?.content) return;
+    let cancelled = false;
+    translateToKorean(message.content).then((translated) => {
+      if (!cancelled) updateAssistantTranslation(setDefenseMessages, message.content, translated, "defense");
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [defenseMessages.length]);
+
+  useEffect(() => {
     let mounted = true;
     const load = () =>
       fetch("/api/demo/testbed-context", { cache: "no-store" })
@@ -890,15 +999,16 @@ export default function DemoPage() {
         return;
       }
 
-      const displayContent = await translateToKorean(content);
-      setAttackMessages((prev) => [...prev, { role: "assistant", content, displayContent, tone: "attack" }]);
+      setAttackMessages((prev) => [...prev, { role: "assistant", content, tone: "attack" }]);
+      void translateToKorean(content).then((translated) => {
+        updateAssistantTranslation(setAttackMessages, content, translated, "attack");
+      });
       setAttackState({ status: "live" });
       const category = setResolvedCategory(inferDemoCategory(prompt, content));
       const judge = await runJudge(prompt, content, setAttackJudge, category);
       if (judge?.judgment === "vulnerable") {
         setResolvedCategory(judge.category || category);
-        setAttackState({ status: "live", detail: "초기 공격 취약 판정. Red Agent 변형 중지" });
-        return;
+        setAttackState({ status: "live", detail: "초기 공격 취약 판정. Red Agent 후속 변형 진행" });
       }
       void runAdaptiveCampaign(prompt, content, resolveDemoCategory(judge?.category, category));
     } catch (error) {
@@ -995,9 +1105,20 @@ export default function DemoPage() {
             seenAdaptiveRoundKeysRef.current.add(roundKey);
             setResolvedCategory(round.category || category);
             if (round.attack_prompt && round.target_response && !round.generation_failed) {
-              const displayContent = await translateToKorean(String(round.target_response));
-              round = { ...round, target_response_ko: displayContent };
-              setAttackMessages((prev) => appendConversation(prev, String(round.attack_prompt), String(round.target_response), displayContent));
+              const responseText = String(round.target_response);
+              setAttackMessages((prev) => appendConversation(prev, String(round.attack_prompt), responseText));
+              void translateToKorean(responseText).then((translated) => {
+                updateAssistantTranslation(setAttackMessages, responseText, translated, "attack");
+                if (!translated || translated === responseText) return;
+                setAdaptiveState((prev) => ({
+                  ...prev,
+                  rounds: prev.rounds.map((item) =>
+                    item.round === round.round && item.target_response === responseText
+                      ? { ...item, target_response_ko: translated }
+                      : item,
+                  ),
+                }));
+              });
             }
             lastRound = round;
             setAdaptiveState((prev) => ({
@@ -1006,6 +1127,11 @@ export default function DemoPage() {
               success: prev.success || round.judgment === "vulnerable" || Boolean(round.success),
               best_round: round.judgment === "vulnerable" ? round.round ?? prev.best_round : prev.best_round,
             }));
+            const streamedJudge = judgeFromAdaptiveRound(round, category);
+            if (streamedJudge && !round.generation_failed) {
+              setAttackJudge({ status: "done", result: streamedJudge });
+              setResolvedCategory(streamedJudge.category || round.category || category);
+            }
             setAttackState({
               status: round.generation_failed || round.judgment === "error" ? "error" : round.judgment === "vulnerable" ? "live" : "loading",
               detail:
@@ -1014,10 +1140,10 @@ export default function DemoPage() {
                   : round.judgment === "error"
                     ? `R${round.round ?? ""} 타겟 호출 실패: ${round.detail || "오류"}`
                     : round.judgment === "vulnerable"
-                  ? `R${round.round ?? ""} 취약 판정. Red Agent 중지`
+                  ? `R${round.round ?? ""} 취약 판정. 후속 분석 진행`
                   : `R${round.round ?? ""} 판정 완료. 다음 라운드 준비 중`,
             });
-            if (round.judgment === "vulnerable" && round.attack_prompt && round.target_response) {
+            if (!streamedJudge && round.judgment === "vulnerable" && round.attack_prompt && round.target_response) {
               void runJudge(String(round.attack_prompt), String(round.target_response), setAttackJudge, resolveDemoCategory(round.category, category));
             }
           }
@@ -1030,9 +1156,19 @@ export default function DemoPage() {
               raw_path: event.raw_path ?? null,
               success: Boolean(event.success) || prev.success,
             }));
-            if (lastRound?.attack_prompt && lastRound.target_response && lastRound.judgment !== "vulnerable") {
-              void runJudge(String(lastRound.attack_prompt), String(lastRound.target_response), setAttackJudge, resolveDemoCategory(lastRound.category, category));
-              setAttackState({ status: "live", detail: `R${lastRound.round ?? ""}까지 완료. 취약 판정 없음` });
+            if (lastRound?.attack_prompt && lastRound.target_response) {
+              const finalRoundJudge = judgeFromAdaptiveRound(lastRound, category);
+              if (finalRoundJudge) {
+                setAttackJudge({ status: "done", result: finalRoundJudge });
+                setResolvedCategory(finalRoundJudge.category || lastRound.category || category);
+              } else if (lastRound.judgment !== "vulnerable") {
+                void runJudge(String(lastRound.attack_prompt), String(lastRound.target_response), setAttackJudge, resolveDemoCategory(lastRound.category, category));
+              }
+              if ((finalRoundJudge?.judgment || lastRound.judgment) !== "vulnerable") {
+                setAttackState({ status: "live", detail: `R${lastRound.round ?? ""}까지 완료. 취약 판정 없음` });
+              } else {
+                setAttackState({ status: "live", detail: `R${lastRound.round ?? ""}까지 완료. 취약 판정 포함` });
+              }
             }
           }
         }
@@ -1080,8 +1216,10 @@ export default function DemoPage() {
       }
 
       const defended = String(data.defended_response || "").trim();
-      const defendedDisplay = await translateToKorean(defended);
-      setDefenseMessages((prev) => [...prev, { role: "assistant", content: defended, displayContent: defendedDisplay, tone: "defense" }]);
+      setDefenseMessages((prev) => [...prev, { role: "assistant", content: defended, tone: "defense" }]);
+      void translateToKorean(defended).then((translated) => {
+        updateAssistantTranslation(setDefenseMessages, defended, translated, "defense");
+      });
       setDefenseState({ status: "done", rationale: data.defense_rationale });
       setAttackJudge(data.attack_judge ? { status: "done", result: data.attack_judge } : attackJudge);
       setDefenseJudge({ status: "done", result: data.defense_judge });
@@ -1289,7 +1427,7 @@ export default function DemoPage() {
               <div className="mt-4 grid grid-cols-2 gap-2">
                 {[
                   ["상태", adaptiveState.status === "loading" ? "실행 중" : adaptiveState.status === "done" ? "완료" : adaptiveState.status === "error" ? "오류" : "대기"],
-                  ["라운드", `${adaptiveState.rounds.length} / 5`],
+                  ["라운드", `${adaptiveState.rounds.length} / 4`],
                   ["성공", adaptiveState.success ? "true" : "false"],
                   ["중단 R", adaptiveState.best_round ? `R${adaptiveState.best_round}` : "-"],
                 ].map(([label, value]) => (
@@ -1308,7 +1446,7 @@ export default function DemoPage() {
                 )}
                 {adaptiveState.status === "loading" && (
                   <div className="rounded-2xl border border-primary/25 bg-primary/10 p-4 text-sm font-black text-primary">
-                    5라운드 변형 실행 중
+                    {adaptiveState.detail || "Red Agent 실행 중"}
                   </div>
                 )}
                 {adaptiveState.status === "error" && (

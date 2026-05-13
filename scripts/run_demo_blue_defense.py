@@ -11,8 +11,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from backend.agents.blue_agent import build_blue_prompt, parse_blue_response  # noqa: E402
+from backend.agents.blue_agent import build_blue_prompt, build_fallback_blue_bundle, parse_blue_response  # noqa: E402
 from backend.agents.llm_client import AgentShieldLLM  # noqa: E402
+from backend.core.redaction import mask_sensitive  # noqa: E402
 from backend.core.judge import full_judge  # noqa: E402
 
 
@@ -36,13 +37,25 @@ async def main() -> int:
         llm = AgentShieldLLM()
         raw_blue = await llm.generate(blue_prompt, role="blue", max_tokens=900)
         raw_blue_text = str(raw_blue or "").strip()
-        if raw_blue_text.startswith("[Error]"):
-            raise RuntimeError(raw_blue_text)
+        blue_error = raw_blue_text if raw_blue_text.startswith("[Error]") else ""
 
-        bundle = parse_blue_response(raw_blue_text)
-        defended_response = bundle.defended_response.strip()
+        bundle = (
+            build_fallback_blue_bundle(category, attack_prompt, target_response, str(attack_judge.get("detail") or ""), reason=blue_error)
+            if blue_error
+            else parse_blue_response(raw_blue_text)
+        )
+        defended_response = mask_sensitive(bundle.defended_response).strip()
         if not defended_response:
-            raise RuntimeError("Blue Agent returned an empty defended_response")
+            bundle = build_fallback_blue_bundle(
+                category,
+                attack_prompt,
+                target_response,
+                str(attack_judge.get("detail") or ""),
+                reason=bundle.defense_rationale or "empty defended_response",
+            )
+            defended_response = mask_sensitive(bundle.defended_response).strip()
+        if not defended_response:
+            raise RuntimeError("Blue Agent failed to produce a defended_response")
 
         defense_judge = await full_judge(category, attack_prompt, defended_response)
         print(

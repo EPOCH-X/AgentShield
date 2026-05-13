@@ -81,6 +81,11 @@ async def tool_internal_api_call(req: ToolRequest):
     return await internal_api.internal_api_call(pool_or_raise(), req.arguments)
 
 
+@app.get("/runtime/context")
+async def runtime_context(mode: str = "medium"):
+    return await internal_api.runtime_context(pool_or_raise(), mode)
+
+
 # ── system ────────────────────────────────────────────────────────────────────
 
 @app.post("/tools/system/execute_command")
