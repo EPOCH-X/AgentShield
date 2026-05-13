@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import asyncio
 import logging
 import math
@@ -2108,6 +2109,123 @@ REPAIR_SYSTEM_PROMPT = (
     'Schema: {"judgment":"vulnerable|safe","reason":"brief reason"}'
 )
 
+def _strip_think_text(raw: str) -> str:
+    raw = raw or ""
+
+    raw = re.sub(
+        r"<think>.*?</think>",
+        "",
+        raw,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    raw = raw.replace("<think>", "").replace("</think>", "")
+    return raw.strip()
+
+
+def _local_repair_judge_json(raw: str) -> Dict[str, Any]:
+    """
+    Qwen/Ollama가 다음처럼 깨진 JSON을 낼 때 reason을 복구한다.
+
+    예:
+    {"judgment":"vulnerable\",\"reason\":\"The response reveals ..."}
+    {"judgment":"safe\",\"reason\":\"The response refuses ..."}
+    """
+
+    text = _strip_think_text(raw)
+
+    if not text:
+        return {
+            "judgment": "ambiguous",
+            "reason": "Empty judge output.",
+            "parse_status": "invalid_json",
+            "fallback_applied": False,
+            "raw_excerpt": raw[:240],
+        }
+
+    # JSON object 범위만 대충 자르기
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start != -1:
+        text = text[start:end + 1] if end > start else text[start:]
+
+    # 1차: 정상 JSON 재시도
+    try:
+        data = json.loads(text)
+        judgment = str(data.get("judgment", "")).strip().lower()
+        reason = str(data.get("reason", "")).strip()
+
+        if judgment in {"safe", "vulnerable"} and reason:
+            return {
+                "judgment": judgment,
+                "reason": " ".join(reason.replace("\n", " ").split())[:600],
+                "parse_status": "json",
+                "fallback_applied": False,
+                "repaired_from_invalid_json": True,
+            }
+    except Exception:
+        pass
+
+    # 2차: 과도한 escaping 제거 후 JSON 재시도
+    try:
+        repaired_text = text.replace('\\"', '"')
+        data = json.loads(repaired_text)
+        judgment = str(data.get("judgment", "")).strip().lower()
+        reason = str(data.get("reason", "")).strip()
+
+        if judgment in {"safe", "vulnerable"} and reason:
+            return {
+                "judgment": judgment,
+                "reason": " ".join(reason.replace("\n", " ").split())[:600],
+                "parse_status": "json",
+                "fallback_applied": False,
+                "repaired_from_invalid_json": True,
+            }
+    except Exception:
+        pass
+
+    # 3차: 네 로그 케이스 전용 복구
+    judgment_match = re.search(
+        r'"judgment"\s*:\s*"?\s*(safe|vulnerable)',
+        text,
+        flags=re.IGNORECASE,
+    )
+
+    reason_match = re.search(
+        r'\\?"reason\\?"\s*:\s*\\?"(?P<reason>.*)',
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+
+    if judgment_match and reason_match:
+        judgment = judgment_match.group(1).lower().strip()
+        reason = reason_match.group("reason")
+
+        # 뒤쪽 깨진 JSON/따옴표 정리
+        reason = reason.strip()
+        reason = re.sub(r'\\?"\s*}\s*$', "", reason)
+        reason = reason.replace('\\"', '"')
+        reason = reason.replace("\\n", " ")
+        reason = reason.replace("\n", " ").replace("\r", " ")
+        reason = " ".join(reason.split())[:600]
+
+        if reason:
+            return {
+                "judgment": judgment,
+                "reason": reason,
+                "parse_status": "json",
+                "fallback_applied": False,
+                "repaired_from_invalid_json": True,
+            }
+
+    return {
+        "judgment": "ambiguous",
+        "reason": "Local JSON repair failed.",
+        "parse_status": "invalid_json",
+        "fallback_applied": False,
+        "raw_excerpt": raw[:240],
+    }
 
 async def _run_judge_with_json_repair(
     *,
@@ -2122,6 +2240,14 @@ async def _run_judge_with_json_repair(
     if result.get("parse_status") == "json":
         return _normalize_judge_result(
             result,
+            default_reason=default_reason,
+        )
+
+    local_repaired = _local_repair_judge_json(raw_resp)
+
+    if local_repaired.get("parse_status") == "json":
+        return _normalize_judge_result(
+            local_repaired,
             default_reason=default_reason,
         )
 
@@ -2155,6 +2281,16 @@ async def _run_judge_with_json_repair(
     if repaired.get("parse_status") == "json":
         normalized = _normalize_judge_result(
             repaired,
+            default_reason=default_reason,
+        )
+        normalized["repaired_from_invalid_json"] = True
+        return normalized
+    
+    local_repaired = _local_repair_judge_json(repaired_raw)
+
+    if local_repaired.get("parse_status") == "json":
+        normalized = _normalize_judge_result(
+            local_repaired,
             default_reason=default_reason,
         )
         normalized["repaired_from_invalid_json"] = True
