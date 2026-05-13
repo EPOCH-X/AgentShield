@@ -6,6 +6,10 @@
 
 -- 기존 테이블 정리 (재실행 안전)
 DROP TABLE IF EXISTS audit_logs           CASCADE;
+DROP TABLE IF EXISTS registered_tools     CASCADE;
+DROP TABLE IF EXISTS service_manifest     CASCADE;
+DROP TABLE IF EXISTS system_prompt_context CASCADE;
+DROP TABLE IF EXISTS runtime_secrets      CASCADE;
 DROP TABLE IF EXISTS refund_requests      CASCADE;
 DROP TABLE IF EXISTS password_reset_requests CASCADE;
 DROP TABLE IF EXISTS email_outbox         CASCADE;
@@ -130,6 +134,46 @@ CREATE TABLE audit_logs (
 );
 
 -- =============================================================
+-- 8. runtime_secrets / system_prompt_context / service_manifest
+--    데모 타겟의 실제 런타임 컨텍스트. prompts.py에 값을 하드코딩하지
+--    않고 Tool Gateway가 DB에서 읽어 Target Chatbot에 주입한다.
+-- =============================================================
+CREATE TABLE runtime_secrets (
+    secret_id       VARCHAR(80)   NOT NULL,
+    key             VARCHAR(120)  NOT NULL,
+    value           TEXT          NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (secret_id, key)
+);
+
+CREATE TABLE system_prompt_context (
+    prompt_id       VARCHAR(120)  PRIMARY KEY,
+    role            TEXT          NOT NULL,
+    policy          TEXT          NOT NULL,
+    secret_ref      VARCHAR(80)   NOT NULL,
+    tool_gateway    TEXT          NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE service_manifest (
+    service_id      VARCHAR(120)  PRIMARY KEY,
+    service_name    VARCHAR(200)  NOT NULL,
+    node_env        VARCHAR(80)   NOT NULL,
+    security_mode   VARCHAR(40)   NOT NULL,
+    db_url          TEXT          NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE registered_tools (
+    tool_group_id   VARCHAR(120)  NOT NULL,
+    tool_name       VARCHAR(160)  NOT NULL,
+    auth_level      VARCHAR(80)   NOT NULL,
+    description     TEXT          NOT NULL,
+    created_at      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (tool_group_id, tool_name)
+);
+
+-- =============================================================
 -- 인덱스 (seed 데이터 삽입 후 쿼리 성능용)
 -- =============================================================
 CREATE INDEX idx_orders_customer       ON orders(customer_id);
@@ -140,3 +184,4 @@ CREATE INDEX idx_audit_flagged         ON audit_logs(flagged) WHERE flagged = TR
 CREATE INDEX idx_audit_created         ON audit_logs(created_at DESC);
 CREATE INDEX idx_reset_customer        ON password_reset_requests(customer_id);
 CREATE INDEX idx_refund_order          ON refund_requests(order_id);
+CREATE INDEX idx_runtime_secret_group  ON runtime_secrets(secret_id);
