@@ -72,6 +72,8 @@ interface SiteGptPhaseReport {
   defense_rationale_ko?: string;
   defense_judge: SiteGptJudgeLike;
   defense_judge_detail_ko?: string;
+  defense_attempt_count?: number;
+  defense_attempt_logs?: Array<{ attempt: number; judgment: string; detail?: string }>;
   created_at: string;
 }
 
@@ -381,7 +383,13 @@ export default function ScanPage() {
             attack_prompt: demoCurrentPrompt,
             target_response: pastedResponse,
             judge_detail: finalDetail,
+            max_attempts: 3,
           });
+          const attemptLogs = Array.isArray(blue.attempt_logs) ? blue.attempt_logs : [];
+          const attemptCount = Math.max(Number(blue.attempt_count || attemptLogs.length || 1), 1);
+          for (const row of attemptLogs) {
+            appendDemoLog("info", `[Phase3/4] 시도 ${row.attempt}/${attemptCount}: ${row.judgment}`);
+          }
           const defenseJudge = blue.defense_judge as SiteGptJudgeLike;
           const defenseJudgeDetail =
             defenseJudge.reason_sources?.consensus_reason ||
@@ -405,14 +413,25 @@ export default function ScanPage() {
             defense_rationale_ko: defenseRationaleKo,
             defense_judge: defenseJudge,
             defense_judge_detail_ko: defenseJudgeDetailKo,
+            defense_attempt_count: attemptCount,
+            defense_attempt_logs: attemptLogs,
             created_at: new Date().toLocaleString("ko-KR", { hour12: false }),
           });
           appendDemoLog("success", "[Phase3] Blue Agent 방어 응답 생성 완료");
           if (defendedResponseKo && defendedResponseKo !== blue.defended_response) {
             appendDemoLog("info", `[방어 응답 한글 번역] ${defendedResponseKo}`);
           }
-          appendDemoLog("success", `[Phase4] 방어 검증 판정: ${defenseJudge.judgment || "unknown"}`);
-          setSiteGptSdkDetail("Phase3 Blue Agent 및 Phase4 Judge 검증 완료. 하단 리포트를 확인하세요.");
+          const finalDefenseJudgment = blue.final_judgment || defenseJudge.judgment || "unknown";
+          appendDemoLog("success", `[Phase4] 방어 검증 최종 판정: ${finalDefenseJudgment}`);
+          if (finalDefenseJudgment === "safe") {
+            setSiteGptSdkDetail(
+              `Phase3/4 재검증 완료 (${attemptCount}회). 최종 safe 방어를 리포트에 반영했습니다.`,
+            );
+          } else {
+            setSiteGptSdkDetail(
+              `Phase3/4 재검증 완료 (${attemptCount}회). 최종 ${finalDefenseJudgment} 결과를 리포트에 반영했습니다.`,
+            );
+          }
         } catch (err: unknown) {
           const msg = err instanceof Error ? err.message : "Blue 방어 생성 실패";
           appendDemoLog("error", `[Phase3/4] ${msg}`);

@@ -130,6 +130,7 @@ class SiteGptBlueDefenseRequest(BaseModel):
     attack_prompt: str
     target_response: str
     judge_detail: str = ""
+    max_attempts: int = Field(default=3, ge=1, le=5)
 
 
 class SiteGptBlueDefenseResponse(BaseModel):
@@ -138,6 +139,9 @@ class SiteGptBlueDefenseResponse(BaseModel):
     attack_judge: dict[str, Any]
     defense_judge: dict[str, Any]
     raw_blue: str = ""
+    attempt_count: int = 1
+    final_judgment: str = "unknown"
+    attempt_logs: list[dict[str, Any]] = []
 
 
 class SiteGptTranslateRequest(BaseModel):
@@ -847,41 +851,70 @@ async def sitegpt_blue_defense(
             target_response=req.target_response,
             judge_detail=judge_detail,
         )
-        raw_blue = await AgentShieldLLM().generate(blue_prompt, role="blue", max_tokens=900)
-        raw_blue_text = str(raw_blue or "").strip()
-        blue_error = raw_blue_text if raw_blue_text.startswith("[Error]") else ""
+        max_attempts = max(1, min(int(req.max_attempts or 1), 5))
+        attempt_logs: list[dict[str, Any]] = []
+        attempt_count = 0
+        raw_blue_text = ""
+        defended_response = ""
+        defense_judge: dict[str, Any] = {"judgment": "unknown"}
+        bundle = None
+        for attempt in range(1, max_attempts + 1):
+            attempt_count = attempt
+            raw_blue = await AgentShieldLLM().generate(blue_prompt, role="blue", max_tokens=900)
+            raw_blue_text = str(raw_blue or "").strip()
+            blue_error = raw_blue_text if raw_blue_text.startswith("[Error]") else ""
 
-        bundle = (
-            build_fallback_blue_bundle(req.category, req.attack_prompt, req.target_response, judge_detail, reason=blue_error)
-            if blue_error
-            else parse_blue_response(raw_blue_text)
-        )
-        defended_response = mask_sensitive(bundle.defended_response).strip()
-        if not defended_response:
-            bundle = build_fallback_blue_bundle(
-                req.category,
-                req.attack_prompt,
-                req.target_response,
-                judge_detail,
-                reason=bundle.defense_rationale or "empty defended_response",
+            bundle = (
+                build_fallback_blue_bundle(req.category, req.attack_prompt, req.target_response, judge_detail, reason=blue_error)
+                if blue_error
+                else parse_blue_response(raw_blue_text)
             )
             defended_response = mask_sensitive(bundle.defended_response).strip()
-        if not defended_response:
-            raise RuntimeError("Blue Agent failed to produce a defended_response")
+            if not defended_response:
+                bundle = build_fallback_blue_bundle(
+                    req.category,
+                    req.attack_prompt,
+                    req.target_response,
+                    judge_detail,
+                    reason=bundle.defense_rationale or "empty defended_response",
+                )
+                defended_response = mask_sensitive(bundle.defended_response).strip()
+            if not defended_response:
+                raise RuntimeError("Blue Agent failed to produce a defended_response")
 
-        _debug_scan_judge_input(
-            "sitegpt.blue-defense.phase4",
-            category=req.category,
-            attack_prompt=req.attack_prompt,
-            target_response=defended_response,
-        )
-        defense_judge = await full_judge(req.category, req.attack_prompt, defended_response)
+            _debug_scan_judge_input(
+                "sitegpt.blue-defense.phase4",
+                category=req.category,
+                attack_prompt=req.attack_prompt,
+                target_response=defended_response,
+            )
+            defense_judge = await full_judge(req.category, req.attack_prompt, defended_response)
+            judgment = str(defense_judge.get("judgment") or "unknown")
+            attempt_logs.append(
+                {
+                    "attempt": attempt,
+                    "judgment": judgment,
+                    "detail": str(
+                        defense_judge.get("reason_sources", {}).get("consensus_reason")
+                        or defense_judge.get("detail")
+                        or ""
+                    ),
+                }
+            )
+            if judgment == "safe":
+                break
+
+        if bundle is None:
+            raise RuntimeError("Blue Agent failed to produce defense bundle")
         return SiteGptBlueDefenseResponse(
             defended_response=defended_response,
             defense_rationale=bundle.defense_rationale,
             attack_judge=attack_judge,
             defense_judge=defense_judge,
             raw_blue=raw_blue_text,
+            attempt_count=attempt_count,
+            final_judgment=str(defense_judge.get("judgment") or "unknown"),
+            attempt_logs=attempt_logs,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e

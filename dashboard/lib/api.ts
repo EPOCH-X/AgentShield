@@ -206,12 +206,20 @@ export async function postSitegptBlueDefense(payload: {
   attack_prompt: string;
   target_response: string;
   judge_detail?: string;
+  max_attempts?: number;
 }): Promise<{
   defended_response: string;
   defense_rationale: string;
   attack_judge: Record<string, unknown>;
   defense_judge: Record<string, unknown>;
   raw_blue?: string;
+  attempt_count?: number;
+  final_judgment?: string;
+  attempt_logs?: Array<{
+    attempt: number;
+    judgment: string;
+    detail?: string;
+  }>;
 }> {
   const res = await apiFetch("/api/v1/scan/sitegpt/blue-defense", {
     method: "POST",
@@ -220,6 +228,7 @@ export async function postSitegptBlueDefense(payload: {
       attack_prompt: payload.attack_prompt,
       target_response: payload.target_response,
       judge_detail: payload.judge_detail ?? "",
+      max_attempts: payload.max_attempts ?? 3,
     }),
   });
   if (!res.ok) {
