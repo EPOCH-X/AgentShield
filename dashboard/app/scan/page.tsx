@@ -360,14 +360,16 @@ export default function ScanPage() {
             : ""),
       );
       if (alignment) appendDemoLog("info", `  └ 합의 정렬: ${alignment}`);
-      if (finalDetail) appendDemoLog("info", `[판결문 - consensus] ${finalDetail}`);
-
-      // 종료 조건(취약 판정 OR 라운드 소진 직전 마지막)에서 한글 번역 출력
-      const translateAndLog = async (text: string) => {
-        if (!text.trim()) return;
-        const translated = await translateToKorean(text);
-        if (translated && translated !== text) appendDemoLog("info", `[한글 번역] ${translated}`);
-      };
+      if (consensusReason) {
+        appendDemoLog("info", `[판결문 - consensus] ${consensusReason}`);
+        void translateToKorean(consensusReason).then((translated) => {
+          if (translated && translated !== consensusReason) {
+            appendDemoLog("info", `[판결문 - consensus 한글 번역] ${translated}`);
+          }
+        });
+      } else if (finalDetail) {
+        appendDemoLog("info", `[판결문] ${finalDetail}`);
+      }
 
       if (verdict === "vulnerable") {
         setDemoActive(false);
@@ -417,7 +419,6 @@ export default function ScanPage() {
           setSiteGptSdkDetail(`Phase3/4 실패: ${msg}`);
         }
         appendDemoLog("success", "SiteGPT Demo 공격 루프 종료.");
-        await translateAndLog(finalDetail);
         return;
       }
 

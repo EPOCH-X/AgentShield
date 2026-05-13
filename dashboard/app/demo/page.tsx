@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
 
@@ -589,8 +589,9 @@ function AgentStatusBadge({
 }
 
 function verdictClass(value?: string | null) {
-  if (value === "vulnerable") return "text-error";
-  if (value === "safe") return "text-tertiary";
+  const verdict = String(value || "").toLowerCase();
+  if (verdict === "vulnerable") return "text-error";
+  if (verdict === "safe") return "text-tertiary";
   return "text-on-surface";
 }
 
@@ -676,6 +677,7 @@ export default function DemoPage() {
   const [isTranslatingDetail, setIsTranslatingDetail] = useState(false);
   const [translatedRationale, setTranslatedRationale] = useState<string | null>(null);
   const [activeCategory, setActiveCategory] = useState(DEFAULT_DEMO_CATEGORY);
+  const seenAdaptiveRoundKeysRef = useRef<Set<string>>(new Set());
 
   function resolveDemoCategory(...candidates: Array<string | undefined | null>) {
     return (
@@ -940,6 +942,7 @@ export default function DemoPage() {
 
   async function runAdaptiveCampaign(prompt: string, targetResponse = "", category = activeCategory) {
     setAdaptiveState({ status: "loading", rounds: [] });
+    seenAdaptiveRoundKeysRef.current.clear();
 
     try {
       const res = await fetch("/api/demo/red-adaptive", {
@@ -982,6 +985,14 @@ export default function DemoPage() {
           }
           if (event.type === "round" && event.round) {
             let round = event.round;
+            const roundKey = [
+              round.round ?? "",
+              round.judgment ?? "",
+              round.attack_prompt ?? "",
+              round.target_response ?? "",
+            ].join("\u001f");
+            if (seenAdaptiveRoundKeysRef.current.has(roundKey)) continue;
+            seenAdaptiveRoundKeysRef.current.add(roundKey);
             setResolvedCategory(round.category || category);
             if (round.attack_prompt && round.target_response && !round.generation_failed) {
               const displayContent = await translateToKorean(String(round.target_response));
@@ -1308,13 +1319,16 @@ export default function DemoPage() {
                     </p>
                   </div>
                 )}
-                {adaptiveState.rounds.map((round) => (
+                {adaptiveState.rounds.map((round) => {
+                  const roundJudgment = String(round.judgment || "").toLowerCase();
+                  const isVulnerableRound = roundJudgment === "vulnerable" || Boolean(round.success);
+                  return (
                   <div
-                    key={`adaptive-round-${round.round}`}
+                    key={`adaptive-round-${round.round}-${roundJudgment}-${round.attack_len ?? 0}`}
                     className={`rounded-2xl border p-4 ${
-                      round.success
+                      isVulnerableRound
                         ? "border-error/35 bg-error/10"
-                        : round.judgment === "safe"
+                        : roundJudgment === "safe"
                           ? "border-tertiary/25 bg-tertiary/10"
                           : "border-white/10 bg-white/5"
                     }`}
@@ -1322,7 +1336,7 @@ export default function DemoPage() {
                     <div className="flex items-center justify-between gap-3">
                       <p className="font-headline text-base font-black text-on-surface">R{round.round}</p>
                       <span className={`rounded-full border px-2 py-1 font-mono text-[10px] font-black ${
-                        round.success ? "border-error/30 text-error" : "border-white/10 text-on-surface-variant"
+                        isVulnerableRound ? "border-error/30 text-error" : "border-white/10 text-on-surface-variant"
                       }`}>
                         {round.judgment || "unknown"}
                       </span>
@@ -1349,7 +1363,8 @@ export default function DemoPage() {
                       </details>
                     )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </section>
@@ -1390,7 +1405,7 @@ export default function DemoPage() {
                 </div>
               )}
               {attackJudge.result && (() => {
-                const cat = resolveDemoCategory(attackJudge.result!.category);
+                const cat = normalizeCategory(attackJudge.result!.category);
                 const danger = CATEGORY_DANGER[cat];
                 if (!danger) return null;
                 const catColor = CATEGORY_COLORS[cat] ?? "text-error";
@@ -1528,10 +1543,10 @@ export default function DemoPage() {
                       {attackJudge.status === "done" ? "Judge Result" : "Judge 대기"}
                     </p>
                     {(() => {
-                      const category = resolveDemoCategory(attackJudge.result?.category);
+                      const category = normalizeCategory(attackJudge.result?.category);
                       return (
                         <h2 className={`mt-1 break-words font-headline text-3xl font-black ${CATEGORY_COLORS[category] ?? "text-on-surface"}`}>
-                          {category} · {CATEGORY_LABELS[category] ?? "판정"}
+                          {category ? `${category} · ${CATEGORY_LABELS[category]}` : "카테고리 판정 대기"}
                         </h2>
                       );
                     })()}

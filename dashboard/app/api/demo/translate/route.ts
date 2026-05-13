@@ -1,12 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
-const TRANSLATE_MODEL = process.env.OLLAMA_GUARD_MODEL || "qwen3.5:4b";
+const TRANSLATE_MODEL =
+  process.env.OLLAMA_TRANSLATE_MODEL ||
+  process.env.OLLAMA_MODEL ||
+  process.env.OLLAMA_GUARD_MODEL ||
+  "qwen3.5:4b";
+
+function cleanTranslation(text: string) {
+  return String(text || "")
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .trim();
+}
+
+function hasChineseOrJapanese(text: string) {
+  return /[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u30FF]/.test(text);
+}
+
+function needsFallback(source: string, translated: string) {
+  const src = source.trim();
+  const out = translated.trim();
+  if (!out) return true;
+  if (hasChineseOrJapanese(out)) return true;
+  return out === src && /[A-Za-z]{4,}|[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u30FF]/.test(src);
+}
 
 async function translateWithGoogle(text: string) {
   const { translate } = await import("@vitalets/google-translate-api");
   const result = await translate(text, { to: "ko" });
-  return String(result.text || "").trim();
+  return cleanTranslation(result.text || "");
 }
 
 async function translateWithOllama(text: string) {
@@ -30,7 +52,7 @@ async function translateWithOllama(text: string) {
 
   if (!res.ok) return "";
   const data = await res.json() as { message?: { content?: string } };
-  return data?.message?.content?.trim() || "";
+  return cleanTranslation(data?.message?.content || "");
 }
 
 export async function POST(req: NextRequest) {
@@ -46,7 +68,15 @@ export async function POST(req: NextRequest) {
 
   try {
     const translated = await translateWithGoogle(text);
-    return NextResponse.json({ ok: true, translated: translated || text, provider: "google" });
+    if (!needsFallback(text, translated)) {
+      return NextResponse.json({ ok: true, translated, provider: "google" });
+    }
+    const fallback = await translateWithOllama(text);
+    return NextResponse.json({
+      ok: Boolean(fallback || translated),
+      translated: fallback || translated || text,
+      provider: fallback ? "ollama_after_google" : "fallback",
+    });
   } catch {
     try {
       const translated = await translateWithOllama(text);
