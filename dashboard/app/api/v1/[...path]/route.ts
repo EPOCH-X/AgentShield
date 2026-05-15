@@ -18,7 +18,7 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
     ? 180000
     : tail.startsWith("scan/sitegpt/")
       ? 90000
-      : 8000;
+      : 30000;
 
   // 백엔드로 프록시 시도
   try {
