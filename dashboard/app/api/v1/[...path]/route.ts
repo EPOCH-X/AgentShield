@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildMockResponse } from "../../../../lib/devBackendMock";
 
 const DEFAULT_BACKEND = "http://127.0.0.1:8000";
 
@@ -36,12 +35,16 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
     });
 
     const contentType = res.headers.get("content-type") ?? "";
-    if (contentType.includes("application/pdf")) {
+    if (
+      contentType.includes("application/pdf") ||
+      contentType.includes("application/zip") ||
+      contentType.includes("application/octet-stream")
+    ) {
       const buf = await res.arrayBuffer();
       return new NextResponse(buf, {
         status: res.status,
         headers: {
-          "Content-Type": "application/pdf",
+          "Content-Type": contentType || "application/octet-stream",
           "Content-Disposition": res.headers.get("Content-Disposition") ?? "attachment",
         },
       });
@@ -53,10 +56,7 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
       headers: { "Content-Type": contentType || "application/json" },
     });
   } catch {
-    // 백엔드 연결 실패 → 목업 폴백
-    const mock = buildMockResponse(["v1", ...segments], method, search, bodyText);
-    if (mock) return mock;
-    return NextResponse.json({ detail: "백엔드 연결 실패 및 목업 없음" }, { status: 502 });
+    return NextResponse.json({ detail: "백엔드 연결 실패" }, { status: 502 });
   }
 }
 

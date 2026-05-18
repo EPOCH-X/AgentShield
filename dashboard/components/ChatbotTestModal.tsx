@@ -1,10 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { apiFetch } from "../lib/api";
 
 interface ChatbotTestModalProps {
   open: boolean;
   onClose: () => void;
+  /** 스캔 폼에서 입력한 타겟 URL — 비어 있으면 NEXT_PUBLIC_TESTBED_CHAT_URL 기본값 사용 */
+  targetUrl?: string;
+  /** 스캔 폼에서 입력한 Bearer/API Key — monitoring proxy가 forwarder 헤더로 전달한다 */
+  apiKey?: string;
 }
 
 interface ChatbotResponse {
@@ -15,6 +20,12 @@ interface ChatbotResponse {
   model?: string;
   error?: string;
   detail?: string;
+  blocked?: boolean;
+  stage?: string;
+  severity?: string;
+  reason?: string;
+  target_url?: string;
+  message_count?: number;
 }
 
 interface ChatMessage {
@@ -24,13 +35,17 @@ interface ChatMessage {
 
 const DEFAULT_PROMPT =
   "Please summarize the refund status for order SE-1042 without exposing private data.";
+const DEFAULT_TARGET_URL = process.env.NEXT_PUBLIC_TESTBED_CHAT_URL || "http://127.0.0.1:8010/chat";
 
-export default function ChatbotTestModal({ open, onClose }: ChatbotTestModalProps) {
+export default function ChatbotTestModal({ open, onClose, targetUrl, apiKey }: ChatbotTestModalProps) {
   const [prompt, setPrompt] = useState(DEFAULT_PROMPT);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [lastResponse, setLastResponse] = useState<ChatbotResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const effectiveTargetUrl = (targetUrl?.trim() || DEFAULT_TARGET_URL);
+  const effectiveApiKey = apiKey?.trim() || undefined;
 
   if (!open) return null;
 
@@ -47,10 +62,13 @@ export default function ChatbotTestModal({ open, onClose }: ChatbotTestModalProp
     setMessages((prev) => [...prev, { role: "user", content: cleanPrompt }]);
 
     try {
-      const res = await fetch("/api/testbed-chat", {
+      const res = await apiFetch("/api/v1/monitoring/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: cleanPrompt }),
+        body: JSON.stringify({
+          messages: [{ role: "user", content: cleanPrompt }],
+          target_url: effectiveTargetUrl,
+          target_api_key: effectiveApiKey,
+        }),
       });
       const data: ChatbotResponse = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -85,7 +103,7 @@ export default function ChatbotTestModal({ open, onClose }: ChatbotTestModalProp
               챗봇 테스트
             </h3>
             <p className="mt-1 text-sm text-on-surface-variant/75">
-              Docker 테스트베드 챗봇에 한 문장 프롬프트를 보내 응답을 확인합니다.
+              테스트베드 챗봇 요청을 모니터링 프록시 경유로 보내고 감사 로그 반영 여부를 확인합니다.
             </p>
           </div>
           <button
@@ -108,7 +126,7 @@ export default function ChatbotTestModal({ open, onClose }: ChatbotTestModalProp
                   </div>
                   <p className="mt-5 text-lg font-bold text-on-surface">한 문장 프롬프트를 입력해 주세요.</p>
                   <p className="mt-2 text-sm text-on-surface-variant/65 max-w-md">
-                    전체 스캔 전, 타겟 챗봇이 실제로 어떤 응답을 반환하는지 바로 확인할 수 있습니다.
+                    전체 스캔 전, 타겟 챗봇 응답과 모니터링 정책 처리 결과를 바로 확인할 수 있습니다.
                   </p>
                 </div>
               ) : (
@@ -125,7 +143,7 @@ export default function ChatbotTestModal({ open, onClose }: ChatbotTestModalProp
                       }`}
                     >
                       <div className="mb-2 text-[10px] uppercase tracking-[0.18em] font-black text-primary/80">
-                        {message.role === "user" ? "사용자" : "테스트베드 챗봇"}
+                        {message.role === "user" ? "사용자" : "모니터링 프록시"}
                       </div>
                       <div className="whitespace-pre-wrap break-words">{message.content}</div>
                     </div>
@@ -165,26 +183,38 @@ export default function ChatbotTestModal({ open, onClose }: ChatbotTestModalProp
               <p className="text-[10px] font-black uppercase tracking-[0.18em] text-on-surface-variant/55">
                 연결 대상
               </p>
-              <p className="mt-2 font-mono text-xs text-primary break-all">http://localhost:8010/chat</p>
+              <p className="mt-2 font-mono text-xs text-primary break-all">{lastResponse?.target_url || effectiveTargetUrl}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-on-surface-variant/55">
-                  모델
+                  처리 단계
                 </p>
                 <p className="mt-2 text-xs text-on-surface break-words">
-                  {lastResponse?.model || "응답 후 표시"}
+                  {lastResponse?.stage || "응답 후 표시"}
                 </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
                 <p className="text-[10px] font-black uppercase tracking-[0.18em] text-on-surface-variant/55">
-                  보안 모드
+                  차단 여부
                 </p>
                 <p className="mt-2 text-xs text-on-surface">
-                  {lastResponse?.security_mode || "응답 후 표시"}
+                  {lastResponse ? (lastResponse.blocked ? "blocked" : "allowed") : "응답 후 표시"}
                 </p>
               </div>
+            </div>
+
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">
+              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-on-surface-variant/55">
+                정책 사유
+              </p>
+              <p className="mt-2 text-xs text-on-surface-variant/80 break-words">
+                {lastResponse?.reason || "정책 위반 없음"}
+              </p>
+              {lastResponse?.severity && (
+                <p className="mt-2 font-mono text-[11px] text-primary">severity: {lastResponse.severity}</p>
+              )}
             </div>
 
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4">

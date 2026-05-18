@@ -3,6 +3,7 @@
 """
 
 from datetime import date
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,8 +14,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.database import get_db
 from backend.api.auth import get_current_user, UserInfo
 from backend.models import Employee, Violation, PolicyRule, UsageLog
+from monitoring_proxy.monitor_server import (
+    MonitorChatRequest as ProxyMonitorChatRequest,
+    MonitorChatResponse as ProxyMonitorChatResponse,
+    process_monitor_request,
+)
+from monitoring_proxy.services import get_default_intent_review_llm_client
 
 router = APIRouter()
+
+
+DEFAULT_MONITORING_TARGET_URL = os.getenv(
+    "MONITORING_TARGET_URL",
+    os.getenv("TESTBED_CHAT_URL", "http://127.0.0.1:8010/chat"),
+)
 
 
 # ── 대시보드 ──────────────────────────────────────────────────────────────────
@@ -221,3 +234,31 @@ async def create_policy(
     await db.commit()
     await db.refresh(rule)
     return _policy_dict(rule)
+
+
+# ── 모니터링 프록시 채팅 ──────────────────────────────────────────────────────
+
+@router.post("/chat", response_model=ProxyMonitorChatResponse)
+async def monitored_chat(
+    body: ProxyMonitorChatRequest,
+    user: UserInfo = Depends(get_current_user),
+):
+    """
+    Dashboard 1:1 chatbot traffic through the monitoring proxy.
+
+    The proxy checks input policy, forwards allowed traffic to the target LLM,
+    masks the output, and writes usage/violation records for the monitoring page.
+    """
+
+    updates = {}
+    if not body.target_url:
+        updates["target_url"] = DEFAULT_MONITORING_TARGET_URL
+    if not body.employee_id:
+        updates["employee_id"] = user.username
+    if updates:
+        body = body.model_copy(update=updates)
+
+    return process_monitor_request(
+        body,
+        llm_client_factory=get_default_intent_review_llm_client,
+    )

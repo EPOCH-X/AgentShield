@@ -51,6 +51,8 @@ class ScanRequest(BaseModel):
     target_provider: Optional[str] = None
     target_model: Optional[str] = None
     max_phase: Optional[int] = None
+    # OWASP LLM 카테고리 필터 — None 또는 빈 리스트면 전체(LLM01/02/06/07)
+    categories: Optional[list[str]] = None
 
 
 class ScanResponse(BaseModel):
@@ -271,10 +273,16 @@ async def _persist_phase1_result_realtime(*, session_id: str, result: dict[str, 
             )
         )
         if existing is not None:
+            # 동일 row가 이미 있어도 Phase3가 매칭할 수 있도록 result dict에 ID를 주입한다.
+            result["test_result_id"] = existing
             return
 
-        db.add(_build_phase1_row(session_id=session_uuid, result=result))
+        row = _build_phase1_row(session_id=session_uuid, result=result)
+        db.add(row)
         await db.commit()
+        await db.refresh(row)
+        # Phase3 _derive_defense_id 가 이 값을 사용해 TestResult row를 다시 찾는다.
+        result["test_result_id"] = row.id
 
 
 def _build_target_config(req: ScanRequest) -> dict[str, Any]:
@@ -283,6 +291,26 @@ def _build_target_config(req: ScanRequest) -> dict[str, Any]:
         "provider": req.target_provider,
         "model": req.target_model,
     }
+
+
+_ALLOWED_CATEGORIES = {"LLM01", "LLM02", "LLM06", "LLM07"}
+
+
+def _normalize_categories(raw: Optional[list[str]]) -> Optional[list[str]]:
+    """프론트에서 받은 카테고리 리스트를 검증해 정규화한다.
+    None / 빈 리스트 / 'ALL' 포함이면 None을 반환(전체 카테고리 실행)."""
+    if not raw:
+        return None
+    cleaned: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        normalized = item.strip().upper()
+        if normalized == "ALL":
+            return None
+        if normalized in _ALLOWED_CATEGORIES and normalized not in cleaned:
+            cleaned.append(normalized)
+    return cleaned or None
 
 
 async def _persist_phase1_results(
@@ -356,13 +384,22 @@ async def _auto_export_session(db: AsyncSession, *, session_id: str, session_sta
             select(func.count()).select_from(TestResult)
             .where(TestResult.session_id == sid, TestResult.judgment == "vulnerable")
         ) or 0
+        safe = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "safe")
+        ) or 0
+        ambiguous = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "ambiguous")
+        ) or 0
         status_data = {
             "session_id": session_id,
             "status": session_status,
             "exported_at": datetime.utcnow().isoformat(),
             "total_results": total_rows,
             "vulnerable_count": vulnerable,
-            "safe_count": max(0, total_rows - vulnerable),
+            "safe_count": safe,
+            "ambiguous_count": ambiguous,
         }
         (export_dir / "status.json").write_text(
             json.dumps(status_data, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -412,6 +449,7 @@ async def _execute_scan_background(
     target_url: str,
     target_config: dict[str, Any],
     max_phase: int = 2,
+    categories: Optional[list[str]] = None,
 ) -> None:
     print(f"[scan:{session_id}] background scan started target={target_url}", flush=True)
     logger.info("[scan:%s] background scan started target=%s", session_id, target_url)
@@ -437,6 +475,7 @@ async def _execute_scan_background(
                 ),
                 max_phase=max_phase,
                 max_failed_attempts=5,
+                categories=categories,
             )
             SCAN_SUMMARIES[session_id] = {
                 "termination_reason": final_state.get("termination_reason") or "",
@@ -516,12 +555,14 @@ async def start_scan(
     print(f"[scan:{session_id}] scan accepted and queued target={req.target_url}", flush=True)
     logger.info("[scan:%s] scan accepted and queued target=%s", session_id, req.target_url)
     bounded_max_phase = max(2, min(4, int(req.max_phase or 2)))
+    normalized_categories = _normalize_categories(req.categories)
     task = asyncio.create_task(
         _execute_scan_background(
             session_id=session_id,
             target_url=req.target_url,
             target_config=_build_target_config(req),
             max_phase=bounded_max_phase,
+            categories=normalized_categories,
         )
     )
     SCAN_TASKS[session_id] = task
@@ -648,6 +689,14 @@ async def scan_status(
             select(func.count()).select_from(TestResult)
             .where(TestResult.session_id == sid, TestResult.judgment == "vulnerable")
         ) or 0
+        safe = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "safe")
+        ) or 0
+        ambiguous = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "ambiguous")
+        ) or 0
         max_phase  = await db.scalar(
             select(func.max(TestResult.phase)).where(TestResult.session_id == sid)
         ) or 1
@@ -672,6 +721,8 @@ async def scan_status(
         total_rows = 0
         phase1_completed = 0
         vulnerable = 0
+        safe = 0
+        ambiguous = 0
         max_phase = 1
         expected_phase1_total = 0
 
@@ -694,7 +745,8 @@ async def scan_status(
         "completed_tests":  completed,
         "stored_results_count": total_rows,
         "vulnerable_count": vulnerable,
-        "safe_count":       max(0, total_rows - vulnerable),
+        "safe_count":       safe,
+        "ambiguous_count":  ambiguous,
         "elapsed_seconds":  elapsed,
         "termination_reason": (SCAN_SUMMARIES.get(session_id) or {}).get("termination_reason"),
         "attempted_count": (SCAN_SUMMARIES.get(session_id) or {}).get("attempted_count"),

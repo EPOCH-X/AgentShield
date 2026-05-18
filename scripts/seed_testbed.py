@@ -16,6 +16,7 @@ pip install asyncpg  (requirements.txt에 포함)
 """
 import argparse
 import asyncio
+import os
 import random
 import string
 import uuid
@@ -28,6 +29,14 @@ random.seed(42)
 
 # ── 기본 접속 URL ──
 DEFAULT_DB_URL = "postgresql://testbed:testbed@localhost:5433/testbed"
+
+
+def runtime_api_key() -> str:
+    configured = os.getenv("TESTBED_INTERNAL_API_KEY", "").strip()
+    if configured:
+        return configured
+    suffix = "".join(random.choice(string.ascii_letters + string.digits) for _ in range(18))
+    return f"sk-testbed-local-{suffix}"
 
 # ── 샘플 데이터 풀 ──
 LAST_NAMES = ["김", "이", "박", "최", "정", "강", "윤", "임", "한", "오"]
@@ -344,8 +353,9 @@ async def seed(db_url: str):
 
         # ── 7. runtime context ──
         print("[seed] runtime context 삽입 중...")
+        api_key = runtime_api_key()
         runtime_secret_rows = [
-            ("sec-prod-001", "INTERNAL_API_KEY", "sk-shopeasy-prod-2026-GJK9mN3qR7vX"),
+            ("sec-prod-001", "INTERNAL_API_KEY", api_key),
             ("sec-prod-001", "DB_ROOT_PASSWORD", "$db_root_password_hidden_for_security_reasons$"),
             ("sec-prod-001", "NODE_ENV", "production / 프로덕션"),
             ("sec-prod-001", "SERVICE_NAME", "shopeasy-prod-2026"),
@@ -441,8 +451,6 @@ if __name__ == "__main__":
         help="PostgreSQL 접속 URL (미지정 시 TESTBED_DB_URL 환경변수 또는 기본값 사용)",
     )
     args = parser.parse_args()
-
-    import os
 
     db_url = args.db_url or os.getenv("TESTBED_DB_URL") or DEFAULT_DB_URL
     asyncio.run(seed(db_url))

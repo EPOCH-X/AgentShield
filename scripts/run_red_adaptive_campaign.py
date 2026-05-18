@@ -16,6 +16,7 @@ import random
 import re
 import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -49,20 +50,43 @@ def _slug(value: str) -> str:
 
 def _load_attack_file(path: Path, category: str = "ALL") -> list[dict[str, Any]]:
     with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
-    rows = data if isinstance(data, list) else data.get("patterns", [data])
+        if path.suffix.lower() == ".jsonl":
+            rows = [json.loads(line) for line in f if line.strip()]
+        else:
+            data = json.load(f)
+            rows = data if isinstance(data, list) else data.get("patterns", [data])
     attacks: list[dict[str, Any]] = []
     for idx, item in enumerate(rows, start=1):
+        messages = item.get("messages") if isinstance(item.get("messages"), list) else []
+        assistant_prompt = next(
+            (
+                str(message.get("content") or "")
+                for message in reversed(messages)
+                if isinstance(message, dict) and message.get("role") == "assistant"
+            ),
+            "",
+        )
+        user_instruction = next(
+            (
+                str(message.get("content") or "")
+                for message in messages
+                if isinstance(message, dict) and message.get("role") == "user"
+            ),
+            "",
+        )
         prompt = (
             item.get("attack_prompt")
             or item.get("mutated_prompt")
             or item.get("prompt_text")
             or item.get("original_prompt")
+            or assistant_prompt
             or ""
         )
         if not prompt:
             continue
-        cat = str(item.get("category") or "LLM01")
+        category_match = re.search(r"(?im)^Category:\s*(LLM\d+)\b", user_instruction)
+        subcategory_match = re.search(r"(?im)^Subcategory:\s*([^\n]+)", user_instruction)
+        cat = str(item.get("category") or (category_match.group(1) if category_match else "") or "LLM01")
         if category != "ALL" and cat != category:
             continue
         attacks.append(
@@ -70,7 +94,7 @@ def _load_attack_file(path: Path, category: str = "ALL") -> list[dict[str, Any]]
                 "id": str(item.get("id") or item.get("attack_pattern_id") or f"seed-{idx}"),
                 "seed_id": str(item.get("seed_id") or item.get("id") or f"seed-{idx}"),
                 "category": cat,
-                "subcategory": str(item.get("subcategory") or ""),
+                "subcategory": str(item.get("subcategory") or (subcategory_match.group(1).strip() if subcategory_match else "")),
                 "attack_prompt": str(prompt),
                 "target_response": str(item.get("target_response") or ""),
                 "detail": str(item.get("detail") or item.get("judge_detail") or ""),
@@ -1433,7 +1457,7 @@ def _resolve_max_attack_chars(args: argparse.Namespace) -> int:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a no-DB/no-Chroma adaptive Red Agent campaign.")
-    parser.add_argument("--input", default=os.getenv("ATTACK_PATTERN_PATH", "data/curated_attack_sets/testbed_manual_mixed_10.json"))
+    parser.add_argument("--input", default=os.getenv("ATTACK_PATTERN_PATH", "data/파인튜닝원본데이터/accepted.jsonl"))
     parser.add_argument("--target-url", required=True)
     parser.add_argument("--target-provider", default=os.getenv("TARGET_PROVIDER") or None)
     parser.add_argument("--target-model", default=os.getenv("TARGET_MODEL") or None)
@@ -1466,7 +1490,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--category", default="ALL")
     parser.add_argument("--campaign-id", default="")
     parser.add_argument("--output-dir",
-                        default=os.getenv("RED_CAMPAIGN_OUTPUT_DIR", "data/red_campaigns"))
+                        default=os.getenv("RED_CAMPAIGN_OUTPUT_DIR", str(Path(tempfile.gettempdir()) / "agentshield-red-campaigns")))
     parser.add_argument(
         "--canary-file",
         default=os.getenv("RL_RED_CANARY_FILE") or None,

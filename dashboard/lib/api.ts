@@ -104,10 +104,11 @@ export async function startScan(
   project_name: string,
   target_api_key?: string,
   max_phase?: number,
+  categories?: string[],
 ): Promise<{ session_id: string; status: string }> {
   const res = await apiFetch("/api/v1/scan/llm-security", {
     method: "POST",
-    body: JSON.stringify({ target_url, project_name, target_api_key, max_phase }),
+    body: JSON.stringify({ target_url, project_name, target_api_key, max_phase, categories }),
   });
   if (!res.ok) throw new Error("스캔을 시작할 수 없습니다.");
   return res.json();
@@ -121,6 +122,7 @@ export async function getScanStatus(sessionId: string): Promise<{
   completed_tests: number;
   vulnerable_count: number;
   safe_count: number;
+  ambiguous_count?: number;
   elapsed_seconds?: number;
   termination_reason?: string;
   attempted_count?: number;

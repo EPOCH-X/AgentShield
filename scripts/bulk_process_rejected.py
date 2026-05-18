@@ -23,16 +23,18 @@ GPU/LLM 호출 없음.
 
 사용법:
 venv/bin/python scripts/bulk_process_rejected.py \
-    data/finetuning/red_v4.rejected.json \
-    data/finetuning/red_v5.rejected.json \
-    data/finetuning/red_v6.rejected.json \
-    data/finetuning/red_v7.rejected.json \
-    data/finetuning/red_v8.rejected.json \
-    data/finetuning/red_v8.1.rejected.json \
-    --output-dir data/finetuning/bulk
+    /tmp/agentshield-finetuning/red_v4.rejected.json \
+    /tmp/agentshield-finetuning/red_v5.rejected.json \
+    /tmp/agentshield-finetuning/red_v6.rejected.json \
+    /tmp/agentshield-finetuning/red_v7.rejected.json \
+    /tmp/agentshield-finetuning/red_v8.rejected.json \
+    /tmp/agentshield-finetuning/red_v8.1.rejected.json \
+    --output-dir /tmp/agentshield-finetuning/bulk
 """
 
 from __future__ import annotations
+
+import tempfile
 
 import argparse
 import json
@@ -105,7 +107,7 @@ def _to_message(sample: dict[str, Any], system_prompt: str) -> dict[str, Any]:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Bulk-process rejected SFT samples by decision rules.")
     ap.add_argument("files", nargs="+", help="rejected.json 파일")
-    ap.add_argument("--output-dir", default="data/finetuning/bulk", help="결과 폴더")
+    ap.add_argument("--output-dir", default=str(Path(tempfile.gettempdir()) / "agentshield-finetuning" / "bulk"), help="결과 폴더")
     ap.add_argument("--prefix", default="bulk", help="출력 파일 prefix")
     args = ap.parse_args()
 

@@ -9,9 +9,9 @@ GPU/LLM 사용 안 함 — 빌드 스크립트 돌고 있어도 안전.
 
 사용법:
   venv/bin/python scripts/analyze_rejected.py \
-    data/finetuning/red_v4.rejected.json \
-    data/finetuning/red_v5.rejected.json \
-    data/finetuning/red_v8.1.rejected.json
+    /tmp/agentshield-finetuning/red_v4.rejected.json \
+    /tmp/agentshield-finetuning/red_v5.rejected.json \
+    /tmp/agentshield-finetuning/red_v8.1.rejected.json
 """
 
 from __future__ import annotations

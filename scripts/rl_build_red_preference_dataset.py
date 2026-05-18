@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -31,8 +32,8 @@ def _load_rows(path: Path) -> list[dict[str, Any]]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Score Red Agent rollouts and build DPO preference pairs.")
     parser.add_argument("--input", required=True, help="raw campaign .json or rollout .jsonl")
-    parser.add_argument("--scored-output", default="data/rl_red_agent/scored/red_rollouts_scored.jsonl")
-    parser.add_argument("--dpo-output", default="data/rl_red_agent/preferences/red_dpo_pairs.jsonl")
+    parser.add_argument("--scored-output", default=str(Path(tempfile.gettempdir()) / "agentshield-rl-red-agent" / "scored" / "red_rollouts_scored.jsonl"))
+    parser.add_argument("--dpo-output", default=str(Path(tempfile.gettempdir()) / "agentshield-rl-red-agent" / "preferences" / "red_dpo_pairs.jsonl"))
     parser.add_argument("--chosen-min", type=float, default=float(os.getenv("RL_RED_REWARD_MIN_CHOSEN", DEFAULT_MIN_TRAINING_SCORE)))
     parser.add_argument("--rejected-max", type=float, default=float(os.getenv("RL_RED_REWARD_MAX_REJECTED", DEFAULT_MAX_REJECT_SCORE)))
     args = parser.parse_args()
@@ -75,4 +76,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

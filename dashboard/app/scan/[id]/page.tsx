@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
 import PipelineFlowViz from "../../../components/PipelineFlowViz";
 import { getScanStatus, getScanResults, cancelScan, ScanResult } from "../../../lib/api";
-import { MOCK_SCAN_STATUS, MOCK_SCAN_RESULTS } from "../../../lib/mockClientData";
 
 const PHASE_LABELS: Record<number, string> = {
   1: "Phase 1 — 정적 스캐너",
@@ -160,6 +159,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
     completed_tests: number;
     vulnerable_count: number;
     safe_count: number;
+    ambiguous_count?: number;
     elapsed_seconds?: number;
   } | null>(null);
 
@@ -194,6 +194,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
       SCAN: "text-primary",
       CRITICAL: "text-error font-black tracking-wider",
       VULNERABLE: "text-error font-black tracking-wider",
+      WARN: "text-[#F59E0B] font-bold",
       SAFE: "text-tertiary",
       ERROR: "text-error",
       DONE: "text-tertiary font-black",
@@ -226,13 +227,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const isMock = sessionId === "mock-session-demo";
-      let s: ScanStatus;
-      if (isMock) {
-        s = { ...MOCK_SCAN_STATUS, session_id: sessionId };
-      } else {
-        s = await getScanStatus(sessionId);
-      }
+      const s = await getScanStatus(sessionId);
       setStatus(s);
       elapsedRef.current = s.elapsed_seconds || elapsedRef.current;
       setElapsed(formatElapsed(elapsedRef.current));
@@ -243,38 +238,36 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
       if (s.status === "running") {
         const phaseLabel = PHASE_LABELS[s.phase] || `Phase ${s.phase}`;
+        const ambiguous = s.ambiguous_count ?? 0;
         if (s.vulnerable_count > 0) {
-          addLog("CRITICAL", `취약점 탐지됨: ${s.vulnerable_count}개 — ${phaseLabel} 진행 중...`, true);
+          const suffix = ambiguous > 0 ? ` · 모호 ${ambiguous}개` : "";
+          addLog("CRITICAL", `취약점 탐지됨: ${s.vulnerable_count}개${suffix} — ${phaseLabel} 진행 중...`, true);
+        } else if (ambiguous > 0) {
+          addLog("WARN", `모호 판정 ${ambiguous}개 — Judge 멀티에이전트 합의 보류 (${phaseLabel})`);
         } else {
           addLog("SCAN", `${phaseLabel} 실행 중... (${s.completed_tests}/${s.total_tests})`);
         }
-        if (!isMock) {
-          try {
-            const partial = await getScanResults(sessionId);
-            enqueueNewResults(partial);
-            const last = partial.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
-            if (last) setLatestAttackPrompt(last);
-          } catch {
-            addLog("ERROR", "실시간 결과를 아직 불러오지 못했습니다.");
-          }
+        try {
+          const partial = await getScanResults(sessionId);
+          enqueueNewResults(partial);
+          const last = partial.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
+          if (last) setLatestAttackPrompt(last);
+        } catch {
+          addLog("ERROR", "실시간 결과를 아직 불러오지 못했습니다.");
         }
       }
 
       if (s.status === "completed") {
         addLog("DONE", "스캔 완료. 최종 결과를 불러오는 중...");
         let r: ScanResult[];
-        if (isMock) {
-          r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
-        } else {
-          try {
+        try {
+          r = await getScanResults(sessionId);
+          if (r.length === 0 && (s.vulnerable_count > 0 || s.safe_count > 0 || (s.ambiguous_count ?? 0) > 0)) {
+            await new Promise((res) => setTimeout(res, 1500));
             r = await getScanResults(sessionId);
-            if (r.length === 0 && (s.vulnerable_count > 0 || s.safe_count > 0)) {
-              await new Promise((res) => setTimeout(res, 1500));
-              r = await getScanResults(sessionId);
-            }
-          } catch {
-            r = [];
           }
+        } catch {
+          r = [];
         }
         const fresh = r.filter((x) => !seenIds.current.has(x.id));
         fresh.forEach((x) => seenIds.current.add(x.id));
@@ -469,10 +462,14 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
                 )}
               </div>
               {/* 인라인 통계 */}
-              <div className="w-full grid grid-cols-2 gap-3 pt-2 border-t border-white/5">
+              <div className="w-full grid grid-cols-3 gap-3 pt-2 border-t border-white/5">
                 <div className="text-center p-3 rounded-xl bg-error/5 border border-error/10">
                   <p className="text-2xl font-black text-error">{status?.vulnerable_count ?? 0}</p>
                   <p className="text-[9px] text-error/60 font-bold uppercase tracking-wider mt-0.5">취약</p>
+                </div>
+                <div className="text-center p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                  <p className="text-2xl font-black text-on-surface-variant">{status?.ambiguous_count ?? 0}</p>
+                  <p className="text-[9px] text-on-surface-variant/60 font-bold uppercase tracking-wider mt-0.5">모호</p>
                 </div>
                 <div className="text-center p-3 rounded-xl bg-tertiary/5 border border-tertiary/10">
                   <p className="text-2xl font-black text-tertiary">{status?.safe_count ?? 0}</p>
@@ -482,7 +479,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
             </div>
 
             {/* 터미널 로그 */}
-            <div className="glass-panel rounded-[2rem] border border-white/5 overflow-hidden flex flex-col flex-1 min-h-[280px] shadow-xl">
+            <div className="glass-panel rounded-[2rem] border border-white/5 overflow-hidden flex flex-col flex-1 min-h-[280px] max-h-[560px] shadow-xl">
               <div className="px-6 py-4 bg-surface-container-high/40 border-b border-white/5 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="flex gap-1.5">

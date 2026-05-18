@@ -11,6 +11,8 @@ function CodeRain({ bright }: { bright: boolean }) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    const canvasEl = canvas;
+    const ctx2d = ctx;
     const colW = 26, fs = 14;
     let id: number, last = 0;
     // 컬럼별 색상 — teal / emerald / violet 3가지
@@ -18,10 +20,10 @@ function CodeRain({ bright }: { bright: boolean }) {
     type Col = { y: number; speed: number; active: boolean; color: string };
     let cols: Col[] = [];
     function init() {
-      canvas.width = window.innerWidth; canvas.height = window.innerHeight;
-      ctx.fillStyle = "#030a10"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      cols = Array.from({ length: Math.floor(canvas.width / colW) }, () => ({
-        y: Math.random() * -(canvas.height / fs) * 1.5,
+      canvasEl.width = window.innerWidth; canvasEl.height = window.innerHeight;
+      ctx2d.fillStyle = "#030a10"; ctx2d.fillRect(0, 0, canvasEl.width, canvasEl.height);
+      cols = Array.from({ length: Math.floor(canvasEl.width / colW) }, () => ({
+        y: Math.random() * -(canvasEl.height / fs) * 1.5,
         speed: 0.45 + Math.random() * 0.65,
         active: Math.random() > 0.35,
         color: PALETTE[Math.floor(Math.random() * PALETTE.length)],
@@ -30,22 +32,22 @@ function CodeRain({ bright }: { bright: boolean }) {
     function draw(ts: number) {
       id = requestAnimationFrame(draw);
       if (ts - last < 55) return; last = ts;
-      ctx.fillStyle = "rgba(3,10,16,0.11)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.font = `${fs}px 'Share Tech Mono', monospace`;
+      ctx2d.fillStyle = "rgba(3,10,16,0.11)";
+      ctx2d.fillRect(0, 0, canvasEl.width, canvasEl.height);
+      ctx2d.font = `${fs}px 'Share Tech Mono', monospace`;
       cols.forEach((col, i) => {
         if (!col.active) return;
         const headY = col.y * fs;
-        if (headY >= 0 && headY <= canvas.height) {
-          ctx.shadowBlur = bright ? 14 : 8;
-          ctx.shadowColor = col.color;
-          ctx.fillStyle = "#e8fffa";
-          ctx.fillText(String(Math.floor(Math.random() * 10)), i * colW + 4, headY);
-          ctx.shadowBlur = 0;
+        if (headY >= 0 && headY <= canvasEl.height) {
+          ctx2d.shadowBlur = bright ? 14 : 8;
+          ctx2d.shadowColor = col.color;
+          ctx2d.fillStyle = "#e8fffa";
+          ctx2d.fillText(String(Math.floor(Math.random() * 10)), i * colW + 4, headY);
+          ctx2d.shadowBlur = 0;
         }
         col.y += col.speed;
-        if (headY > canvas.height + 200) {
-          col.y = Math.random() * -(canvas.height / fs);
+        if (headY > canvasEl.height + 200) {
+          col.y = Math.random() * -(canvasEl.height / fs);
           col.speed = 0.45 + Math.random() * 0.65;
           col.active = Math.random() > 0.2;
           col.color = PALETTE[Math.floor(Math.random() * PALETTE.length)];

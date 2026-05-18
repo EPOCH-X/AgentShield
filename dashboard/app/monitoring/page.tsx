@@ -8,7 +8,6 @@ import {
   getViolations,
   Violation,
 } from "../../lib/api";
-import { MOCK_DASHBOARD, MOCK_VIOLATIONS } from "../../lib/mockClientData";
 
 function visiblePageNumbers(current: number, total: number, max = 5): number[] {
   if (total <= 0) return [];
@@ -121,8 +120,9 @@ export default function MonitoringPage() {
       setDashboard(dash);
       setViolations(viols);
     } catch {
-      setDashboard(MOCK_DASHBOARD);
-      setViolations(MOCK_VIOLATIONS);
+      setLoadError(true);
+      setDashboard(null);
+      setViolations([]);
     } finally {
       setLoading(false);
     }
@@ -139,10 +139,8 @@ export default function MonitoringPage() {
       setViolations(viols);
       setPage(1);
     } catch {
-      let filtered = [...MOCK_VIOLATIONS];
-      if (deptFilter) filtered = filtered.filter((v) => v.department === deptFilter);
-      if (typeFilter) filtered = filtered.filter((v) => v.violation_type === typeFilter);
-      setViolations(filtered);
+      setLoadError(true);
+      setViolations([]);
       setPage(1);
     }
   }
@@ -152,7 +150,10 @@ export default function MonitoringPage() {
     setTypeFilter("");
     getViolations()
       .then((v) => setViolations(v))
-      .catch(() => setViolations(MOCK_VIOLATIONS));
+      .catch(() => {
+        setLoadError(true);
+        setViolations([]);
+      });
     setPage(1);
   }
 
@@ -400,7 +401,7 @@ export default function MonitoringPage() {
           </div>
 
           {/* 테이블 바디 */}
-          <div className="divide-y" style={{ divideColor: "rgba(255,255,255,0.04)" }}>
+          <div className="divide-y divide-white/[0.04]">
             {loading ? (
               <div className="py-20 flex flex-col items-center gap-4">
                 <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />

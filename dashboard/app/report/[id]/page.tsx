@@ -21,7 +21,6 @@ type DemoReportSnapshot = {
   results: ScanResult[];
 };
 
-const DEMO_REPORT_SESSION_ID = "mock-session-demo";
 const DEMO_REPORT_STORAGE_KEY = "agentshield_demo_report_snapshot";
 const DEMO_RESTORE_FLAG_KEY = "agentshield_demo_restore_requested";
 
@@ -58,15 +57,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
       setLoading(true);
       setError("");
       try {
-        if (sessionId === DEMO_REPORT_SESSION_ID) {
-          const raw = localStorage.getItem(DEMO_REPORT_STORAGE_KEY);
-          if (!raw) {
-            setStatus(null);
-            setResults([]);
-            setError("데모 리포트 스냅샷이 없습니다. /demo에서 판정 결과 생성 후 전체 리포트를 열어야 합니다.");
-            return;
-          }
-          const snapshot = JSON.parse(raw) as DemoReportSnapshot;
+        const rawSnapshot = localStorage.getItem(DEMO_REPORT_STORAGE_KEY);
+        const snapshot = rawSnapshot ? JSON.parse(rawSnapshot) as DemoReportSnapshot : null;
+        if (snapshot?.status?.session_id === sessionId) {
           const orderedResults = [...(snapshot.results || [])].sort((a, b) => {
             const priority = (result: ScanResult) =>
               result.phase === 2 && result.judgment === "vulnerable" ? 0 :
@@ -110,7 +103,9 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   }
 
   function goBack() {
-    if (sessionId === DEMO_REPORT_SESSION_ID) {
+    const rawSnapshot = localStorage.getItem(DEMO_REPORT_STORAGE_KEY);
+    const snapshotSessionId = rawSnapshot ? (JSON.parse(rawSnapshot) as DemoReportSnapshot)?.status?.session_id : "";
+    if (snapshotSessionId === sessionId) {
       sessionStorage.setItem(DEMO_RESTORE_FLAG_KEY, "1");
       router.push("/demo");
       return;

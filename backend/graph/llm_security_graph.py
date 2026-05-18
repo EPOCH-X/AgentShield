@@ -23,6 +23,7 @@ class ScanState(TypedDict):
     session_id: str
     target_url: str
     target_config: dict[str, Any]
+    categories: Optional[list[str]]  # OWASP LLM 필터(None=전체)
     phase1_result: dict[str, Any]  # [R2] Phase 1 출력
     phase2_result: dict[str, Any]  # [R1] Phase 2 출력
     phase3_result: dict[str, Any]  # [R3] Phase 3 출력
@@ -146,6 +147,7 @@ def build_security_graph(
             state["target_url"],
             target_config=state.get("target_config") or {},
             on_result=phase1_result_callback,
+            categories=state.get("categories"),
         )
         return {"phase1_result": result}
 
@@ -172,6 +174,7 @@ async def run_scan(
     phase1_result_callback: Optional[Callable[[dict[str, Any]], Awaitable[None]]] = None,
     max_phase: Optional[int] = None,
     max_failed_attempts: Optional[int] = None,
+    categories: Optional[list[str]] = None,
 ) -> ScanState:
     """전체 스캔 실행 진입점"""
     if max_phase is not None or max_failed_attempts is not None:
@@ -207,6 +210,7 @@ async def run_scan(
             "session_id": session_id,
             "target_url": target_url,
             "target_config": effective_target_config,
+            "categories": categories,
             "phase1_result": {},
             "phase2_result": {},
             "phase3_result": {},

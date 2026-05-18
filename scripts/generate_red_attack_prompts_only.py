@@ -14,6 +14,7 @@ import os
 import re
 import random
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -51,22 +52,43 @@ def _versioned_output_path(path: Path) -> Path:
 
 
 def _load_items(path: Path, category: str) -> list[dict[str, Any]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(data, dict):
-        rows = data.get("items") or data.get("data") or data.get("results") or []
-    elif isinstance(data, list):
-        rows = data
+    if path.suffix.lower() == ".jsonl":
+        rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     else:
-        rows = []
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            rows = data.get("items") or data.get("data") or data.get("results") or []
+        elif isinstance(data, list):
+            rows = data
+        else:
+            rows = []
 
     picked: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
             continue
-        prompt = row.get("attack_prompt") or row.get("mutated_prompt") or row.get("prompt")
+        messages = row.get("messages") if isinstance(row.get("messages"), list) else []
+        assistant_prompt = next(
+            (
+                str(message.get("content") or "")
+                for message in reversed(messages)
+                if isinstance(message, dict) and message.get("role") == "assistant"
+            ),
+            "",
+        )
+        user_instruction = next(
+            (
+                str(message.get("content") or "")
+                for message in messages
+                if isinstance(message, dict) and message.get("role") == "user"
+            ),
+            "",
+        )
+        prompt = row.get("attack_prompt") or row.get("mutated_prompt") or row.get("prompt") or assistant_prompt
         if not prompt:
             continue
-        cat = str(row.get("category") or "LLM01").upper()
+        category_match = re.search(r"(?im)^Category:\s*(LLM\d+)\b", user_instruction)
+        cat = str(row.get("category") or (category_match.group(1) if category_match else "") or "LLM01").upper()
         if category != "ALL" and cat != category.upper():
             continue
         picked.append({**row, "category": cat, "attack_prompt": str(prompt)})
@@ -243,7 +265,7 @@ def _build_domain_context(domain: str) -> dict[str, str] | None:
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Generate attack prompts only; no target request, no target response.")
-    parser.add_argument("--input", default=os.getenv("ATTACK_PATTERN_PATH", "data/test_attack_sets/all_01_02_06_07_strongest_20.json"))
+    parser.add_argument("--input", default=os.getenv("ATTACK_PATTERN_PATH", "data/파인튜닝원본데이터/accepted.jsonl"))
     parser.add_argument("--output", default="")
     parser.add_argument("--category", default="ALL")
     parser.add_argument(
@@ -422,7 +444,11 @@ async def main() -> int:
             if target_failure_mode:
                 used_failure_modes.append(target_failure_mode)
 
-    output_path = _versioned_output_path(_resolve_path(args.output)) if args.output else PROJECT_ROOT / "data" / "red_prompt_only" / f"red_attack_prompts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    output_path = (
+        _versioned_output_path(_resolve_path(args.output))
+        if args.output
+        else Path(tempfile.gettempdir()) / "agentshield-red-prompt-only" / f"red_attack_prompts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(output_rows, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[saved] {output_path}")

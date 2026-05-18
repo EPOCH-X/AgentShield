@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.database import init_db
 import backend.models  # noqa: F401 — ORM 테이블을 Base.metadata에 등록
-from backend.api import scan, report, monitoring, auth, vector_admin
+from backend.api import scan, report, monitoring, auth, vector_admin, policy_export
 
 
 @asynccontextmanager
@@ -38,6 +38,7 @@ app.include_router(scan.router, prefix="/api/v1/scan", tags=["scan"])
 app.include_router(vector_admin.router, prefix="/api/v1/vector", tags=["vector"])
 app.include_router(report.router, prefix="/api/v1/report", tags=["report"])
 app.include_router(monitoring.router, prefix="/api/v1/monitoring", tags=["monitoring"])
+app.include_router(policy_export.router, prefix="/api/v1/policy-export", tags=["policy-export"])
 
 
 @app.get("/health")
