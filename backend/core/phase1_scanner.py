@@ -128,25 +128,31 @@ async def _load_attack_patterns(
             if max_attacks:
                 stmt = stmt.limit(max_attacks)
             rows = (await db.execute(stmt)).scalars().all()
-            if not rows:
-                logger.error(
-                    "[Phase1] ❌ DB에 AttackPattern 데이터 없음 → file fallback으로 전환"
-                )
-                raise ValueError("DB가 비어 있음")
-            return [
+            patterns = [
                 {
                     "id": row.id,
                     "category": getattr(row, "category", ""),
                     "subcategory": getattr(row, "subcategory", ""),
-                    "attack_prompt": getattr(
-                        row, "attack_prompt", getattr(row, "prompt_text", "")
-                    ),
+                    "attack_prompt": (
+                        getattr(row, "attack_prompt", None)
+                        or getattr(row, "prompt_text", "")
+                        or ""
+                    ).strip(),
                     "target_response": getattr(row, "target_response", ""),
                     "seed_id": str(getattr(row, "seed_id", row.id) or row.id),
                     "severity": getattr(row, "severity", ""),
                 }
                 for row in rows
             ]
+            # 빈 attack_prompt(placeholder)는 testbed로 보낼 수 없으므로 제외
+            patterns = [p for p in patterns if p["attack_prompt"]]
+            if not patterns:
+                logger.warning(
+                    "[Phase1] DB에서 사용 가능한 AttackPattern을 찾지 못함 (rows=%s) → file fallback",
+                    len(rows),
+                )
+                raise ValueError("DB에 유효한 attack_prompt 없음")
+            return patterns
     except Exception as e:
         logger.warning(f"[Phase1] DB load failed → file fallback: {e}")
         return await _load_attack_patterns_from_file(category, max_attacks, categories=categories)

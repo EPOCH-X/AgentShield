@@ -5,13 +5,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 import ipaddress
 import json
+import logging
 import os
 from typing import Any, Literal, Optional
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlunparse
 
 import httpx
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 TargetProvider = Literal[
     "auto",
@@ -47,6 +50,7 @@ class TargetAdapterConfig:
         provider: Optional[str] = None,
         model: Optional[str] = None,
     ) -> "TargetAdapterConfig":
+        target_url = _rewrite_local_target_for_container(target_url)
         normalized_provider = (provider or settings.TARGET_PROVIDER or "auto").strip().lower()
         if normalized_provider not in {
             "auto",
@@ -113,6 +117,45 @@ def _is_local_target(target_url: str) -> bool:
     except ValueError:
         return host.endswith(".local")
     return ip.is_loopback or ip.is_private or ip.is_link_local
+
+
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
+
+
+def _rewrite_local_target_for_container(target_url: str) -> str:
+    """컨테이너 내부에서 호스트의 testbed에 닿도록 loopback hostname을 치환한다.
+
+    backend가 docker 컨테이너로 실행 중이면 사용자가 폼에 입력한 ``localhost``는
+    backend 컨테이너 자신을 가리키므로 testbed에 연결되지 않는다. ``/.dockerenv``로
+    컨테이너를 감지하면 ``TARGET_LOCAL_REWRITE_HOST`` 환경변수(기본:
+    ``host.docker.internal``)로 호스트네임을 교체한다.
+    """
+    if not os.path.exists("/.dockerenv"):
+        return target_url
+
+    parsed = urlparse(target_url)
+    host = (parsed.hostname or "").lower()
+    if host not in _LOOPBACK_HOSTS:
+        return target_url
+
+    rewrite_host = (os.getenv("TARGET_LOCAL_REWRITE_HOST") or "host.docker.internal").strip()
+    if not rewrite_host or rewrite_host.lower() == host:
+        return target_url
+
+    new_netloc = rewrite_host
+    if parsed.port:
+        new_netloc = f"{rewrite_host}:{parsed.port}"
+    if parsed.username:
+        auth = parsed.username + (f":{parsed.password}" if parsed.password else "")
+        new_netloc = f"{auth}@{new_netloc}"
+
+    rewritten = urlunparse(parsed._replace(netloc=new_netloc))
+    logger.info(
+        "[target adapter] local hostname rewritten for container: %s -> %s",
+        target_url,
+        rewritten,
+    )
+    return rewritten
 
 
 def validate_target_environment(config: TargetAdapterConfig) -> None:
