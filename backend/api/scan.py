@@ -273,10 +273,16 @@ async def _persist_phase1_result_realtime(*, session_id: str, result: dict[str, 
             )
         )
         if existing is not None:
+            # 동일 row가 이미 있어도 Phase3가 매칭할 수 있도록 result dict에 ID를 주입한다.
+            result["test_result_id"] = existing
             return
 
-        db.add(_build_phase1_row(session_id=session_uuid, result=result))
+        row = _build_phase1_row(session_id=session_uuid, result=result)
+        db.add(row)
         await db.commit()
+        await db.refresh(row)
+        # Phase3 _derive_defense_id 가 이 값을 사용해 TestResult row를 다시 찾는다.
+        result["test_result_id"] = row.id
 
 
 def _build_target_config(req: ScanRequest) -> dict[str, Any]:
@@ -378,13 +384,22 @@ async def _auto_export_session(db: AsyncSession, *, session_id: str, session_sta
             select(func.count()).select_from(TestResult)
             .where(TestResult.session_id == sid, TestResult.judgment == "vulnerable")
         ) or 0
+        safe = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "safe")
+        ) or 0
+        ambiguous = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "ambiguous")
+        ) or 0
         status_data = {
             "session_id": session_id,
             "status": session_status,
             "exported_at": datetime.utcnow().isoformat(),
             "total_results": total_rows,
             "vulnerable_count": vulnerable,
-            "safe_count": max(0, total_rows - vulnerable),
+            "safe_count": safe,
+            "ambiguous_count": ambiguous,
         }
         (export_dir / "status.json").write_text(
             json.dumps(status_data, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -674,6 +689,14 @@ async def scan_status(
             select(func.count()).select_from(TestResult)
             .where(TestResult.session_id == sid, TestResult.judgment == "vulnerable")
         ) or 0
+        safe = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "safe")
+        ) or 0
+        ambiguous = await db.scalar(
+            select(func.count()).select_from(TestResult)
+            .where(TestResult.session_id == sid, TestResult.judgment == "ambiguous")
+        ) or 0
         max_phase  = await db.scalar(
             select(func.max(TestResult.phase)).where(TestResult.session_id == sid)
         ) or 1
@@ -698,6 +721,8 @@ async def scan_status(
         total_rows = 0
         phase1_completed = 0
         vulnerable = 0
+        safe = 0
+        ambiguous = 0
         max_phase = 1
         expected_phase1_total = 0
 
@@ -720,7 +745,8 @@ async def scan_status(
         "completed_tests":  completed,
         "stored_results_count": total_rows,
         "vulnerable_count": vulnerable,
-        "safe_count":       max(0, total_rows - vulnerable),
+        "safe_count":       safe,
+        "ambiguous_count":  ambiguous,
         "elapsed_seconds":  elapsed,
         "termination_reason": (SCAN_SUMMARIES.get(session_id) or {}).get("termination_reason"),
         "attempted_count": (SCAN_SUMMARIES.get(session_id) or {}).get("attempted_count"),

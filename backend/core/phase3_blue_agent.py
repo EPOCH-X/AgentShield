@@ -143,6 +143,8 @@ async def run_phase3(
     4) llm.generate(role='blue')
     5) 파싱 후 defense JSON 저장
     """
+    from uuid import UUID
+    from sqlalchemy import select
     from backend.agents.llm_client import AgentShieldLLM
     from backend.rag.chromadb_client import rag_client
     from backend.database import async_session
@@ -335,6 +337,19 @@ async def run_phase3(
                     row = None
                     if str(defense_id).isdigit():
                         row = await db.get(TestResult, int(defense_id))
+                    if row is None:
+                        # 슬러그 fallback ID였거나 ID로 못 찾은 경우 — 세션+공격 프롬프트 기준으로 매칭
+                        row = await db.scalar(
+                            select(TestResult)
+                            .where(
+                                TestResult.session_id == UUID(session_id),
+                                TestResult.attack_prompt == attack_prompt,
+                                TestResult.category == category,
+                                TestResult.judgment == "vulnerable",
+                            )
+                            .order_by(TestResult.id.desc())
+                            .limit(1)
+                        )
 
                     if row:
                         row.defended_response = bundle.defended_response
@@ -346,6 +361,7 @@ async def run_phase3(
                     else:
                         db_update_failed_ids.append(defense_id)
             except Exception:
+                logger.exception("[phase3] DB update failed defense_id=%s", defense_id)
                 db_update_failed_ids.append(defense_id)
 
             source_vulnerabilities.append(

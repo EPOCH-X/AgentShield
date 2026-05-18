@@ -122,6 +122,7 @@ export async function getScanStatus(sessionId: string): Promise<{
   completed_tests: number;
   vulnerable_count: number;
   safe_count: number;
+  ambiguous_count?: number;
   elapsed_seconds?: number;
   termination_reason?: string;
   attempted_count?: number;
