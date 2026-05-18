@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,7 +16,7 @@ from backend.rl.red_rollout_recorder import read_jsonl, write_jsonl
 def main() -> int:
     parser = argparse.ArgumentParser(description="Export scored Red Agent rollouts into a GRPO prompt dataset.")
     parser.add_argument("--scored-input", required=True)
-    parser.add_argument("--output", default="data/rl_red_agent/grpo/red_grpo_prompts.jsonl")
+    parser.add_argument("--output", default=str(Path(tempfile.gettempdir()) / "agentshield-rl-red-agent" / "grpo" / "red_grpo_prompts.jsonl"))
     parser.add_argument("--min-score", type=float, default=0.35)
     args = parser.parse_args()
 
@@ -43,4 +44,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

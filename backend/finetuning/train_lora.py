@@ -5,7 +5,7 @@ TRL 1.3.0 기준: SFTConfig + SFTTrainer(peft_config=) API 사용
 사용법:
   python backend/finetuning/train_lora.py \
     --role red \
-    --data data/finetuning/red_train_qwen35_2b_4096_compressed.jsonl \
+    --data /tmp/agentshield-finetuning/red_train_qwen35_2b_4096_compressed.jsonl \
     --output adapters/lora-red-qwen35-2b-abliterated
 
 환경변수:

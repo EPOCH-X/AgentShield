@@ -5,6 +5,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,13 +14,13 @@ ROOT = Path(__file__).resolve().parents[1]
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run a testbed-only Red Agent rollout campaign for RL reward data.")
     parser.add_argument("--target-url", default="http://localhost:8010/chat")
-    parser.add_argument("--input", default="data/curated_attack_sets/testbed_meta_only.json")
+    parser.add_argument("--input", default="data/파인튜닝원본데이터/accepted.jsonl")
     parser.add_argument("--campaign-id", required=True)
     parser.add_argument("--red-model", default="")
     parser.add_argument("--seeds", type=int, default=5)
     parser.add_argument("--rounds", type=int, default=5)
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--output-dir", default="data/red_campaigns")
+    parser.add_argument("--output-dir", default=str(Path(tempfile.gettempdir()) / "agentshield-red-campaigns"))
     parser.add_argument("--score-output", default="")
     args = parser.parse_args()
 
@@ -55,8 +56,8 @@ def main() -> int:
     if not raw_path.exists():
         raise SystemExit(f"raw campaign output not found: {raw_path}")
 
-    score_output = args.score_output or f"data/rl_red_agent/scored/{args.campaign_id}_scored.jsonl"
-    dpo_output = f"data/rl_red_agent/preferences/{args.campaign_id}_dpo_pairs.jsonl"
+    score_output = args.score_output or str(Path(tempfile.gettempdir()) / "agentshield-rl-red-agent" / "scored" / f"{args.campaign_id}_scored.jsonl")
+    dpo_output = str(Path(tempfile.gettempdir()) / "agentshield-rl-red-agent" / "preferences" / f"{args.campaign_id}_dpo_pairs.jsonl")
     subprocess.run(
         [
             sys.executable,
@@ -77,4 +78,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

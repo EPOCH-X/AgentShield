@@ -32,8 +32,13 @@ async def run_phase1(
     send_fn=None,
     llm=None,
     on_result=None,
+    categories: Optional[List[str]] = None,
 ) -> dict:
-    """Run Phase 1 and optionally stream each result through on_result."""
+    """Run Phase 1 and optionally stream each result through on_result.
+
+    ``categories`` (UI에서 선택한 OWASP LLM 다중 카테고리)가 전달되면 단일
+    ``category`` 인자보다 우선한다. None/빈 리스트면 전체(ALL) 패턴을 로드한다.
+    """
     adapter_config = TargetAdapterConfig.from_input(
         target_url=target_url,
         api_key=(target_config or {}).get("api_key"),
@@ -42,11 +47,11 @@ async def run_phase1(
     )
 
     import backend.core.phase1_scanner as _self
-    attack_patterns = await _self._load_attacks(category, max_attacks)
+    attack_patterns = await _self._load_attacks(category, max_attacks, categories=categories)
 
     if not attack_patterns:
         logger.error(
-            f"[Phase1] ❌ 공격 패턴 로드 실패 — category={category}, "
+            f"[Phase1] ❌ 공격 패턴 로드 실패 — category={category}, categories={categories}, "
             f"max_attacks={max_attacks}. "
             f"data/attack_patterns/ 폴더 또는 DB를 확인하세요."
         )
@@ -105,15 +110,20 @@ async def run_phase1(
 # ── 공격 패턴 로드 ────────────────────────────────────────────────────────────
 
 async def _load_attack_patterns(
-    category: str = "ALL", max_attacks: int = None
+    category: str = "ALL",
+    max_attacks: int = None,
+    *,
+    categories: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
-    """공격 패턴 로드 (DB 우선, 파일 fallback)"""
+    """공격 패턴 로드 (DB 우선, 파일 fallback). categories가 우선한다."""
     try:
         from sqlalchemy import select as sa_select
         async with async_session() as db:
             from backend.models.attack_pattern import AttackPattern as AP
             stmt = sa_select(AP)
-            if category and category != "ALL":
+            if categories:
+                stmt = stmt.where(AP.category.in_(categories))
+            elif category and category != "ALL":
                 stmt = stmt.where(AP.category == category)
             if max_attacks:
                 stmt = stmt.limit(max_attacks)
@@ -139,7 +149,7 @@ async def _load_attack_patterns(
             ]
     except Exception as e:
         logger.warning(f"[Phase1] DB load failed → file fallback: {e}")
-        return await _load_attack_patterns_from_file(category, max_attacks)
+        return await _load_attack_patterns_from_file(category, max_attacks, categories=categories)
 
 
 # ★ smoke 스크립트(_patched_phase1_loader)가 monkey-patch하는 함수명.
@@ -171,7 +181,10 @@ async def estimate_phase1_total(category: str = "ALL") -> int:
 
 
 async def _load_attack_patterns_from_file(
-    category: str, max_attacks: int = None
+    category: str,
+    max_attacks: int = None,
+    *,
+    categories: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """공격 패턴 파일 로드 (fallback)"""
     import json
@@ -182,7 +195,7 @@ async def _load_attack_patterns_from_file(
     if configured_path and not configured_path.is_absolute():
         configured_path = Path(__file__).resolve().parents[2] / configured_path
 
-    curated_testbed = base / "curated_attack_sets" / "testbed_manual_mixed_10.json"
+    original_attack_data = base / "파인튜닝원본데이터" / "accepted.jsonl"
     candidates: List[Path] = []
     if configured_path:
         if configured_path.exists():
@@ -193,10 +206,10 @@ async def _load_attack_patterns_from_file(
                 configured_path,
             )
     if not candidates:
-        if curated_testbed.exists():
-            candidates = [curated_testbed]
+        if original_attack_data.exists():
+            candidates = [original_attack_data]
         else:
-            candidates = sorted(base.glob("attack_patterns/**/*.json"))
+            candidates = sorted((base / "파인튜닝원본데이터").glob("*.jsonl"))
     if not candidates:
         single = base / "attack_patterns.json"
         candidates = [single] if single.exists() else []
@@ -210,19 +223,44 @@ async def _load_attack_patterns_from_file(
     patterns = []
     for file_path in candidates:
         try:
+            import re
+
             with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            raw_list = data if isinstance(data, list) else data.get("patterns", [data])
+                if file_path.suffix.lower() == ".jsonl":
+                    raw_list = [json.loads(line) for line in f if line.strip()]
+                else:
+                    data = json.load(f)
+                    raw_list = data if isinstance(data, list) else data.get("patterns", [data])
             for item in raw_list:
+                messages = item.get("messages") if isinstance(item.get("messages"), list) else []
+                assistant_prompt = next(
+                    (
+                        str(message.get("content") or "")
+                        for message in reversed(messages)
+                        if isinstance(message, dict) and message.get("role") == "assistant"
+                    ),
+                    "",
+                )
+                user_instruction = next(
+                    (
+                        str(message.get("content") or "")
+                        for message in messages
+                        if isinstance(message, dict) and message.get("role") == "user"
+                    ),
+                    "",
+                )
+                category_match = re.search(r"(?im)^Category:\s*(LLM\d+)\b", user_instruction)
+                subcategory_match = re.search(r"(?im)^Subcategory:\s*([^\n]+)", user_instruction)
                 patterns.append({
                     "id": item.get("id", item.get("vector_id", item.get("attack_pattern_id", ""))),
-                    "category": item.get("category", ""),
-                    "subcategory": item.get("subcategory", ""),
+                    "category": item.get("category") or (category_match.group(1) if category_match else ""),
+                    "subcategory": item.get("subcategory") or (subcategory_match.group(1).strip() if subcategory_match else ""),
                     "attack_prompt": (
                         item.get("attack_prompt")
                         or item.get("prompt_text")
                         or item.get("mutated_prompt")
                         or item.get("original_prompt")
+                        or assistant_prompt
                         or ""
                     ),
                     "target_response": item.get("target_response", ""),
@@ -237,7 +275,10 @@ async def _load_attack_patterns_from_file(
     if before != len(patterns):
         logger.warning(f"[Phase1] attack_prompt 없는 항목 {before - len(patterns)}개 제거")
 
-    if category and category != "ALL":
+    if categories:
+        wanted = set(categories)
+        patterns = [p for p in patterns if p.get("category") in wanted]
+    elif category and category != "ALL":
         patterns = [p for p in patterns if p.get("category") == category]
     if max_attacks:
         patterns = patterns[:max_attacks]

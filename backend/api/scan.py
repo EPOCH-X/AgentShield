@@ -51,6 +51,8 @@ class ScanRequest(BaseModel):
     target_provider: Optional[str] = None
     target_model: Optional[str] = None
     max_phase: Optional[int] = None
+    # OWASP LLM 카테고리 필터 — None 또는 빈 리스트면 전체(LLM01/02/06/07)
+    categories: Optional[list[str]] = None
 
 
 class ScanResponse(BaseModel):
@@ -285,6 +287,26 @@ def _build_target_config(req: ScanRequest) -> dict[str, Any]:
     }
 
 
+_ALLOWED_CATEGORIES = {"LLM01", "LLM02", "LLM06", "LLM07"}
+
+
+def _normalize_categories(raw: Optional[list[str]]) -> Optional[list[str]]:
+    """프론트에서 받은 카테고리 리스트를 검증해 정규화한다.
+    None / 빈 리스트 / 'ALL' 포함이면 None을 반환(전체 카테고리 실행)."""
+    if not raw:
+        return None
+    cleaned: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        normalized = item.strip().upper()
+        if normalized == "ALL":
+            return None
+        if normalized in _ALLOWED_CATEGORIES and normalized not in cleaned:
+            cleaned.append(normalized)
+    return cleaned or None
+
+
 async def _persist_phase1_results(
     db: AsyncSession,
     *,
@@ -412,6 +434,7 @@ async def _execute_scan_background(
     target_url: str,
     target_config: dict[str, Any],
     max_phase: int = 2,
+    categories: Optional[list[str]] = None,
 ) -> None:
     print(f"[scan:{session_id}] background scan started target={target_url}", flush=True)
     logger.info("[scan:%s] background scan started target=%s", session_id, target_url)
@@ -437,6 +460,7 @@ async def _execute_scan_background(
                 ),
                 max_phase=max_phase,
                 max_failed_attempts=5,
+                categories=categories,
             )
             SCAN_SUMMARIES[session_id] = {
                 "termination_reason": final_state.get("termination_reason") or "",
@@ -516,12 +540,14 @@ async def start_scan(
     print(f"[scan:{session_id}] scan accepted and queued target={req.target_url}", flush=True)
     logger.info("[scan:%s] scan accepted and queued target=%s", session_id, req.target_url)
     bounded_max_phase = max(2, min(4, int(req.max_phase or 2)))
+    normalized_categories = _normalize_categories(req.categories)
     task = asyncio.create_task(
         _execute_scan_background(
             session_id=session_id,
             target_url=req.target_url,
             target_config=_build_target_config(req),
             max_phase=bounded_max_phase,
+            categories=normalized_categories,
         )
     )
     SCAN_TASKS[session_id] = task

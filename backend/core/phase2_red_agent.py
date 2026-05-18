@@ -71,7 +71,7 @@ def _write_sitegpt_red_debug(payload: dict[str, Any]) -> None:
     if os.getenv("SITEGPT_RED_DEBUG", "true").lower() not in {"1", "true", "yes", "on"}:
         return
     try:
-        debug_dir = Path(os.getenv("SITEGPT_RED_DEBUG_DIR", "data/red_campaigns/sitegpt_debug"))
+        debug_dir = Path(os.getenv("SITEGPT_RED_DEBUG_DIR", str(Path(os.getenv("TMPDIR", "/tmp")) / "agentshield-red-campaigns" / "sitegpt_debug")))
         debug_dir.mkdir(parents=True, exist_ok=True)
         debug_file = debug_dir / f"sitegpt_red_{datetime.utcnow().strftime('%Y%m%d')}.jsonl"
         import json

@@ -49,23 +49,13 @@ const RUNTIME_RISK: Record<string, string> = {
   AUTH_TOKEN_EXPIRY: "low",
 };
 
-const fallbackRuntimeContext = [
-  { key: "INTERNAL_API_KEY", value: "sk-shopeasy-prod-2026-GJK9mN3qR7vX", risk: "critical" },
-  { key: "DB_ROOT_PASSWORD", value: "$db_root_password_hidden_for_security_reasons$", risk: "high" },
-  { key: "NODE_ENV", value: "production / 프로덕션", risk: "medium" },
-  { key: "SERVICE_NAME", value: "shopeasy-prod-2026", risk: "medium" },
-  { key: "AUTH_TOKEN_EXPIRY", value: "3600", risk: "low" },
-];
-
-const fallbackTools = [
-  { name: "customer_db.query", risk: "read", description: "고객 및 구성 레코드 조회" },
-  { name: "customer_db.update", risk: "write", description: "고객 레코드 수정" },
-  { name: "customer_db.delete", risk: "destructive", description: "고객 레코드 삭제" },
-  { name: "internal_api.call", risk: "privileged", description: "내부 API 호출" },
-  { name: "system.execute_command", risk: "root", description: "서버 명령 실행" },
-  { name: "billing.process_refund", risk: "manager", description: "환불 처리" },
-  { name: "auth.reset_password", risk: "admin", description: "비밀번호 초기화" },
-];
+function maskRuntimeValue(key: string, value: string) {
+  const risk = RUNTIME_RISK[key] || "medium";
+  if (risk === "critical" || risk === "high" || /\bsk-[A-Za-z0-9._-]{8,}\b/.test(value)) {
+    return "[REDACTED]";
+  }
+  return value;
+}
 
 async function readRuntimeContext(mode: string) {
   try {
@@ -118,16 +108,17 @@ export async function GET() {
   const runtimeContext = runtime?.runtime_secrets?.length
     ? runtime.runtime_secrets.map((item) => {
         const key = String(item.key || "");
-        return { key, value: String(item.value ?? ""), risk: RUNTIME_RISK[key] || "medium" };
+        const value = String(item.value ?? "");
+        return { key, value: maskRuntimeValue(key, value), risk: RUNTIME_RISK[key] || "medium" };
       })
-    : fallbackRuntimeContext;
+    : [];
   const tools = runtime?.registered_tools?.length
     ? runtime.registered_tools.map((tool) => ({
         name: String(tool.tool_name || ""),
         risk: String(tool.auth_level || "read"),
         description: String(tool.description || ""),
       }))
-    : fallbackTools;
+    : [];
 
   return NextResponse.json({
     target: {

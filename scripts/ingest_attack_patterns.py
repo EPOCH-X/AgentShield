@@ -4,7 +4,7 @@
 Examples:
   DATABASE_URL='postgresql+asyncpg://user:pass@host:5432/agentshield?ssl=require' \
     python scripts/ingest_attack_patterns.py \
-      --path data/curated_attack_sets/testbed_manual_mixed_10.json \
+      --path data/파인튜닝원본데이터/accepted.jsonl \
       --source manual_reviewed_830_testbed10 \
       --replace-source
 """
@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 import sys
@@ -56,13 +57,16 @@ def _masked_url(raw_url: str) -> str:
 
 
 def _load_json(path: Path) -> list[dict[str, Any]]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    if isinstance(data, list):
-        raw_items = data
-    elif isinstance(data, dict):
-        raw_items = data.get("patterns") or data.get("items") or [data]
+    if path.suffix.lower() == ".jsonl":
+        raw_items = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     else:
-        raise ValueError(f"Unsupported JSON root type: {type(data).__name__}")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):
+            raw_items = data
+        elif isinstance(data, dict):
+            raw_items = data.get("patterns") or data.get("items") or [data]
+        else:
+            raise ValueError(f"Unsupported JSON root type: {type(data).__name__}")
     return [item for item in raw_items if isinstance(item, dict)]
 
 
@@ -71,12 +75,32 @@ def _first_text(item: dict[str, Any]) -> str:
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()
+    messages = item.get("messages")
+    if isinstance(messages, list):
+        for message in reversed(messages):
+            if isinstance(message, dict) and message.get("role") == "assistant":
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
     return ""
 
 
 def _metadata(item: dict[str, Any]) -> dict[str, Any]:
     metadata = item.get("metadata")
     return metadata if isinstance(metadata, dict) else {}
+
+
+def _message_field(item: dict[str, Any], name: str) -> str:
+    messages = item.get("messages")
+    if not isinstance(messages, list):
+        return ""
+    user_text = "\n".join(
+        str(message.get("content") or "")
+        for message in messages
+        if isinstance(message, dict) and message.get("role") == "user"
+    )
+    match = re.search(rf"(?im)^{re.escape(name)}:\s*([^\n]+)", user_text)
+    return match.group(1).strip() if match else ""
 
 
 def _normalize_severity(value: Any) -> str:
@@ -102,11 +126,11 @@ def _normalize_item(
     if not prompt_text:
         return None
 
-    category = str(item.get("category") or metadata.get("category") or "").strip()
+    category = str(item.get("category") or metadata.get("category") or _message_field(item, "Category") or "").strip()
     if not category:
         return None
 
-    subcategory = str(item.get("subcategory") or metadata.get("subcategory") or "").strip() or None
+    subcategory = str(item.get("subcategory") or metadata.get("subcategory") or _message_field(item, "Subcategory") or "").strip() or None
     severity = _normalize_severity(item.get("severity") or metadata.get("severity"))
 
     return NormalizedPattern(

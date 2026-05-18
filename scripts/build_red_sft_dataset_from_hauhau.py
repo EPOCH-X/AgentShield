@@ -18,6 +18,7 @@ import os
 import random
 import re
 import sys
+import tempfile
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -102,8 +103,8 @@ def _normalize_for_dedup(text: str) -> str:
 
 async def main() -> int:
     parser = argparse.ArgumentParser(description="Build clean Red Agent SFT messages JSONL using hauhau/strong Red model.")
-    parser.add_argument("--input", default=os.getenv("ATTACK_PATTERN_PATH", "data/test_attack_sets/all_01_02_06_07_strongest_20.json"))
-    parser.add_argument("--output", default=f"data/finetuning/red_sft_hauhau_generated_{_utc_stamp()}.jsonl")
+    parser.add_argument("--input", default=os.getenv("ATTACK_PATTERN_PATH", "data/파인튜닝원본데이터/accepted.jsonl"))
+    parser.add_argument("--output", default=str(Path(tempfile.gettempdir()) / "agentshield-finetuning" / f"red_sft_hauhau_generated_{_utc_stamp()}.jsonl"))
     parser.add_argument("--raw-output", default="")
     parser.add_argument("--report-output", default="")
     parser.add_argument("--category", default="ALL")

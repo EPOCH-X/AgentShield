@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -144,7 +145,7 @@ def _dedupe_sources(items: list[dict[str, str]]) -> list[dict[str, str]]:
 
 async def main_async() -> int:
     parser = argparse.ArgumentParser(description="Build synthetic testbed canary list for Red Agent RL rewards.")
-    parser.add_argument("--output", default="data/rl_red_agent/canaries.json")
+    parser.add_argument("--output", default=str(Path(tempfile.gettempdir()) / "agentshield-rl-red-agent" / "canaries.json"))
     parser.add_argument("--db-limit", type=int, default=500)
     parser.add_argument("--require-db", action="store_true", help="Fail if TESTBED_DB_URL cannot be read.")
     args = parser.parse_args()

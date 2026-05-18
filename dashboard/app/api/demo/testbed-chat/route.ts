@@ -1,26 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { demoScriptedTargetResponse } from "../demo-agent-prompts";
 
 const DEFAULT_TESTBED_CHAT_URL = "http://127.0.0.1:8010/chat";
 
 function testbedChatUrl(): string {
   return process.env.TESTBED_CHAT_URL || DEFAULT_TESTBED_CHAT_URL;
-}
-
-function scriptedChatEnabled() {
-  return (process.env.DEMO_TESTBED_CHAT_SCRIPTED || "false").toLowerCase() === "true";
-}
-
-function scriptedDelayMs() {
-  return Number(process.env.DEMO_TESTBED_CHAT_DELAY_MS || 8500);
-}
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function scriptedTargetResponse(prompt: string) {
-  return demoScriptedTargetResponse(prompt);
 }
 
 export async function POST(req: NextRequest) {
@@ -35,24 +18,6 @@ export async function POST(req: NextRequest) {
   const prompt = String(body.prompt || "").trim();
   if (!prompt) {
     return NextResponse.json({ detail: "프롬프트를 입력해 주세요." }, { status: 400 });
-  }
-
-  if (scriptedChatEnabled()) {
-    const content = scriptedTargetResponse(prompt);
-    if (content) {
-      await sleep(scriptedDelayMs());
-      return NextResponse.json({
-        ok: true,
-        status: 200,
-        target: "scripted-demo-target",
-        raw: {
-          content,
-          security_mode: "weak",
-          credential_label: "INTERNAL_API_KEY",
-        },
-        content,
-      });
-    }
   }
 
   try {

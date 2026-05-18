@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { buildMockResponse } from "@/lib/devBackendMock";
 
 const DEFAULT_BACKEND = "http://127.0.0.1:8000";
 
@@ -43,9 +42,6 @@ async function forwardToBackend(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15_000);
 
-  const bodyText =
-    bodyBuf && bodyBuf.byteLength > 0 ? new TextDecoder("utf-8").decode(bodyBuf) : "";
-
   try {
     const upstream = await fetch(target, {
       method,
@@ -61,15 +57,10 @@ async function forwardToBackend(
     return res;
   } catch {
     clearTimeout(timeout);
-    const mock = buildMockResponse(segments, method, req.nextUrl.searchParams, bodyText);
-    if (mock) return mock;
-
     return NextResponse.json(
       {
-        detail:
-          "백엔드에 연결할 수 없습니다. (" +
-          backendOrigin() +
-          ") 오프라인일 때는 로그인·스캔·모니터링·관리자·PDF 등 주요 API에 목 응답이 자동 적용됩니다. 이 경로는 목이 없습니다.",
+        detail: "백엔드에 연결할 수 없습니다.",
+        backend: backendOrigin(),
       },
       { status: 503 }
     );

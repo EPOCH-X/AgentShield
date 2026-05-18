@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
 import PipelineFlowViz from "../../../components/PipelineFlowViz";
 import { getScanStatus, getScanResults, cancelScan, ScanResult } from "../../../lib/api";
-import { MOCK_SCAN_STATUS, MOCK_SCAN_RESULTS } from "../../../lib/mockClientData";
 
 const PHASE_LABELS: Record<number, string> = {
   1: "Phase 1 — 정적 스캐너",
@@ -226,13 +225,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
 
   const fetchStatus = useCallback(async () => {
     try {
-      const isMock = sessionId === "mock-session-demo";
-      let s: ScanStatus;
-      if (isMock) {
-        s = { ...MOCK_SCAN_STATUS, session_id: sessionId };
-      } else {
-        s = await getScanStatus(sessionId);
-      }
+      const s = await getScanStatus(sessionId);
       setStatus(s);
       elapsedRef.current = s.elapsed_seconds || elapsedRef.current;
       setElapsed(formatElapsed(elapsedRef.current));
@@ -248,33 +241,27 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
         } else {
           addLog("SCAN", `${phaseLabel} 실행 중... (${s.completed_tests}/${s.total_tests})`);
         }
-        if (!isMock) {
-          try {
-            const partial = await getScanResults(sessionId);
-            enqueueNewResults(partial);
-            const last = partial.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
-            if (last) setLatestAttackPrompt(last);
-          } catch {
-            addLog("ERROR", "실시간 결과를 아직 불러오지 못했습니다.");
-          }
+        try {
+          const partial = await getScanResults(sessionId);
+          enqueueNewResults(partial);
+          const last = partial.filter((x) => x.attack_prompt).at(-1)?.attack_prompt;
+          if (last) setLatestAttackPrompt(last);
+        } catch {
+          addLog("ERROR", "실시간 결과를 아직 불러오지 못했습니다.");
         }
       }
 
       if (s.status === "completed") {
         addLog("DONE", "스캔 완료. 최종 결과를 불러오는 중...");
         let r: ScanResult[];
-        if (isMock) {
-          r = MOCK_SCAN_RESULTS.map((res) => ({ ...res, session_id: sessionId }));
-        } else {
-          try {
+        try {
+          r = await getScanResults(sessionId);
+          if (r.length === 0 && (s.vulnerable_count > 0 || s.safe_count > 0)) {
+            await new Promise((res) => setTimeout(res, 1500));
             r = await getScanResults(sessionId);
-            if (r.length === 0 && (s.vulnerable_count > 0 || s.safe_count > 0)) {
-              await new Promise((res) => setTimeout(res, 1500));
-              r = await getScanResults(sessionId);
-            }
-          } catch {
-            r = [];
           }
+        } catch {
+          r = [];
         }
         const fresh = r.filter((x) => !seenIds.current.has(x.id));
         fresh.forEach((x) => seenIds.current.add(x.id));

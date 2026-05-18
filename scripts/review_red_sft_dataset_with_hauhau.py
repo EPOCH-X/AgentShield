@@ -442,7 +442,7 @@ async def main() -> int:
         description="Split Red SFT JSONL into per-sample JSON files and review each sample with hauhau/Ollama."
     )
     parser.add_argument("--input", required=True, help="SFT JSONL to split/review.")
-    parser.add_argument("--output-dir", default="", help="Default: data/finetuning/review/<input_stem>")
+    parser.add_argument("--output-dir", default="", help="Default: /tmp/agentshield-finetuning/review/<input_stem>")
     parser.add_argument("--model", default="hauhau-qwen:latest")
     parser.add_argument("--split-only", action="store_true")
     parser.add_argument("--review-only", action="store_true")
