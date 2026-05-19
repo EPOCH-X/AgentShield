@@ -1,6 +1,8 @@
 # backend/core/judge.py
 """Judge API entrypoint."""
 
+from __future__ import annotations
+
 import hashlib
 import logging
 import os
@@ -166,6 +168,40 @@ async def full_judge(
         result["evidence_scan_result"] = final_state.get("evidence_scan_result") or {}
         result["leak_origin"] = None
 
+        # Dashboard demo judge graph hover — UI(JUDGE_FLOW)가 보는 키 이름으로 정규화.
+        # include_debug보다 가벼운 페이로드: 노드별 judgment/reason/severity만 포함.
+        def _node_summary(src: dict | None) -> dict:
+            if not isinstance(src, dict):
+                return {}
+            judgment_value = (
+                src.get("judgment")
+                or src.get("verdict")
+                or src.get("result")
+                or ""
+            )
+            reason_value = (
+                src.get("reason")
+                or src.get("detail")
+                or src.get("summary")
+                or src.get("evidence")
+                or ""
+            )
+            summary: dict = {}
+            if judgment_value:
+                summary["judgment"] = judgment_value
+            if reason_value:
+                summary["reason"] = reason_value
+            if src.get("severity"):
+                summary["severity"] = src["severity"]
+            return summary
+
+        result["debug_nodes"] = {
+            "evidence_scan_result": _node_summary(final_state.get("evidence_scan_result")),
+            "strict_auditor": _node_summary(strict_result),
+            "context_auditor": _node_summary(context_result),
+            "consensus_detail": consensus_result.get("reason", "") if isinstance(consensus_result, dict) else "",
+        }
+
         if include_debug:
             result["node_results"] = {
                 "triage": final_state.get("triage_result"),
@@ -234,6 +270,12 @@ async def full_judge(
             "evidence_hard_veto": False,
             "evidence_scan_result": {},
             "leak_origin": None,
+            "debug_nodes": {
+                "evidence_scan_result": {},
+                "strict_auditor": {},
+                "context_auditor": {},
+                "consensus_detail": "",
+            },
         }
 
         if include_debug:

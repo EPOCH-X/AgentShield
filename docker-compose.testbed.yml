@@ -150,6 +150,7 @@ services:
         condition: service_started
     volumes:
       - ./data/testbed_kb:/app/data/testbed_kb:ro
+      - ./scripts:/app/scripts:ro
     command: python scripts/ingest_testbed_kb.py
     restart: "no"
 

@@ -106,15 +106,38 @@ def _redact_target_values_for_planning(text: str) -> str:
     return _TARGET_VALUE_REDACTION_RE.sub("<target_value_redacted>", text or "")
 
 
-def _has_repeated_long_line(text: str, *, min_repeats: int = 5) -> bool:
-    lines = []
+_TIMESTAMP_PREFIX_RE = re.compile(
+    r"^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\]?\s*[:.\-,]*\s*"
+)
+_TIMESTAMP_HIT_RE = re.compile(r"\[\d{1,2}:\d{2}(?::\d{2})?\s*(?:AM|PM|am|pm)?\]")
+
+
+def _has_repeated_long_line(text: str, *, min_repeats: int = 3) -> bool:
+    """타임스탬프나 사소한 접두어가 다른 동일 문장의 반복도 잡아낸다.
+
+    공격이 `[09:42 AM] 顧客: 同じ文` … `[09:44 AM] 顧客: 同じ文` 형태로
+    매 줄 prefix만 바뀌어 반복 loop에 빠지는 경우, 기존 라인 단위
+    중복 카운트는 통과하기 때문에 prefix를 제거한 본문으로 다시 비교한다.
+    """
+    lines: list[str] = []
     for line in text.splitlines():
         normalized = " ".join(line.strip().split())
-        if len(normalized) >= 24:
+        normalized = _TIMESTAMP_PREFIX_RE.sub("", normalized).strip()
+        if len(normalized) >= 20:
             lines.append(normalized)
     if not lines:
         return False
-    return any(count >= min_repeats for count in Counter(lines).values())
+    counts = Counter(lines)
+    if any(count >= min_repeats for count in counts.values()):
+        return True
+    # 상위 1개 문장이 본문의 절반 이상을 차지하면 degenerate.
+    top_line, top_count = counts.most_common(1)[0]
+    if top_count >= 5 and top_count * 2 >= len(lines):
+        return True
+    # `[HH:MM ...]` 같은 가짜 로그 타임스탬프가 10번 이상이면 fake-log loop.
+    if len(_TIMESTAMP_HIT_RE.findall(text)) >= 10:
+        return True
+    return False
 
 _FAILURE_SIGNAL_PATTERNS = {
     "refusal_policy": [

@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
 import ChatbotTestModal from "../../components/ChatbotTestModal";
 import {
@@ -597,10 +596,7 @@ export default function ScanPage() {
               LLM 취약점 스캔
             </h2>
             <p className="text-on-surface-variant/80 text-sm">
-              심층 적대적 테스트로 LLM 엔드포인트의 취약점을 분석합니다.{" "}
-              <Link href="/overview" className="text-primary/90 hover:text-primary font-bold hover:underline underline-offset-2">
-                플랫폼 개요
-              </Link>
+              심층 적대적 테스트로 LLM 엔드포인트의 취약점을 분석합니다.
             </p>
           </div>
           <div className="flex items-center gap-3 text-[11px] text-on-surface-variant/60 font-mono">

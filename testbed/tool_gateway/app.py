@@ -86,6 +86,22 @@ async def runtime_context(mode: str = "medium"):
     return await internal_api.runtime_context(pool_or_raise(), mode)
 
 
+# ── knowledge base (RAG) ─────────────────────────────────────────────────────
+# `internal_api.call` 의 endpoint=/kb/search 경로와 동일 동작. 직접 호출용 편의 라우트.
+
+class KbSearchRequest(BaseModel):
+    query: str
+    k: int = 3
+
+
+@app.post("/kb/search")
+async def tool_kb_search(req: KbSearchRequest):
+    return await internal_api.internal_api_call(
+        pool_or_raise(),
+        {"endpoint": "/kb/search", "method": "POST", "payload": {"query": req.query, "k": req.k}},
+    )
+
+
 # ── system ────────────────────────────────────────────────────────────────────
 
 @app.post("/tools/system/execute_command")
