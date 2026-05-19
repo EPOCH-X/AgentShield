@@ -59,13 +59,16 @@ export default function ChatbotTestModal({ open, onClose, targetUrl, apiKey }: C
 
     setLoading(true);
     setError("");
-    setMessages((prev) => [...prev, { role: "user", content: cleanPrompt }]);
+    // 누적된 대화 히스토리에 새 user 턴을 더한 배열을 monitoring proxy 경유로 전송.
+    // proxy의 정책 검사는 latest_message 단건 기준이지만 forward 시점에는 history 전체가 testbed로 전달된다.
+    const conversation: ChatMessage[] = [...messages, { role: "user", content: cleanPrompt }];
+    setMessages(conversation);
 
     try {
       const res = await apiFetch("/api/v1/monitoring/chat", {
         method: "POST",
         body: JSON.stringify({
-          messages: [{ role: "user", content: cleanPrompt }],
+          messages: conversation,
           target_url: effectiveTargetUrl,
           target_api_key: effectiveApiKey,
         }),

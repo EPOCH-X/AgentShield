@@ -81,6 +81,10 @@ class RequestContext:
     target_provider: Optional[str]
     target_model: Optional[str]
     message_count: int
+    # 정책 검사(P1/P2/P3/P4)는 latest_message 단건 기준으로 동작하지만,
+    # 실제 forward 시에는 클라이언트가 보낸 전체 대화 히스토리를 그대로 전달해서
+    # 타겟 챗봇이 multi-turn 컨텍스트를 유지하도록 한다.
+    full_messages: tuple[dict[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -107,6 +111,9 @@ def extract_request_context(payload: MonitorChatRequest) -> RequestContext:
         target_provider=payload.target_provider,
         target_model=payload.target_model,
         message_count=len(payload.messages),
+        full_messages=tuple(
+            {"role": m.role, "content": m.content} for m in payload.messages
+        ),
     )
 
 
@@ -120,6 +127,7 @@ def build_monitor_response(
     reason: Optional[str] = None,
     retry_after_seconds: Optional[int] = None,
     limit_type: Optional[LimitType] = None,
+    tool_trace: Optional[list[dict]] = None,
 ) -> MonitorChatResponse:
     return MonitorChatResponse(
         content=content,
@@ -131,6 +139,7 @@ def build_monitor_response(
         limit_type=limit_type,
         target_url=context.target_url,
         message_count=context.message_count,
+        tool_trace=tool_trace or [],
     )
 
 
@@ -399,18 +408,26 @@ def process_monitor_request_with_dependencies(
                 create_violation_record_fn=create_violation_record_fn,
             )
 
+    # 전체 대화 히스토리를 그대로 forward — 타겟 챗봇의 multi-turn 컨텍스트 유지.
+    # 클라이언트가 messages 배열 누적 책임을 지는 표준 패턴.
+    forward_messages = (
+        [dict(m) for m in context.full_messages]
+        if context.full_messages
+        else [{"role": "user", "content": context.latest_message}]
+    )
     forward_request = build_forward_request(
         target_url=context.target_url,
         target_api_key=context.target_api_key,
         target_provider=context.target_provider,
         target_model=context.target_model,
-        messages=[{"role": "user", "content": context.latest_message}],
+        messages=forward_messages,
         employee_context={"employee_id": context.employee_id},
     )
     forward_response: ForwardResponse = forwarder_fn(forward_request)
     response_content = masking_fn(
         forward_response.content or "Monitoring proxy accepted message.",
     )
+    forward_tool_trace = list(forward_response.tool_trace or [])
 
     if p2_result.category != "normal":
         response = build_monitor_response(
@@ -424,6 +441,7 @@ def process_monitor_request_with_dependencies(
                 if intent_review_result and intent_review_result.judgment == "ambiguous"
                 else p2_result.reason
             ),
+            tool_trace=forward_tool_trace,
         )
         record_plan = (
             build_review_needed_record_plan(p2_result.stage)
@@ -453,6 +471,7 @@ def process_monitor_request_with_dependencies(
         stage=p1_result.stage if p1_result.severity else "skeleton",
         severity=p1_result.severity,
         reason=final_reason,
+        tool_trace=forward_tool_trace,
     )
     record_plan = (
         build_review_needed_record_plan(p1_result.stage)

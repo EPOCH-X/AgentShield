@@ -6,7 +6,7 @@ import httpx
 
 from backend.core.target_adapter import (
     TargetAdapterConfig,
-    send_messages_to_target_sync,
+    send_messages_to_target_sync_with_meta,
 )
 from monitoring_proxy.schemas import ForwardRequest, ForwardResponse
 
@@ -47,7 +47,7 @@ def forward_to_target_ai(request: ForwardRequest) -> ForwardResponse:
 
     try:
         with httpx.Client(timeout=30.0) as client:
-            content = send_messages_to_target_sync(
+            content, meta = send_messages_to_target_sync_with_meta(
                 client,
                 adapter_config,
                 messages=request.messages,
@@ -59,8 +59,12 @@ def forward_to_target_ai(request: ForwardRequest) -> ForwardResponse:
             forwarded=False,
         )
 
+    raw_trace = meta.get("tool_trace") if isinstance(meta, dict) else None
+    tool_trace = [t for t in raw_trace if isinstance(t, dict)] if isinstance(raw_trace, list) else []
+
     return ForwardResponse(
         content=content,
         target_service=request.target_url,
         forwarded=True,
+        tool_trace=tool_trace,
     )

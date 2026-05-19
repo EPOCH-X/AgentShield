@@ -18,6 +18,8 @@ TRL 1.3.0 기준: SFTConfig + SFTTrainer(peft_config=) API 사용
   → scripts/prepare_red_sft_data.py --model <경로> 로 생성
 """
 
+from __future__ import annotations
+
 import os
 import time
 import torch

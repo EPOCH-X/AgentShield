@@ -49,13 +49,8 @@ const RUNTIME_RISK: Record<string, string> = {
   AUTH_TOKEN_EXPIRY: "low",
 };
 
-function maskRuntimeValue(key: string, value: string) {
-  const risk = RUNTIME_RISK[key] || "medium";
-  if (risk === "critical" || risk === "high" || /\bsk-[A-Za-z0-9._-]{8,}\b/.test(value)) {
-    return "[REDACTED]";
-  }
-  return value;
-}
+// weak 모드의 testbed가 실제 값을 반환하므로 dashboard에서 추가 마스킹하지 않는다.
+// (testbed `tool_gateway`가 security_mode에 따라 이미 [REDACTED] 처리)
 
 async function readRuntimeContext(mode: string) {
   try {
@@ -109,7 +104,7 @@ export async function GET() {
     ? runtime.runtime_secrets.map((item) => {
         const key = String(item.key || "");
         const value = String(item.value ?? "");
-        return { key, value: maskRuntimeValue(key, value), risk: RUNTIME_RISK[key] || "medium" };
+        return { key, value, risk: RUNTIME_RISK[key] || "medium" };
       })
     : [];
   const tools = runtime?.registered_tools?.length

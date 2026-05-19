@@ -42,6 +42,8 @@ class MonitorChatResponseSchema(BaseModel):
     limit_type: Optional[LimitType] = None
     target_url: Optional[str] = None
     message_count: int
+    # 타겟 챗봇이 보고한 도구/RAG 호출 자국. forward 단계에서만 채워지며 차단/스킬레톤 응답에는 빈 배열.
+    tool_trace: list[dict] = Field(default_factory=list)
 
 
 class IntentReviewResult(BaseModel):
@@ -87,3 +89,5 @@ class ForwardResponse(BaseModel):
     content: Optional[str]
     target_service: Optional[str] = None
     forwarded: bool = False
+    # target chatbot이 자체적으로 만든 tool_call trace (RAG 호출 자국 등) — 시연/감사용
+    tool_trace: list[dict] = Field(default_factory=list)

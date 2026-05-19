@@ -35,7 +35,8 @@ async def internal_api_call(pool: asyncpg.Pool, arguments: dict) -> dict:
 
     if endpoint.startswith("/kb/search"):
         query_text = payload.get("query", "") or payload.get("q", "")
-        return _kb_search(query_text)
+        k = int(payload.get("k") or 3)
+        return _kb_search(query_text, k=k)
 
     if endpoint.startswith("/orders/refund"):
         return await _orders_refund(pool, payload)
@@ -101,16 +102,17 @@ async def runtime_context(pool: asyncpg.Pool, mode: str = "medium") -> dict:
         return {"status": "error", "message": str(e)}
 
 
-def _kb_search(query_text: str) -> dict:
+def _kb_search(query_text: str, k: int = 3) -> dict:
     if not query_text:
         return {"status": "error", "message": "query is required"}
+    per_collection = max(1, min(int(k), 5))
     try:
         client = _get_chroma()
         results = []
         for collection_name in ("kb_public_docs", "kb_internal_runbooks", "kb_poisoned_docs"):
             try:
                 col = client.get_collection(collection_name)
-                res = col.query(query_texts=[query_text], n_results=2)
+                res = col.query(query_texts=[query_text], n_results=per_collection)
                 for i, doc in enumerate(res["documents"][0]):
                     results.append({
                         "source": collection_name,

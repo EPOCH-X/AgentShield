@@ -468,12 +468,17 @@ async def probe_target_contract(config: TargetAdapterConfig) -> dict[str, Any]:
     }
 
 
-def send_messages_to_target_sync(
+def send_messages_to_target_sync_with_meta(
     client: httpx.Client,
     config: TargetAdapterConfig,
     *,
     messages: list[dict[str, str]],
-) -> str:
+) -> tuple[str, dict[str, Any]]:
+    """Target에 sync 전송하고 (content_text, raw_response_dict)를 반환한다.
+
+    raw_response_dict에는 target이 돌려준 JSON 그대로 들어있다 — tool_trace,
+    security_mode 같은 부가 메타데이터를 호출자가 직접 활용할 수 있도록.
+    """
     headers = build_target_headers(config)
     last_exc: Optional[httpx.HTTPStatusError] = None
 
@@ -497,9 +502,21 @@ def send_messages_to_target_sync(
         try:
             response_json = response.json()
         except ValueError:
-            return extract_target_content(config, None, response.text)
-        return extract_target_content(config, response_json, response.text)
+            return extract_target_content(config, None, response.text), {}
+        meta = response_json if isinstance(response_json, dict) else {}
+        return extract_target_content(config, response_json, response.text), meta
 
     if last_exc is not None:
         raise last_exc
     raise RuntimeError("Target adapter payload negotiation failed")
+
+
+def send_messages_to_target_sync(
+    client: httpx.Client,
+    config: TargetAdapterConfig,
+    *,
+    messages: list[dict[str, str]],
+) -> str:
+    """레거시 caller(content 문자열만 필요)를 위한 얇은 wrapper."""
+    content, _ = send_messages_to_target_sync_with_meta(client, config, messages=messages)
+    return content
