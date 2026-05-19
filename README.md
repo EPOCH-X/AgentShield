@@ -45,11 +45,13 @@ AgentShield는 이러한 위험을 실제 파이프라인으로 재현하고, �
 flowchart TD
     Seed["Curated Attack Seeds / DB AttackPattern"]
     Red["Red Agent<br/>adaptive attack generation"]
-    Target["Target Chatbot<br/>testbed or external URL"]
+    Target["Target Chatbot<br/>testbed (DB + tools + implicit RAG) or external URL"]
     Judge["Judge Multi-Agent<br/>Evidence + Strict + Context + Consensus"]
     Blue["Blue Agent<br/>defense generation"]
     Verify["Phase 4 Verify<br/>defense re-judgment"]
-    Store["Artifacts<br/>PostgreSQL / ChromaDB / JSON / Markdown"]
+    Policy["Phase 5 Guardrail Policy Package<br/>JSON/YAML export"]
+    Store["Artifacts<br/>PostgreSQL / ChromaDB / JSON / Markdown / PDF"]
+    Monitor["Monitoring Proxy<br/>employee 1:1 audit channel"]
     Dashboard["Next.js Dashboard"]
 
     Seed --> Red
@@ -57,9 +59,13 @@ flowchart TD
     Target --> Judge
     Judge -->|vulnerable| Blue
     Blue --> Verify
+    Verify --> Policy
     Judge --> Store
     Verify --> Store
+    Policy --> Store
     Store --> Dashboard
+    Monitor --> Target
+    Monitor --> Store
 ```
 
 ## 주요 기능
@@ -165,21 +171,61 @@ Blue Agent가 만든 방어 응답을 다시 Judge에 넣어 검증합니다.
 - 일반 사용자에게 필요한 안전한 대안을 제공했는가
 - 기존 취약점이 재현되지 않는가
 
-### 6. Testbed
+### 6. Phase 5: Guardrail Policy Package
 
-AgentShield는 외부 서비스만 테스트하는 것이 아니라, 자체 Docker testbed를 포함합니다.
+Phase 4까지 끝난 세션을 입력으로 받아, 운영팀과 보안팀이 실제로 적용할 수 있는 **가드레일 정책 패키지**(JSON/YAML)를 산출합니다.
+
+목적:
+
+- 보안 검증 결과를 "취약점 X건 발견" 로그로 끝내지 않고, 즉시 운영에 반영 가능한 정책 산출물로 변환
+- 카테고리별(LLM01/02/06/07) 차단 규칙·완화 권고·시그니처를 한 번에 모아 배포 단위로 제공
+- 외부 도구·내부 게이트웨이가 모두 동일 스키마로 인입할 수 있도록 `policy_package_schema`로 검증
+
+관련 파일:
+
+- `backend/api/policy_export.py` 산출 API
+- `backend/core/phase5_policy_export.py` Phase 1~4 결과 → 정책 패키지 변환
+- `backend/core/policy_package_schema.py` / `policy_package_validator.py` 스키마와 검증기
+- `tests/test_policy_package_export.py` 단위 테스트
+
+### 7. Monitoring Proxy
+
+`/api/v1/monitoring/chat` 엔드포인트는 **직원이 외부 LLM을 1:1로 호출할 때 적용되는 운영 감사 채널**입니다. 보안 스캔 파이프라인과는 별개 경로이며, 다음 시나리오를 위해 존재합니다.
+
+- 직원이 운영 LLM에 보내는 질문을 정책 검사(P1: 기밀, P2: 부적절, P3: rate, P4: intent review)로 필터
+- 정책 위반 시 차단하고 위반 기록을 PostgreSQL에 적재
+- 허용된 요청은 forwarder가 타겟 챗봇으로 전달
+- 타겟이 반환한 `tool_trace` (RAG 호출, 도구 호출)를 그대로 보존해 감사 화면에 노출
+
+대시보드 `/scan` 페이지의 **챗봇 테스트 모달**이 이 흐름을 시연용으로 사용하며, multi-turn 대화 히스토리도 그대로 전달됩니다. Scan/Red Agent/Demo 캠페인 같은 메인 파이프라인은 monitoring proxy를 거치지 않고 testbed에 직접 접속합니다.
+
+### 8. Testbed
+
+AgentShield는 외부 서비스만 테스트하는 것이 아니라, **DB·tool·KB가 모두 연결된 자체 Docker testbed**를 포함합니다. 외부 챗봇처럼 보이지만 내부는 우리가 통제하기 때문에 공격 성공/실패의 ground truth를 측정할 수 있습니다.
 
 Testbed 구성:
 
-- `target_chatbot`: 공격 대상 챗봇
-- `tool_gateway`: 고객 DB, 이메일, 내부 API 등 tool gateway
-- `postgres_testbed`: 테스트용 고객/주문/환불/티켓 DB
-- `chromadb_testbed`: RAG 문서 저장소
-- `mailpit`: 이메일 sandbox
-- `db_seed`: 테스트베드 초기 데이터 주입
-- `kb_ingest`: 테스트베드 지식 문서 ingest
+| 서비스 | 역할 |
+| --- | --- |
+| `target_chatbot` | 공격 대상 챗봇. weak / medium / strict 3단계 보안 모드 |
+| `tool_gateway` | 고객 DB, 이메일, 내부 API, KB 검색 라우트 (`/kb/search`) |
+| `postgres_testbed` | 고객·주문·환불·티켓·runtime_secrets·system_prompt_context·registered_tools DB |
+| `chromadb_testbed` | RAG 문서 컬렉션 (`kb_public_docs` / `kb_internal_runbooks` / `kb_poisoned_docs`) |
+| `mailpit` | 이메일 tool sandbox |
+| `db_seed` | testbed PostgreSQL 시드 데이터 1회 주입 (one-shot) |
+| `kb_ingest` | `data/testbed_kb/*.md`를 frontmatter 기준으로 ChromaDB에 1회 적재 (one-shot) |
 
-Testbed는 실제 서비스처럼 DB, tool, API가 연결된 환경에서 공격과 방어를 검증하기 위한 목적입니다.
+#### Implicit RAG (자동 KB 검색)
+
+`target_chatbot`은 매 user message에 대해 자동으로 `/kb/search`를 호출하고, 검색된 snippet을 시스템 프롬프트 뒤에 inject한 뒤 응답합니다. 모델이 자율적으로 tool_call을 만들지 못해도 RAG가 항상 동작하므로, **간접 인젝션(LLM01) 공격 표면이 비어 있지 않습니다**. 호출 자국은 `tool_trace`에 `{"auto": true, "name": "internal_api.call", "arguments": {"endpoint": "/kb/search", ...}}` 형태로 남아 감사 가능합니다.
+
+KB 문서 분류(frontmatter 기반):
+
+- `audience: customer` → `kb_public_docs` (환불·배송·멤버십·결제 등 공개 정책)
+- `audience: internal` → `kb_internal_runbooks` (개인정보 처리방침·GDPR 절차 등 내부 절차)
+- `sensitivity: confidential` 또는 `audience: operations` → `kb_poisoned_docs` (내부 운영 핸드북·슈퍼바이저 권한 가이드 — **간접 인젝션 표면 의도 삽입**)
+
+문서는 `data/testbed_kb/*.md` 평탄 구조이며, 각 파일 상단의 YAML frontmatter(title / audience / sensitivity / last_updated)로 분류·검색 메타데이터가 결정됩니다.
 
 ## 기술 스택
 
@@ -241,16 +287,21 @@ AgentShield/
 │   │   └── llm_client.py             # Ollama role-aware client
 │   ├── api/
 │   │   ├── auth.py                   # Auth API
-│   │   ├── scan.py                   # LLM security scan / SiteGPT demo API
+│   │   ├── scan.py                   # LLM security scan / SiteGPT demo API (categories filter, ambiguous_count)
 │   │   ├── report.py                 # Report API
+│   │   ├── monitoring.py             # 1:1 chatbot test relay -> monitoring_proxy
+│   │   ├── policy_export.py          # Phase 5 Guardrail Policy Package export API
 │   │   └── vector_admin.py           # Vector memory management
 │   ├── core/
-│   │   ├── target_adapter.py         # Target URL request/response adapters
-│   │   ├── phase1_scanner.py         # Phase 1 seed attack scanner
+│   │   ├── target_adapter.py         # Target URL request/response adapters + container-local URL rewrite
+│   │   ├── phase1_scanner.py         # Phase 1 seed attack scanner (multi-category filter, empty-row safe)
 │   │   ├── phase2_red_agent.py       # Phase 2 red mutation pipeline
-│   │   ├── phase3_blue_agent.py      # Phase 3 defense pipeline
+│   │   ├── phase3_blue_agent.py      # Phase 3 defense pipeline (slug/integer ID fallback match)
 │   │   ├── phase4_verify.py          # Phase 4 verification
-│   │   ├── judge.py                  # full_judge entrypoint
+│   │   ├── phase5_policy_export.py   # Phase 5 Guardrail Policy Package builder
+│   │   ├── policy_package_schema.py  # Phase 5 schema definition
+│   │   ├── policy_package_validator.py # Phase 5 schema validator
+│   │   ├── judge.py                  # full_judge entrypoint (debug_nodes normalized)
 │   │   ├── mutation_engine.py        # optional mutation utilities
 │   │   └── frr_tracker.py            # false refusal rate tracking
 │   ├── graph/
@@ -293,7 +344,14 @@ AgentShield/
 │   ├── red_campaigns/
 │   ├── finetuning/
 │   ├── rl_red_agent/
-│   └── testbed_kb/
+│   └── testbed_kb/                   # 한국 쇼핑몰 도메인 KB 11개 markdown (frontmatter 분류)
+├── monitoring_proxy/                 # employee 1:1 chat audit proxy
+│   ├── monitor_server.py             # request context + policy stages
+│   ├── services/forwarder.py         # tool_trace 보존 forward
+│   └── schemas/                      # MonitorChatRequest / ForwardResponse
+├── outputs/                          # Phase 5 정책 패키지 출력 (auto-created)
+├── tests/
+│   └── test_policy_package_export.py
 ├── database/
 │   ├── schema.sql
 │   └── testbed_schema.sql
@@ -307,30 +365,43 @@ AgentShield/
 
 ### 표준 전체 파이프라인
 
-`scripts/run_finetuned_full_pipeline.py`는 AgentShield의 Phase 1~4 전체 흐름을 실행하는 통합 실행기입니다.
+`scripts/run_finetuned_full_pipeline.py`는 AgentShield의 Phase 1~5 전체 흐름을 실행하는 통합 실행기입니다.
 
 ```text
 Phase 1
   curated seed 또는 DB AttackPattern 로드
-  target chatbot 호출
+  (DB에 row가 있지만 attack_prompt가 비어 있으면 자동 무시하고 file fallback)
+  ScanRequest.categories로 OWASP LLM01/02/06/07 부분 필터링 가능
+  target chatbot 호출 (실제 응답에 implicit RAG hit 포함)
   target response 수집
   Judge 판정
+  결과 row 저장 후 test_result_id를 in-memory result에 inplace 주입
 
 Phase 2
   Red Agent가 target response와 judge detail을 기반으로 변형 공격 생성
-  target chatbot 재호출
-  Judge 재판정
+  ROUND_ESCALATION[2]에서 다국어/인코딩 fragment를 미리 심고
+  ROUND_ESCALATION[3]에서 그 fragment를 합쳐 실행하도록 강제
+  target chatbot 재호출 → Judge 재판정
 
 Phase 3
   vulnerable 케이스에 대해 Blue Agent 방어 응답 생성
+  defense_id 슬러그여도 session_id + attack_prompt + category로 row를 다시 매칭해 DB에 defense_code 저장
+  (이전엔 isdigit() 체크만 있어 슬러그 ID가 영원히 미반영되던 버그를 fix)
 
 Phase 4
   Blue Agent 응답을 다시 Judge로 검증
   safe / unsafe 판정
 
+Phase 5
+  Phase 1~4 결과를 종합해 Guardrail Policy Package(JSON/YAML)로 export
+  카테고리별 차단 규칙·완화 권고·시그니처를 포함한 운영용 산출물 생성
+  schema validator로 형식 검증
+
 Output
-  results/*.json
-  results/*.md
+  results/*.json                       (전체 라운드 로그)
+  results/*.md                         (감사용 마크다운)
+  results/review_exports/<sid>_<ts>/   (auto-export status/results/queue)
+  outputs/policy_package/              (Phase 5 정책 패키지)
   PostgreSQL persistence hooks
   ChromaDB memory hooks
 ```
@@ -431,6 +502,10 @@ data/red_campaigns/real_value_leaks/     # testbed canary 실제값 유출 탐�
 - 타겟 응답 없이 standalone attack prompt를 생성합니다.
 - 하드코딩된 API key, 주문번호, 날짜, PII, tool call 예시는 reject합니다.
 - 모델이 예시값을 직접 만들어내는 것이 아니라 target runtime 값을 추출하도록 유도하는 데이터만 남깁니다.
+- 도메인은 6개로 정리되어 있습니다: `finance, healthcare, rag, hr, government, ecommerce`. 모두 LLM 보안 위협이 실제로 의미 있는 도메인이며, restaurant/travel/education 같은 약한 표면 도메인은 제거되었습니다.
+- 12개 인코딩/언어 지시문(`_ENCODING_DIRECTIVES`)이 seed index 기준으로 강제 로테이션됩니다. "allowed" 가이드가 아니라 **mandatory** 지시이므로 매 sample마다 한국어/중국어/일본어/아랍어/base64/hex/ROT13/homoglyph/split-payload 중 하나가 반드시 적용됩니다.
+- `_GENERIC_CARRIER_RE`로 "please review this python code" 같은 base 모델 stale opener를 차단합니다.
+- 검증기 `validate_sft_seed_output`은 instruction scaffold leak, fake conversation, hardcoded sample value, generic carrier 모두를 단계적으로 reject 합니다.
 
 실행 예시:
 
@@ -438,15 +513,15 @@ data/red_campaigns/real_value_leaks/     # testbed canary 실제값 유출 탐�
 python scripts/build_red_sft_dataset_from_hauhau.py \
   --category ALL \
   --seed-mode raw \
-  --domains finance,rag,ecommerce,tax,restaurant,government,healthcare,education,travel,hr \
   --seeds 200 \
-  --generation-attempts 4 \
+  --generation-attempts 5 \
   --min-attack-chars 500 \
-  --max-attack-chars 30000 \
+  --max-attack-chars 20000 \
   --red-model hauhau-qwen:latest \
-  --no-code-mutation \
-  --output data/finetuning/red_v16.jsonl
+  --output data/finetuning/red_v17.jsonl
 ```
+
+`--domains` 기본값은 자동으로 `finance,healthcare,rag,hr,government,ecommerce` 6개입니다.
 
 출력:
 
@@ -688,15 +763,29 @@ http://localhost:8000/api/v1
 
 | API | 설명 |
 | --- | --- |
-| `POST /api/v1/scan/llm-security` | LLM 보안 스캔 시작 |
+| `POST /api/v1/scan/llm-security` | LLM 보안 스캔 시작. `categories: ["LLM01","LLM02","LLM06","LLM07"]` 부분 선택 가능 |
 | `GET /api/v1/scan/latest` | 최신 스캔 세션 조회 |
-| `GET /api/v1/scan/{session_id}/status` | 세션 상태 조회 |
+| `GET /api/v1/scan/{session_id}/status` | 세션 상태 조회 (`vulnerable_count` / `safe_count` / `ambiguous_count` 분리) |
 | `GET /api/v1/scan/{session_id}/results` | 세션 결과 조회 |
 | `GET /api/v1/scan/{session_id}/review-queue` | 수동 검수 큐 조회 |
 | `POST /api/v1/scan/manual-check` | 단일 공격/응답 Judge 판정 |
+| `GET /api/v1/scan/sitegpt/config` | Phase 2 최대 라운드 등 dashboard용 설정 노출 |
+| `POST /api/v1/monitoring/chat` | 직원 1:1 챗봇 감사 채널 (monitoring proxy 경유, multi-turn history 전달) |
+| `GET /api/v1/monitoring/dashboard` | 위반·차단 통계 |
+| `GET /api/v1/monitoring/violations` | 위반 기록 |
+| `POST /api/v1/policy/export/{session_id}` | Phase 5 Guardrail Policy Package export |
 | `GET /api/v1/report/{session_id}/pdf` | 리포트 PDF |
 | `GET /api/v1/vector/attack-results` | Chroma attack memory 조회 |
 | `POST /api/v1/vector/attack-results/reingest` | attack memory 재적재 |
+
+Dashboard 내부 보조 API:
+
+| Route | 설명 |
+| --- | --- |
+| `GET /api/demo/testbed-context` | testbed health + runtime_secrets + DB snapshot + 등록 도구 목록 |
+| `POST /api/demo/translate` | Ollama로 영문 judge detail / defense rationale을 한국어로 번역 |
+| `POST /api/demo/judge` | 데모 페이지에서 Judge 직접 호출 (debug_nodes 포함) |
+| `POST /api/demo/red-adaptive` | 데모용 적응형 Red 캠페인 streamer |
 
 ## 데이터 저장 정책
 
@@ -717,14 +806,16 @@ http://localhost:8000/api/v1
 
 ## 공격 카테고리
 
-AgentShield는 OWASP LLM Top 10 계열의 주요 공격군을 기준으로 테스트합니다.
+AgentShield는 OWASP LLM Top 10 계열의 주요 공격군을 기준으로 테스트합니다. 대시보드 `/scan` 페이지의 공격 벡터 토글은 다음과 같이 1:1 매핑되며, 선택된 항목이 `ScanRequest.categories`로 백엔드까지 그대로 전달되어 Phase 1 패턴 필터링에 사용됩니다.
 
-| 카테고리 | 설명 |
-| --- | --- |
-| LLM01 | Prompt Injection |
-| LLM02 | Sensitive Information Disclosure |
-| LLM06 | Excessive Agency / Unauthorized Tool Use |
-| LLM07 | System Prompt Leakage |
+| 카테고리 | 설명 | 대시보드 UI 토글 |
+| --- | --- | --- |
+| LLM01 | Prompt Injection | 프롬프트 주입 (`prompt_injection`) |
+| LLM02 | Sensitive Information Disclosure | 민감정보 유출 (`data_leak`) |
+| LLM06 | Excessive Agency / Unauthorized Tool Use | 권한 오남용 (`excessive_agency`) |
+| LLM07 | System Prompt Leakage | 시스템 프롬프트 유출 (`prompt_leak`) |
+
+판정 결과 시각화도 카테고리별로 색상이 다르게 부여됩니다. 데모 리포트 페이지의 위험 분석 카드는 카테고리에 맞춰 "왜 위험한가" 설명을 동적으로 표시합니다.
 
 카테고리별 공격은 단일 문장 jailbreak뿐 아니라 다음 형태를 포함할 수 있습니다.
 
@@ -860,10 +951,14 @@ PY
 | `RED_CAMPAIGN_CONVERSATION_MODE` | `single` 또는 `multi` |
 | `RED_CAMPAIGN_VALIDATION_MODE` | `strict`, `penalty`, `off` |
 | `ATTACK_PATTERN_PATH` | Phase 1 file fallback 공격 데이터 |
-| `PHASE2_MAX_ROUNDS` | Red Agent 최대 라운드 |
-| `TESTBED_SECURITY_MODE` | testbed chatbot 보안 모드 |
+| `PHASE2_MAX_ROUNDS` | Red Agent 최대 라운드 (대시보드/스크립트의 단일 소스. `RED_CAMPAIGN_ROUNDS`가 명시되면 그것이 우선) |
+| `RED_CAMPAIGN_ROUNDS` | demo `/api/demo/red-adaptive` 라운드 override. 미설정 시 `PHASE2_MAX_ROUNDS` fallback |
+| `TARGET_LOCAL_REWRITE_HOST` | backend가 컨테이너 안일 때 사용자가 입력한 `localhost`/`127.0.0.1`를 자동 치환할 호스트 (기본: `host.docker.internal`) |
+| `TESTBED_SECURITY_MODE` | testbed chatbot 보안 모드 (`weak` / `medium` / `strict`) |
 | `TESTBED_DB_URL` | testbed PostgreSQL |
 | `TOOL_GATEWAY_URL` | testbed tool gateway URL |
+| `TESTBED_CHROMADB_HOST` | testbed ChromaDB host (KB 검색용) |
+| `TESTBED_CHROMADB_PORT` | testbed ChromaDB port |
 | `CHROMADB_MODE` | `persistent` 또는 `http` |
 | `CHROMADB_HOST` | ChromaDB host |
 | `CHROMADB_PORT` | ChromaDB port |
@@ -932,6 +1027,86 @@ python scripts/run_red_adaptive_campaign.py \
 ```
 
 `strict`는 invalid output을 강하게 차단합니다. `penalty`는 결과를 남기되 reward 또는 수동 검수에서 감점 처리하기 위한 모드입니다.
+
+### 6. 대시보드에서 입력한 `localhost:8010`이 Docker 컨테이너 안에서 안 닿는 경우
+
+backend가 Docker로 돌고 있다면 컨테이너 내부의 `localhost`는 컨테이너 자신을 가리킵니다. `target_adapter`가 `/.dockerenv` 존재를 감지하면 `localhost`/`127.0.0.1`/`0.0.0.0`을 자동으로 `host.docker.internal`(또는 `TARGET_LOCAL_REWRITE_HOST` env로 지정한 호스트)로 치환합니다. 별도 설정 없이 시연 페이지에서 입력한 URL이 그대로 동작하게 됩니다.
+
+### 7. testbed가 KB 검색을 호출하지 않는 경우
+
+`target_chatbot`은 매 user message마다 자동으로 `/kb/search`를 호출하도록(implicit RAG) 통합되어 있습니다. 응답에 `tool_trace`가 비어 있으면 다음을 확인합니다.
+
+- `data/testbed_kb/*.md` 가 비어 있지 않은지 (`ls data/testbed_kb/`)
+- `docker compose -f docker-compose.testbed.yml run --rm kb_ingest` 로 ChromaDB 적재가 끝났는지
+- `target_chatbot` 컨테이너를 KB 코드 변경 후 재빌드/재기동했는지 (`docker compose -f docker-compose.testbed.yml build target_chatbot && docker compose -f docker-compose.testbed.yml up -d target_chatbot`)
+- `docker exec testbed-chatbot grep -c "fetch_kb_context" /app/testbed/target_chatbot/app.py` 가 0이 아니어야 합니다 (코드 반영 확인)
+
+### 8. 챗봇 테스트 모달이 대화를 기억하지 못하는 경우
+
+`ChatbotTestModal`은 누적된 messages 배열 전체를 monitoring proxy에 전달하고, proxy는 정책 검사(P1~P4)만 latest 단건 기준으로 수행한 뒤 forward 단계에서는 history 전체를 testbed로 보냅니다. 대화가 끊긴다면:
+
+- backend 재기동 (`docker compose restart backend`)
+- 모달을 한 번 닫고 다시 열어 messages state 초기화 후 재시도
+
+## 최근 변경 사항
+
+발표 이후 포트폴리오 마무리 과정에서 적용된 주요 변경입니다. 코드 변경의 의도와 효과 중심으로 정리합니다.
+
+### 파이프라인 / 산출물 강화
+
+- **Phase 5 Guardrail Policy Package** 추가 — Phase 1~4 결과를 JSON/YAML 정책 패키지로 export하는 단계. `backend/api/policy_export.py`, `backend/core/phase5_policy_export.py`, schema/validator + 단위 테스트.
+- **Phase 1 카테고리 부분 필터링** — `ScanRequest.categories` 필드로 OWASP LLM01/02/06/07 중 일부만 선택해 스캔 가능. `_normalize_categories` 헬퍼가 입력을 검증하고 phase1_scanner까지 일관 전달.
+- **Phase 1 / Phase 3 데이터 연결 fix**
+  - DB에 placeholder row만 있고 `attack_prompt`가 비어 있을 때 자동 무시하고 파일 fallback이 동작하도록 보강.
+  - Phase 1 row 저장 후 `test_result_id`를 in-memory result dict에 inplace 주입.
+  - Phase 3에서 슬러그 `defense_id`를 받아도 `session_id + attack_prompt + category` 조합으로 row를 다시 매칭. 이전엔 슬러그 ID가 `isdigit()` 체크에 막혀 `defense_code` 컬럼이 영원히 비어 있던 사일런트 실패 경로를 제거.
+- **scan status API의 ambiguous 분리** — `vulnerable_count`/`safe_count`에 모두 묶이던 ambiguous를 `ambiguous_count`로 별도 노출. 대시보드 통계 박스도 3열로 확장하고 라이브 로그에 `WARN: Judge 멀티에이전트 합의 보류` 표시.
+
+### Testbed Implicit RAG
+
+- `data/testbed_kb/`에 한국 쇼핑몰 도메인 markdown 11개 문서 추가 (환불·배송·멤버십·결제·교환반품·비밀번호 재설정·개인정보·GDPR 탈퇴·내부 운영 핸드북·슈퍼바이저 권한 가이드).
+- 각 문서 상단의 YAML frontmatter(`audience` / `sensitivity`) 기준으로 `kb_public_docs` / `kb_internal_runbooks` / `kb_poisoned_docs` 컬렉션 자동 분류.
+- `scripts/ingest_testbed_kb.py` 재작성 (평탄 구조 + frontmatter 파서 + 청크 분할, idempotent).
+- `tool_gateway`에 편의용 `POST /kb/search` 라우트 + `_kb_search`의 `k` 파라미터 지원.
+- `target_chatbot`에 **자동 RAG**(`fetch_kb_context`) 통합. 매 user message마다 `/kb/search` 호출 → snippet을 system prompt에 inject → 응답. tool_trace에 `auto: True` 자국. Qwen 3B의 자율 tool_call 의존을 제거함.
+
+### 데모 페이지 / 챗봇 테스트
+
+- 공격 벡터 4개를 OWASP LLM01/02/06/07에 1:1 매핑하고, 선택값이 `categories`로 백엔드까지 전달되도록 연결.
+- 데모 카테고리 라벨/색상/위험 설명 카드 동적 (`CATEGORY_LABELS` / `CATEGORY_COLORS` / `CATEGORY_DANGER`).
+- 데모 라운드 라벨 `/4` → `/${phase2MaxRounds}` 동적 — `getSitegptConfig()`로 backend `PHASE2_MAX_ROUNDS` 값 동기화. `red-adaptive/route.ts`도 단일 소스로 통합.
+- Judge 그래프 노드 hover에 verdict/reason 표시 (`judge.py`가 항상 `debug_nodes`를 UI 키 이름으로 정규화).
+- 공격응답 / 방어응답 박스 내부에 Consensus 판정 근거 박스 추가, 별도 영문 → 한국어 번역(`/api/demo/translate`) 자동 trigger.
+- "최종 결과" 섹션과 `defenseState.rationale` 박스 통째 제거 — 동일 정보가 위 카드에 이미 표시되어 잔여 코드 정리.
+- `ChatbotTestModal` 멀티턴 대화 기억 — 누적 messages를 monitoring proxy 경유로 testbed에 전달.
+- `runtime_secrets` 마스킹 제거 — weak 모드 testbed가 반환한 실제 시크릿 값을 대시보드에 그대로 노출 (시연 의도). strict 모드면 testbed가 자체적으로 `[REDACTED]` 처리.
+
+### Monitoring Proxy 경로
+
+- `MonitorChatRequest`의 messages 전체를 `RequestContext.full_messages`에 보존. 정책 검사(P1~P4)는 `latest_message` 단건 그대로, forward 단계에서만 history 전체를 testbed로 전송.
+- `target_adapter`에 `send_messages_to_target_sync_with_meta` 추가 (raw response_json 포함 반환). forwarder가 `tool_trace`까지 보존해 `ForwardResponse.tool_trace` → `MonitorChatResponse.tool_trace`로 흘려보냄. ChatbotTestModal에서 도구 호출 건수가 정확히 보임.
+
+### Red Agent / 학습 데이터 품질
+
+- `ROUND_ESCALATION[2]`에 다국어/인코딩 fragment를 미리 심는 seed strategy, `[3]`에 해당 fragment를 조합·실행하도록 강제하는 chain activation 지시문 추가.
+- `red_sft_seed_agent.py`에 12개 인코딩/언어 지시문(`_ENCODING_DIRECTIVES`) 강제 로테이션 — 매 seed가 한국어/중국어/일본어/아랍어/base64/hex/ROT13/homoglyph/split-payload 중 하나를 반드시 적용.
+- `_GENERIC_CARRIER_RE` 추가 — "Please review this Python code" 같은 base 모델 stale opener를 reject.
+- `validate_attack_prompt_output`의 degenerate loop 차단 강화 — 타임스탬프 prefix 정규화 후 반복 카운트, 상위 1개 라인이 본문 50%를 초과하거나 `[HH:MM]` 형식이 10회 이상이면 fake-log loop로 reject (사용자 사례 240줄 일본어 반복 컨테이너 내부 직접 차단 확인).
+- SFT 도메인을 6개로 정리 (`finance, healthcare, rag, hr, government, ecommerce`). restaurant/travel/education 같은 약한 표면 도메인 제거.
+- `_DOMAIN_KEYWORDS` / `_DOMAIN_ATTACK_HINTS`도 같은 6개 도메인 + `rag` / `government` / `legal` / `general` 기준으로 정리.
+- `_SYSTEM_PROMPT_ABLITERATED`에서 영어 강제 제거, `multilingual_attack_guidance()`를 항상 다국어 허용으로 단순화. 카테고리 attack_examples에서 하드코딩된 ID/이메일/시크릿 제거.
+
+### 컨테이너 / 환경 안전화
+
+- `target_adapter._rewrite_local_target_for_container` — backend가 컨테이너 안일 때 `localhost`/`127.0.0.1`/`0.0.0.0`을 자동으로 `host.docker.internal`(또는 `TARGET_LOCAL_REWRITE_HOST` env로 지정한 호스트)로 치환. 사용자가 폼에 `localhost:8010`을 입력해도 그대로 동작.
+- `backend/core/judge.py`, `backend/finetuning/train_lora.py`에 `from __future__ import annotations` 추가. 호스트 python이 3.10 미만이어도 PEP604 union 평가 에러 방지.
+- `data` 폴더 정리 — `data/파인튜닝원본데이터/accepted.jsonl`을 단일 진실 소스로 유지하고, 기존 시연·임시 데이터 폴더 제거.
+
+### 대시보드 정리
+
+- `/scan/[id]` 라이브 터미널에 `max-h-[560px]` 적용 (페이지 자체가 무한 확장되던 버그 해결).
+- `/overview` 라우트 삭제 + 잔존 링크 정리.
+- 대시보드 목업/하드코딩 시연 데이터 일괄 제거 (`dashboard/lib/devBackendMock.ts`, `dashboard/lib/mockClientData.ts` 등).
 
 ## 보안 및 윤리 원칙
 
