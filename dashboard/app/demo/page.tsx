@@ -4,6 +4,7 @@ import type { Dispatch, SetStateAction } from "react";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
+import { getSitegptConfig } from "../../lib/api";
 
 type DemoContext = {
   target: {
@@ -747,7 +748,10 @@ export default function DemoPage() {
   const [defenseState, setDefenseState] = useState<DefenseState>({ status: "idle" });
   const [translatedDetail, setTranslatedDetail] = useState<string | null>(null);
   const [isTranslatingDetail, setIsTranslatingDetail] = useState(false);
-  const [translatedRationale, setTranslatedRationale] = useState<string | null>(null);
+  const [translatedDefenseDetail, setTranslatedDefenseDetail] = useState<string | null>(null);
+  const [isTranslatingDefenseDetail, setIsTranslatingDefenseDetail] = useState(false);
+  // backend PHASE2_MAX_ROUNDS와 동기화 — 하드코딩 제거
+  const [phase2MaxRounds, setPhase2MaxRounds] = useState(5);
   const [activeCategory, setActiveCategory] = useState(DEFAULT_DEMO_CATEGORY);
   const seenAdaptiveRoundKeysRef = useRef<Set<string>>(new Set());
 
@@ -788,7 +792,7 @@ export default function DemoPage() {
       setDefenseJudge(saved.defenseJudge || { status: "idle" });
       setDefenseState(saved.defenseState || { status: "idle" });
       setTranslatedDetail(saved.translatedDetail || null);
-      setTranslatedRationale(saved.translatedRationale || null);
+      setTranslatedDefenseDetail(saved.translatedDefenseDetail || null);
       setActiveCategory(normalizeCategory(saved.activeCategory) || DEFAULT_DEMO_CATEGORY);
     } catch {
       sessionStorage.removeItem(DEMO_STATE_STORAGE_KEY);
@@ -810,33 +814,47 @@ export default function DemoPage() {
         defenseJudge,
         defenseState,
         translatedDetail,
-        translatedRationale,
+        translatedDefenseDetail,
         activeCategory,
       }),
     );
   }
 
   useEffect(() => {
+    let mounted = true;
+    getSitegptConfig()
+      .then((cfg) => { if (mounted && cfg?.phase2_max_rounds) setPhase2MaxRounds(cfg.phase2_max_rounds); })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
     if (attackJudge.status !== "done") return;
-    const detail = attackJudge.result?.detail;
-    if (!detail) return;
+    const consensus =
+      (attackJudge.result?.reason_sources?.consensus_reason as string | undefined) ||
+      attackJudge.result?.detail;
+    if (!consensus) return;
     setTranslatedDetail(null);
     setIsTranslatingDetail(true);
-    translateToKorean(detail)
+    translateToKorean(consensus)
       .then((translated) => { if (translated) setTranslatedDetail(translated); })
       .catch(() => {})
       .finally(() => setIsTranslatingDetail(false));
-  }, [attackJudge.status, attackJudge.result?.detail]);
+  }, [attackJudge.status, attackJudge.result?.detail, attackJudge.result?.reason_sources]);
 
   useEffect(() => {
     if (defenseJudge.status !== "done") return;
-    const rationale = defenseState.rationale;
-    if (!rationale) return;
-    setTranslatedRationale(null);
-    translateToKorean(rationale)
-      .then((translated) => { if (translated) setTranslatedRationale(translated); })
-      .catch(() => {});
-  }, [defenseJudge.status, defenseState.rationale]);
+    const consensus =
+      (defenseJudge.result?.reason_sources?.consensus_reason as string | undefined) ||
+      defenseJudge.result?.detail;
+    if (!consensus) return;
+    setTranslatedDefenseDetail(null);
+    setIsTranslatingDefenseDetail(true);
+    translateToKorean(consensus)
+      .then((translated) => { if (translated) setTranslatedDefenseDetail(translated); })
+      .catch(() => {})
+      .finally(() => setIsTranslatingDefenseDetail(false));
+  }, [defenseJudge.status, defenseJudge.result?.detail, defenseJudge.result?.reason_sources]);
 
   useEffect(() => {
     const message = [...attackMessages].reverse().find((item) => item.role === "assistant" && item.tone === "attack" && !item.displayContent);
@@ -909,7 +927,7 @@ export default function DemoPage() {
         created_at: now,
         summary: String(primary ? translatedDetail || round.detail || round.exploit_type || "" : round.detail || round.exploit_type || ""),
         danger_highlight: String(round.exploit_type || ""),
-        defense_code: primary ? String(translatedRationale || defenseState.rationale || "") : "",
+        defense_code: primary ? String(defenseState.rationale || "") : "",
         verify_result: primary ? String(defenseJudge.result?.judgment || "") : "",
       };
     };
@@ -935,7 +953,7 @@ export default function DemoPage() {
       created_at: now,
       summary: adaptiveRows.length > 0 ? "초기 사용자 프롬프트와 테스트베드 응답" : String(attackJudge.result?.detail || attackJudge.detail || ""),
       danger_highlight: adaptiveRows.length > 0 ? "" : String(attackJudge.result?.failure_mode || ""),
-      defense_code: adaptiveRows.length > 0 ? "" : String(translatedRationale || defenseState.rationale || ""),
+      defense_code: adaptiveRows.length > 0 ? "" : String(defenseState.rationale || ""),
       verify_result: adaptiveRows.length > 0 ? "" : String(defenseJudge.result?.judgment || ""),
     };
 
@@ -1414,7 +1432,7 @@ export default function DemoPage() {
               <div className="mt-4 grid grid-cols-2 gap-2">
                 {[
                   ["상태", adaptiveState.status === "loading" ? "실행 중" : adaptiveState.status === "done" ? "완료" : adaptiveState.status === "error" ? "오류" : "대기"],
-                  ["라운드", `${adaptiveState.rounds.length} / 4`],
+                  ["라운드", `${adaptiveState.rounds.length} / ${phase2MaxRounds}`],
                   ["성공", adaptiveState.success ? "true" : "false"],
                   ["중단 R", adaptiveState.best_round ? `R${adaptiveState.best_round}` : "-"],
                 ].map(([label, value]) => (
@@ -1705,25 +1723,7 @@ export default function DemoPage() {
                 </div>
               )}
 
-              <div className="rounded-2xl border border-white/10 bg-[#06131D] p-5">
-                <div className="mb-4 flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <span className="material-symbols-outlined text-primary">psychology_alt</span>
-                    <p className="font-headline text-xl font-black text-on-surface">판정 에이전트 · 위험 판단 이유</p>
-                  </div>
-                  {isTranslatingDetail && (
-                    <span className="flex items-center gap-1.5 text-xs text-primary">
-                      <span className="agent-pulse h-1.5 w-1.5 rounded-full bg-primary" />
-                      번역 중
-                    </span>
-                  )}
-                </div>
-                <p className="break-words text-sm leading-7 text-on-surface-variant">
-                  {translatedDetail || attackJudge.result?.detail || attackJudge.detail || "Judge 결과 없음"}
-                </p>
-              </div>
-
-              <div className="mt-5 grid gap-4 xl:grid-cols-2">
+              <div className="grid gap-4 xl:grid-cols-2">
                 <div>
                   <div className="mb-3 flex items-center gap-3">
                     <span className="material-symbols-outlined text-error">account_tree</span>
@@ -1761,6 +1761,27 @@ export default function DemoPage() {
                   <pre className="max-h-[270px] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-error/20 bg-black/25 p-4 font-mono text-xs leading-6 text-on-surface">
                     {shownResponseDisplay ? highlightEvidence(shownResponseDisplay) : "공격 응답 없음"}
                   </pre>
+                  <div className="mt-4 rounded-xl border border-error/20 bg-black/30 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-error text-base">psychology_alt</span>
+                        <p className="text-xs font-black uppercase tracking-[0.14em] text-error/85">판정 근거 · Consensus</p>
+                      </div>
+                      {isTranslatingDetail && (
+                        <span className="flex items-center gap-1.5 text-[10px] text-primary">
+                          <span className="agent-pulse h-1.5 w-1.5 rounded-full bg-primary" />
+                          번역 중
+                        </span>
+                      )}
+                    </div>
+                    <p className="break-words text-xs leading-6 text-on-surface-variant">
+                      {translatedDetail
+                        || (attackJudge.result?.reason_sources?.consensus_reason as string | undefined)
+                        || attackJudge.result?.detail
+                        || attackJudge.detail
+                        || "판정 근거 없음"}
+                    </p>
+                  </div>
                 </div>
 
                 <div className="rounded-2xl border border-tertiary/25 bg-tertiary/10 p-5">
@@ -1783,41 +1804,28 @@ export default function DemoPage() {
                   <pre className="max-h-[270px] overflow-auto whitespace-pre-wrap break-words rounded-xl border border-tertiary/20 bg-black/20 p-4 font-mono text-xs leading-6 text-on-surface">
                     {lastDefenseResponseDisplay || "방어 응답 없음"}
                   </pre>
-                </div>
-              </div>
-
-              <div className="mt-5 rounded-2xl border border-white/10 bg-[#07111D] p-5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div>
-                    <p className="font-headline text-2xl font-black text-on-surface">최종 결과</p>
-                    <p className="mt-1 text-sm text-on-surface-variant">실행된 응답만 비교합니다.</p>
-                  </div>
-                  <span className="rounded-full border border-tertiary/25 bg-tertiary/10 px-4 py-2 text-sm font-black text-tertiary">
-                    {defenseJudge.result?.judgment || "방어 대기"}
-                  </span>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-4">
-                  {[
-                    ["공격 응답", attackJudge.result?.judgment || "-"],
-                    ["방어 응답", defenseJudge.result?.judgment || "-"],
-                    ["공격 점수", attackJudge.result?.score ?? attackJudge.result?.confidence ?? "-"],
-                    ["방어 점수", defenseJudge.result?.score ?? defenseJudge.result?.confidence ?? "-"],
-                  ].map(([key, value]) => (
-                    <div key={key} className="min-w-0 rounded-2xl border border-white/10 bg-white/5 p-4">
-                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-on-surface-variant/55">{key}</p>
-                      <p className={`mt-2 break-words text-lg font-black ${verdictClass(String(value))}`}>
-                        {String(value)}
-                      </p>
+                  <div className="mt-4 rounded-xl border border-tertiary/20 bg-black/25 p-4">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2">
+                        <span className="material-symbols-outlined text-tertiary text-base">psychology_alt</span>
+                        <p className="text-xs font-black uppercase tracking-[0.14em] text-tertiary/85">판정 근거 · Consensus</p>
+                      </div>
+                      {isTranslatingDefenseDetail && (
+                        <span className="flex items-center gap-1.5 text-[10px] text-primary">
+                          <span className="agent-pulse h-1.5 w-1.5 rounded-full bg-primary" />
+                          번역 중
+                        </span>
+                      )}
                     </div>
-                  ))}
-                </div>
-                {defenseState.rationale && (
-                  <div className="mt-4 rounded-2xl border border-primary/15 bg-primary/10 p-4">
-                    <p className="break-words text-sm leading-6 text-on-surface-variant">
-                      {translatedRationale || defenseState.rationale}
+                    <p className="break-words text-xs leading-6 text-on-surface-variant">
+                      {translatedDefenseDetail
+                        || (defenseJudge.result?.reason_sources?.consensus_reason as string | undefined)
+                        || defenseJudge.result?.detail
+                        || defenseJudge.detail
+                        || "판정 근거 없음"}
                     </p>
                   </div>
-                )}
+                </div>
               </div>
             </div>
           </section>

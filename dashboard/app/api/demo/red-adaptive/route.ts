@@ -80,7 +80,8 @@ function toRound(record: Record<string, unknown>) {
 function runRedAdaptive(prompt: string, category: string): Promise<{ status: number; stdout: string; stderr: string }> {
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
-  const rounds = e("RED_CAMPAIGN_ROUNDS", "4");
+  // 단일 소스: RED_CAMPAIGN_ROUNDS가 명시되어 있으면 그것, 없으면 PHASE2_MAX_ROUNDS(backend의 설정값) fallback
+  const rounds = e("RED_CAMPAIGN_ROUNDS", e("PHASE2_MAX_ROUNDS", "5"));
   const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
   const validationMode = e("DEMO_RED_VALIDATION_MODE", "penalty");
   const continueAfterSuccess = e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "true").toLowerCase() === "true";
@@ -136,7 +137,8 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
   const encoder = new TextEncoder();
   const redModel = e("RED_CAMPAIGN_MODEL") || e("OLLAMA_RED_MODEL");
   const targetUrl = e("TESTBED_CHAT_URL", `http://127.0.0.1:${e("TESTBED_PORT", "8010")}/chat`);
-  const rounds = e("RED_CAMPAIGN_ROUNDS", "4");
+  // 단일 소스: RED_CAMPAIGN_ROUNDS가 명시되어 있으면 그것, 없으면 PHASE2_MAX_ROUNDS(backend의 설정값) fallback
+  const rounds = e("RED_CAMPAIGN_ROUNDS", e("PHASE2_MAX_ROUNDS", "5"));
   const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
   const validationMode = e("DEMO_RED_VALIDATION_MODE", "penalty");
   const continueAfterSuccess = e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "true").toLowerCase() === "true";
