@@ -913,6 +913,14 @@ export default function DemoPage() {
       [...adaptiveRounds].reverse().find((round) => round.attack_prompt || round.target_response || round.detail) ||
       null;
 
+    const lastDefendedResponse =
+      [...defenseMessages]
+        .reverse()
+        .find((message) => message.role === "assistant" && message.tone === "defense");
+    const defendedResponseText = String(
+      lastDefendedResponse?.displayContent || lastDefendedResponse?.content || ""
+    );
+
     const adaptiveRow = (round: AdaptiveRound, id: number, primary = false) => {
       const judgment = String(round.judgment || (round.generation_failed ? "error" : "unknown"));
       return {
@@ -927,7 +935,9 @@ export default function DemoPage() {
         created_at: now,
         summary: String(primary ? translatedDetail || round.detail || round.exploit_type || "" : round.detail || round.exploit_type || ""),
         danger_highlight: String(round.exploit_type || ""),
-        defense_code: primary ? String(defenseState.rationale || "") : "",
+        defended_response: primary ? defendedResponseText : "",
+        defense_rationale: primary ? String(defenseState.rationale || "") : "",
+        defense_code: "",
         verify_result: primary ? String(defenseJudge.result?.judgment || "") : "",
       };
     };
@@ -953,7 +963,9 @@ export default function DemoPage() {
       created_at: now,
       summary: adaptiveRows.length > 0 ? "초기 사용자 프롬프트와 테스트베드 응답" : String(attackJudge.result?.detail || attackJudge.detail || ""),
       danger_highlight: adaptiveRows.length > 0 ? "" : String(attackJudge.result?.failure_mode || ""),
-      defense_code: adaptiveRows.length > 0 ? "" : String(defenseState.rationale || ""),
+      defended_response: adaptiveRows.length > 0 ? "" : defendedResponseText,
+      defense_rationale: adaptiveRows.length > 0 ? "" : String(defenseState.rationale || ""),
+      defense_code: "",
       verify_result: adaptiveRows.length > 0 ? "" : String(defenseJudge.result?.judgment || ""),
     };
 

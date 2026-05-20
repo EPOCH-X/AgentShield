@@ -3,7 +3,17 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../../components/DashboardLayout";
-import { getLatestScan, getScanStatus, getScanResults, ScanResult } from "../../../lib/api";
+import {
+  getLatestScan,
+  getScanStatus,
+  getScanResults,
+  getPolicyPackage,
+  getOwaspGuidance,
+  downloadAuthenticated,
+  ScanResult,
+  PolicyPackageBundle,
+  OwaspGuidanceBundle,
+} from "../../../lib/api";
 
 type ReportStatus = {
   session_id: string;
@@ -38,8 +48,28 @@ const CATEGORY_META: Record<string, { name: string; color: string; icon: string 
   LLM07: { name: "시스템 프롬프트 노출", color: "#3ec8c8", icon: "lock_open"             },
 };
 
+// 카테고리별 조치 가이드는 backend API(/api/v1/policy-export/guidance)에서 로드한다.
+// 원본은 data/owasp_guidance.yaml — 코드 안 하드코딩 ×, 보안팀이 yaml로 관리.
+
 function fmtElapsed(s: number) {
   return `${Math.floor(s / 60)}분 ${s % 60}초`;
+}
+
+// AgentShield 공격 카탈로그(자산)의 페이로드를 고객 리포트에 그대로 노출하지 않기 위한 부분 마스킹.
+// 카테고리/기법은 보이게 두고, 민감 패턴(키·토큰·PII)·긴 인코딩 블록만 가린다.
+function maskAttackPayload(text: string): string {
+  if (!text) return text;
+  return text
+    // sk-/pk-/api-key 류 토큰
+    .replace(/\b((?:sk|pk|rk|api[-_]?key|token|bearer)[-_]?[A-Za-z0-9]{2,4})[A-Za-z0-9_\-]{8,}/gi,
+      (_m, head) => `${head}▓▓▓▓▓▓`)
+    // 32자 이상 영숫자/하이픈 토큰
+    .replace(/\b[A-Za-z0-9_\-]{32,}\b/g, (m) => `${m.slice(0, 4)}▓▓▓▓(${m.length}자)`)
+    // 이메일: 앞 2자만 노출
+    .replace(/\b([A-Za-z0-9._%+\-]{1,2})[A-Za-z0-9._%+\-]+@([A-Za-z0-9.\-]+\.[A-Za-z]{2,})\b/g,
+      (_m, p1, p2) => `${p1}***@${p2}`)
+    // 신용카드/긴 숫자열
+    .replace(/\b\d{12,19}\b/g, (m) => `${m.slice(0, 4)}-▓▓▓▓-▓▓▓▓-${m.slice(-4)}`);
 }
 
 export default function ReportPage({ params }: { params: { id: string } }) {
@@ -51,6 +81,8 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [openSet, setOpenSet] = useState<Set<number>>(new Set());
+  const [policyPkg, setPolicyPkg] = useState<PolicyPackageBundle | null>(null);
+  const [guidance, setGuidance] = useState<OwaspGuidanceBundle | null>(null);
 
   useEffect(() => {
     async function load() {
@@ -81,7 +113,23 @@ export default function ReportPage({ params }: { params: { id: string } }) {
           getScanResults(sessionId),
         ]);
         setStatus(s);
-        setResults(r);
+        // Phase 4(재검증 로그)는 별도 row지만 사용자가 봐야 할 정보는 Phase 1/2 카드의 AFTER 패널에
+        // verify_result로 이미 합쳐서 표시된다. 카드 목록은 vulnerable/safe 본 결과만 노출.
+        setResults(r.filter((row) => row.phase !== 4));
+        // 정책 패키지는 있으면 가져오고, 없으면 무시
+        try {
+          const pkg = await getPolicyPackage(sessionId);
+          setPolicyPkg(pkg);
+        } catch {
+          setPolicyPkg(null);
+        }
+        // OWASP 가이드 (yaml 단일 소스)
+        try {
+          const g = await getOwaspGuidance();
+          setGuidance(g);
+        } catch {
+          setGuidance(null);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : "리포트 데이터를 가져올 수 없습니다.");
         setStatus(null);
@@ -230,6 +278,146 @@ export default function ReportPage({ params }: { params: { id: string } }) {
           </div>
         </div>
 
+        {/* 정책 패키지 패널 — Actionable Evidence */}
+        {policyPkg && (
+          <div className="anim-fade-up rounded-2xl border overflow-hidden"
+            style={{ background: "rgba(124,58,237,0.06)", borderColor: "rgba(124,58,237,0.25)", animationDelay: "80ms" }}>
+
+            {/* 헤더 */}
+            <div className="flex items-center gap-2.5 px-5 py-3.5"
+              style={{ background: "rgba(124,58,237,0.08)", borderBottom: "1px solid rgba(124,58,237,0.18)" }}>
+              <span className="material-symbols-outlined text-base" style={{ color: "#a78bfa", fontVariationSettings: "'FILL' 1" }}>policy</span>
+              <p className="text-xs font-black uppercase tracking-widest" style={{ color: "#c4b5fd" }}>
+                Actionable Evidence · 조치 가능한 보안 증거
+              </p>
+              <span className="ml-auto text-[10px] text-white/30 font-mono">SESSION {sessionId.slice(0, 8).toUpperCase()}</span>
+            </div>
+
+            {/* Stat 3-col */}
+            <div className="grid grid-cols-3 gap-3 p-4">
+              <div className="rounded-xl px-4 py-3 border" style={{ background: "rgba(0,0,0,0.3)", borderColor: "rgba(124,58,237,0.18)" }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1">패키지 상태</p>
+                <p className="text-base font-black" style={{
+                  color: policyPkg.manifest.package_status === "validated" ? "#5eead4" :
+                         policyPkg.manifest.package_status === "empty" ? "#fbbf24" : "#ef4444"
+                }}>
+                  {policyPkg.manifest.package_status === "validated" ? "검증 완료" :
+                   policyPkg.manifest.package_status === "empty" ? "검증 대상 없음" : "검증 실패"}
+                </p>
+              </div>
+              <div className="rounded-xl px-4 py-3 border" style={{ background: "rgba(0,0,0,0.3)", borderColor: "rgba(124,58,237,0.18)" }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1">검증된 Findings</p>
+                <p className="text-base font-black text-white">
+                  {policyPkg.manifest.verified_safe_count}
+                  <span className="text-white/30 text-sm font-medium ml-1">/ {policyPkg.manifest.total_findings}</span>
+                </p>
+              </div>
+              <div className="rounded-xl px-4 py-3 border" style={{ background: "rgba(0,0,0,0.3)", borderColor: "rgba(124,58,237,0.18)" }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1">회귀 테스트</p>
+                <p className="text-base font-black text-white">
+                  {policyPkg.regression_tests?.length ?? 0}<span className="text-white/30 text-sm font-medium ml-1">건</span>
+                </p>
+              </div>
+            </div>
+
+            {/* 다운로드 버튼 row */}
+            {(policyPkg.reports || policyPkg.download_url) && (() => {
+              const dl = (path: string | null | undefined, filename: string) => {
+                if (!path) return;
+                void downloadAuthenticated(path, filename).catch((err) => alert(err.message || "다운로드 실패"));
+              };
+              const execPdf  = policyPkg.reports?.executive_summary_pdf;
+              const execHtml = policyPkg.reports?.executive_summary_html;
+              const fullPdf  = policyPkg.reports?.full_report_pdf;
+              const fullHtml = policyPkg.reports?.full_report_html;
+              const zip      = policyPkg.download_url;
+              const sid8 = sessionId.slice(0, 8);
+              return (
+                <div className="px-4 pb-4">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-2 px-1">외부 공유 산출물 · 다운로드</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {/* 경영진 요약 */}
+                    <button
+                      onClick={() => dl(execPdf || execHtml, `agentshield-${sid8}-executive_summary.${execPdf ? "pdf" : "html"}`)}
+                      disabled={!execPdf && !execHtml}
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:brightness-125 disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ background: execPdf ? "rgba(239,68,68,0.12)" : "rgba(59,130,246,0.12)",
+                               borderColor: execPdf ? "rgba(239,68,68,0.35)" : "rgba(59,130,246,0.35)" }}>
+                      <span className="material-symbols-outlined text-2xl shrink-0" style={{ color: execPdf ? "#fca5a5" : "#93c5fd", fontVariationSettings: "'FILL' 1" }}>
+                        {execPdf ? "picture_as_pdf" : "description"}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold text-white">경영진 요약</div>
+                        <div className="text-[10px] text-white/45 font-mono">{execPdf ? "PDF" : "HTML"} · A4 1–2장</div>
+                      </div>
+                      <span className="material-symbols-outlined text-base text-white/40">download</span>
+                    </button>
+
+                    {/* 상세 보고서 */}
+                    <button
+                      onClick={() => dl(fullPdf || fullHtml, `agentshield-${sid8}-full_report.${fullPdf ? "pdf" : "html"}`)}
+                      disabled={!fullPdf && !fullHtml}
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:brightness-125 disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ background: fullPdf ? "rgba(239,68,68,0.12)" : "rgba(59,130,246,0.12)",
+                               borderColor: fullPdf ? "rgba(239,68,68,0.35)" : "rgba(59,130,246,0.35)" }}>
+                      <span className="material-symbols-outlined text-2xl shrink-0" style={{ color: fullPdf ? "#fca5a5" : "#93c5fd", fontVariationSettings: "'FILL' 1" }}>
+                        {fullPdf ? "picture_as_pdf" : "description"}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold text-white">상세 보고서</div>
+                        <div className="text-[10px] text-white/45 font-mono">{fullPdf ? "PDF" : "HTML"} · 카드 long-form</div>
+                      </div>
+                      <span className="material-symbols-outlined text-base text-white/40">download</span>
+                    </button>
+
+                    {/* 정책 패키지 ZIP */}
+                    <button
+                      onClick={() => dl(zip, `agentshield-${sid8}-policy_package.zip`)}
+                      disabled={!zip}
+                      className="flex items-center gap-3 px-4 py-3 rounded-xl border text-left transition-all hover:brightness-125 disabled:opacity-30 disabled:cursor-not-allowed"
+                      style={{ background: "rgba(124,58,237,0.15)", borderColor: "rgba(124,58,237,0.35)" }}>
+                      <span className="material-symbols-outlined text-2xl shrink-0" style={{ color: "#c4b5fd", fontVariationSettings: "'FILL' 1" }}>folder_zip</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-bold text-white">정책 패키지</div>
+                        <div className="text-[10px] text-white/45 font-mono">ZIP · 미들웨어/회귀 테스트 등 9 파일</div>
+                      </div>
+                      <span className="material-symbols-outlined text-base text-white/40">download</span>
+                    </button>
+                  </div>
+                  {!execPdf && !fullPdf && (
+                    <p className="text-[10px] text-white/35 mt-2 px-1">
+                      PDF가 비활성화된 상태입니다. <code className="text-white/55">brew install pango && pip install weasyprint</code> 설치 후 다음 스캔부터 PDF가 자동 생성됩니다.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* OWASP 매핑 row */}
+            {policyPkg.middleware_policy?.category_actions && Object.keys(policyPkg.middleware_policy.category_actions).length > 0 && (
+              <div className="px-5 py-4" style={{ borderTop: "1px solid rgba(124,58,237,0.15)" }}>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">미들웨어 정책 · 카테고리별 권장 액션</p>
+                  <span className="text-[9px] font-bold uppercase tracking-widest px-2 py-0.5 rounded"
+                    style={{ color: "#fbbf24", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.22)" }}>
+                    OWASP LLM Top 10 v1.1 기반
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(policyPkg.middleware_policy.category_actions).map(([cat, action]) => (
+                    <span key={cat} className="px-2.5 py-1 rounded-md text-[11px] font-bold border"
+                      style={{ background: "rgba(0,0,0,0.3)", borderColor: "rgba(124,58,237,0.25)", color: "#c4b5fd" }}>
+                      <span className="text-white/80">{cat}</span>
+                      <span className="text-white/30 mx-1.5">→</span>
+                      <span>{action}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── 카드 목록 ── */}
         {results.length === 0 ? (
           <div className="glass-panel rounded-2xl py-20 text-center text-on-surface-variant/40 text-sm">
@@ -325,6 +513,28 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                     {isOpen && (
                       <div className="anim-expand" style={{ borderTop: `1px solid ${sev.border}` }}>
 
+                        {/* ① 공격 프롬프트 원문 */}
+                        {r.attack_prompt && (
+                          <div className="px-7 py-5"
+                            style={{ background: "rgba(239,68,68,0.06)", borderBottom: "1px solid rgba(239,68,68,0.15)" }}>
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="material-symbols-outlined text-base" style={{ color: "#ef4444", fontVariationSettings: "'FILL' 1" }}>code</span>
+                              <p className="text-xs font-bold uppercase tracking-widest" style={{ color: "#ef4444cc" }}>
+                                공격 프롬프트 원문
+                              </p>
+                              <span className="text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded"
+                                style={{ color: "#fbbf24", background: "rgba(251,191,36,0.10)", border: "1px solid rgba(251,191,36,0.25)" }}
+                                title="AgentShield 공격 카탈로그(자산) 보호 — 페이로드 일부는 마스킹되어 표시됩니다.">
+                                AgentShield 자산 · 부분 마스킹
+                              </span>
+                            </div>
+                            <pre className="font-mono text-sm text-white/85 leading-relaxed whitespace-pre-wrap break-words rounded-lg p-4 overflow-y-auto"
+                              style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(239,68,68,0.18)", maxHeight: "320px" }}>
+                              {maskAttackPayload(r.attack_prompt)}
+                            </pre>
+                          </div>
+                        )}
+
                         {/* ② 판정 이유 */}
                         {r.summary && (
                           <div className="px-7 py-4" style={{ background: "rgba(0,0,0,0.22)", borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
@@ -338,7 +548,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                           </div>
                         )}
 
-                        {/* ④ 비교 배너 */}
+                        {/* ③ 비교 배너 */}
                         <div className="flex items-center gap-3 px-6 py-2.5"
                           style={{ background: "rgba(255,255,255,0.025)", borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
                           <div className="flex-1 h-px" style={{ background: "linear-gradient(to right, transparent, rgba(239,68,68,0.5))" }} />
@@ -350,7 +560,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                           <div className="flex-1 h-px" style={{ background: "linear-gradient(to left, transparent, rgba(14,165,165,0.5))" }} />
                         </div>
 
-                        {/* ⑤ BEFORE / AFTER */}
+                        {/* ④ BEFORE / AFTER */}
                         <div className="grid grid-cols-2">
 
                           {/* BEFORE */}
@@ -365,16 +575,22 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                                 <div className="rounded-xl p-4 danger-pulse"
                                   style={{ background: "rgba(239,68,68,0.09)", border: "1.5px solid rgba(239,68,68,0.3)" }}>
                                   <p className="text-[11px] font-black text-error uppercase tracking-widest mb-2.5">⚠ 핵심 위협 내용</p>
-                                  <pre className="font-mono text-sm font-semibold text-error/90 leading-relaxed whitespace-pre-wrap break-words overflow-y-auto" style={{ maxHeight: "160px" }}>
+                                  <pre className="font-mono text-sm font-semibold text-error/90 leading-relaxed whitespace-pre-wrap break-words overflow-y-auto"
+                                    style={{ maxHeight: "180px" }}>
                                     {r.danger_highlight}
                                   </pre>
                                 </div>
                               )}
                               <div>
-                                <p className="text-[10px] font-bold uppercase tracking-widest text-white/20 mb-1.5">AI 응답 전문</p>
-                                <p className="font-mono text-xs text-white/40 leading-relaxed whitespace-pre-wrap break-words line-clamp-5">
-                                  {r.target_response}
-                                </p>
+                                <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-1.5">AI 응답 전문</p>
+                                {r.target_response ? (
+                                  <pre className="font-mono text-xs text-white/70 leading-relaxed whitespace-pre-wrap break-words rounded-lg p-3 overflow-y-auto"
+                                    style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.05)", maxHeight: "420px" }}>
+                                    {r.target_response}
+                                  </pre>
+                                ) : (
+                                  <p className="text-xs text-white/20 italic">응답 없음</p>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -386,23 +602,119 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                               <span className="material-symbols-outlined text-lg text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>shield</span>
                               <span className="text-sm font-black text-primary tracking-wide">AFTER · 방어 후 응답</span>
                             </div>
-                            <div className="p-6">
-                              {r.defense_code ? (
+                            <div className="p-6 space-y-4">
+                              {r.defended_response ? (
                                 <div className="rounded-xl p-4 safe-pulse"
                                   style={{ background: "rgba(14,165,165,0.09)", border: "1.5px solid rgba(14,165,165,0.3)" }}>
-                                  <p className="text-[11px] font-black text-primary uppercase tracking-widest mb-2.5">✓ 방어 결과</p>
-                                  <p className="text-xs leading-relaxed whitespace-pre-wrap break-words overflow-y-auto"
-                                    style={{ color: "#5eead4cc", maxHeight: "160px" }}>
-                                    {r.defense_code}
-                                  </p>
+                                  <p className="text-[11px] font-black text-primary uppercase tracking-widest mb-2.5">✓ 방어된 AI 응답</p>
+                                  <pre className="font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-y-auto"
+                                    style={{ color: "#5eead4ee", maxHeight: "420px" }}>
+                                    {r.defended_response}
+                                  </pre>
                                 </div>
                               ) : (
                                 <p className="text-xs text-white/20 italic">방어 응답 미생성</p>
+                              )}
+
+                              {r.defense_rationale && (
+                                <div>
+                                  <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 mb-1.5">Blue Agent · 방어 근거</p>
+                                  <p className="text-xs text-white/55 leading-relaxed whitespace-pre-wrap break-words rounded-lg p-3 overflow-y-auto"
+                                    style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.05)", maxHeight: "240px" }}>
+                                    {r.defense_rationale}
+                                  </p>
+                                </div>
+                              )}
+
+                              {r.verify_result && (
+                                <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest">
+                                  <span className="material-symbols-outlined text-sm text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>fact_check</span>
+                                  <span className="text-white/40">검증 결과 ·</span>
+                                  <span style={{ color: r.verify_result === "safe" ? "#5eead4" : r.verify_result === "vulnerable" ? "#ef4444" : "#fbbf24" }}>
+                                    {r.verify_result}
+                                  </span>
+                                </div>
                               )}
                             </div>
                           </div>
 
                         </div>
+
+                        {/* ⑤ 조치 항목 — 어디를 고쳐야 하는지 */}
+                        {(() => {
+                          const guide = guidance?.categories?.[r.category];
+                          const refusal = policyPkg?.refusal_templates?.find((t) => t.category === r.category);
+                          const regression = policyPkg?.regression_tests?.find((t) => t.source_result_id === r.id);
+                          if (!guide && !refusal && !regression) return null;
+                          return (
+                            <div className="px-7 py-5"
+                              style={{ background: "rgba(124,58,237,0.05)", borderTop: "1px solid rgba(124,58,237,0.18)" }}>
+                              <div className="flex items-center gap-2 mb-3">
+                                <span className="material-symbols-outlined text-base" style={{ color: "#a78bfa", fontVariationSettings: "'FILL' 1" }}>policy</span>
+                                <p className="text-xs font-black uppercase tracking-widest" style={{ color: "#c4b5fd" }}>조치 항목 · Action Items</p>
+                              </div>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {guide && (
+                                  <div className="rounded-lg p-3 border" style={{ background: "rgba(0,0,0,0.28)", borderColor: "rgba(124,58,237,0.2)" }}>
+                                    <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">권장 액션</p>
+                                      <a
+                                        href={guide.reference_url}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded hover:brightness-125"
+                                        style={{ color: "#fbbf24", background: "rgba(251,191,36,0.08)", border: "1px solid rgba(251,191,36,0.22)" }}
+                                        title={`${r.category} ${guide.name} — ${guidance?.source}`}>
+                                        OWASP 권고 ↗
+                                      </a>
+                                    </div>
+                                    <p className="text-sm font-bold text-white mb-2">
+                                      {guide.action_label_ko} <span className="text-white/30 font-mono text-xs">({guide.default_action})</span>
+                                    </p>
+                                    <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1.5">고쳐야 할 지점 <span className="text-white/25 normal-case font-normal">(고객사 환경 맞춤화 필요)</span></p>
+                                    <ul className="space-y-1">
+                                      {guide.fix_targets.map((target: string) => (
+                                        <li key={target} className="text-xs text-white/70 flex items-start gap-2">
+                                          <span className="text-white/30 font-bold">·</span>
+                                          <span>{target}</span>
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  </div>
+                                )}
+                                <div className="space-y-3">
+                                  {refusal && (
+                                    <div className="rounded-lg p-3 border" style={{ background: "rgba(0,0,0,0.28)", borderColor: "rgba(124,58,237,0.2)" }}>
+                                      <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">Refusal Template</p>
+                                        <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded"
+                                          style={{ color: "#5eead4", background: "rgba(14,165,165,0.10)", border: "1px solid rgba(14,165,165,0.25)" }}>
+                                          본 스캔 검증 데이터
+                                        </span>
+                                      </div>
+                                      <pre className="text-xs text-white/75 leading-relaxed whitespace-pre-wrap break-words font-mono overflow-y-auto" style={{ maxHeight: "120px" }}>
+                                        {refusal.template}
+                                      </pre>
+                                    </div>
+                                  )}
+                                  {regression && (
+                                    <div className="rounded-lg p-3 border" style={{ background: "rgba(0,0,0,0.28)", borderColor: "rgba(124,58,237,0.2)" }}>
+                                      <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                        <p className="text-[10px] font-bold uppercase tracking-widest text-white/40">회귀 테스트</p>
+                                        <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded"
+                                          style={{ color: "#5eead4", background: "rgba(14,165,165,0.10)", border: "1px solid rgba(14,165,165,0.25)" }}>
+                                          본 스캔 검증 데이터
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-white/75 font-mono break-all">{regression.test_id}</p>
+                                      <p className="text-[10px] text-white/40 mt-1">expected: <span className="text-white/60 font-bold">{regression.expected_action}</span></p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
                       </div>
                     )}
 

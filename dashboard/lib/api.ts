@@ -340,6 +340,8 @@ export interface ScanResult {
   severity: string;
   category: string;
   defense_code?: string;
+  defended_response?: string;
+  defense_rationale?: string;
   verify_result?: string;
   created_at: string;
   summary?: string;
@@ -431,4 +433,94 @@ export interface Policy {
   action: string;
   is_active: boolean;
   created_at: string;
+}
+
+// --- Phase 5 가드레일 정책 패키지 ---
+
+export interface PolicyPackageManifest {
+  session_id: string;
+  generated_at: string;
+  included_result_ids: number[];
+  excluded_result_ids: number[];
+  total_findings: number;
+  verified_safe_count: number;
+  package_status: "validated" | "empty" | "invalid";
+}
+
+export interface PolicyPackageBundle {
+  session_id: string;
+  manifest: PolicyPackageManifest;
+  middleware_policy: {
+    input_policy?: Record<string, boolean>;
+    output_policy?: Record<string, boolean>;
+    category_actions?: Record<string, string>;
+  } | null;
+  masking_rules: Array<{ id: string; target: string; pattern_family: string; replacement: string }> | null;
+  refusal_templates: Array<{ category: string; template: string; verified_result_id: number }> | null;
+  regression_tests: Array<{
+    test_id: string;
+    source_result_id: number;
+    category: string;
+    attack_prompt: string;
+    must_not_contain: string[];
+    expected_action: string;
+  }> | null;
+  validation: { valid: boolean; errors?: string[]; warnings?: string[] } | null;
+  zip_available: boolean;
+  download_url: string | null;
+  reports?: {
+    executive_summary_pdf?: string;
+    executive_summary_html?: string;
+    full_report_pdf?: string;
+    full_report_html?: string;
+  };
+}
+
+export async function getPolicyPackage(sessionId: string): Promise<PolicyPackageBundle | null> {
+  const res = await apiFetch(`/api/v1/policy-export/${sessionId}`, { redirectOn401: false });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("정책 패키지를 불러올 수 없습니다.");
+  return res.json();
+}
+
+// data/owasp_guidance.yaml 의 카테고리 권고. 대시보드 ACTION_GUIDE의 단일 소스.
+export interface OwaspGuidanceCategory {
+  name: string;
+  default_action: string;
+  action_label_ko: string;
+  fix_targets: string[];
+  must_not_contain: string[];
+  input_policy_flag: string | null;
+  output_policy_flag: string | null;
+  reference_url: string;
+  severity_baseline: string;
+}
+
+export interface OwaspGuidanceBundle {
+  source: string;
+  categories: Record<string, OwaspGuidanceCategory>;
+}
+
+export async function getOwaspGuidance(): Promise<OwaspGuidanceBundle | null> {
+  const res = await apiFetch(`/api/v1/policy-export/guidance`, { redirectOn401: false });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// 브라우저는 <a href> 클릭 시 Authorization 헤더를 안 붙이기 때문에 보호된 다운로드 URL은 401을 받는다.
+// fetch로 JWT를 함께 보내 Blob을 만든 뒤 임시 URL로 저장한다.
+export async function downloadAuthenticated(url: string, filename: string): Promise<void> {
+  const res = await apiFetch(url, { redirectOn401: false });
+  if (!res.ok) {
+    throw new Error(`다운로드 실패 (${res.status})`);
+  }
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = blobUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
 }

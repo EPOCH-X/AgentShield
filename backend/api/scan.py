@@ -183,6 +183,19 @@ def _phase1_seed_row_json(p: dict[str, Any]) -> Optional[dict[str, Any]]:
         return None
 
 
+def _extract_defense_rationale(defense_code: Optional[str]) -> str:
+    """defense_code 컬럼에는 Blue Agent bundle JSON(defended_response + defense_rationale)이 들어 있다.
+    UI에는 rationale만 깔끔하게 노출하기 위해 파싱한다. 파싱 실패하면 빈 문자열."""
+    raw = (defense_code or "").strip()
+    if not raw.startswith("{"):
+        return ""
+    try:
+        parsed = json.loads(raw)
+        return str(parsed.get("defense_rationale") or "").strip()
+    except Exception:
+        return ""
+
+
 def _result_dict(r: TestResult, session_id: str) -> dict:
     return {
         "id":            r.id,
@@ -197,7 +210,11 @@ def _result_dict(r: TestResult, session_id: str) -> dict:
         "category":      r.category,
         "subcategory":   r.subcategory,
         "detail":        r.detail,
+        # dashboard ScanResult.summary 와 매핑 — 판정 에이전트의 위험 판단 이유 박스가 이 필드로 그려진다.
+        "summary":       r.detail,
         "defense_code":  r.defense_code,
+        "defended_response": r.defended_response,
+        "defense_rationale": _extract_defense_rationale(r.defense_code),
         "defense_reviewed": r.defense_reviewed,
         "verify_result": r.verify_result,
         "created_at":    r.created_at.isoformat() if r.created_at else None,
@@ -439,6 +456,18 @@ async def _auto_export_session(db: AsyncSession, *, session_id: str, session_sta
             "[scan:%s] auto-export done → %s (results=%d, queue=%d)",
             session_id, export_dir, len(results_data), len(queue_data),
         )
+
+        # Phase 5 — 검증된 가드레일 정책 패키지 자동 생성 (스캔 완료 시에만)
+        if session_status == "completed" and vulnerable > 0:
+            try:
+                from backend.core.phase5_policy_export import export_policy_package
+                result = await export_policy_package(db, session_id)
+                logger.info(
+                    "[scan:%s] phase5 policy package → status=%s, dir=%s, zip=%s",
+                    session_id, result.validation.valid, result.package_dir, result.zip_path,
+                )
+            except Exception:
+                logger.exception("[scan:%s] phase5 policy export 실패 (스캔 결과에는 영향 없음)", session_id)
     except Exception:
         logger.exception("[scan:%s] auto-export 실패 (스캔 결과에는 영향 없음)", session_id)
 
@@ -887,7 +916,6 @@ async def sitegpt_blue_defense(
     try:
         from backend.agents.blue_agent import build_blue_prompt, build_fallback_blue_bundle, parse_blue_response
         from backend.agents.llm_client import AgentShieldLLM
-        from backend.core.redaction import mask_sensitive
 
         _debug_scan_judge_input(
             "sitegpt.blue-defense.attack",
@@ -921,7 +949,8 @@ async def sitegpt_blue_defense(
                 if blue_error
                 else parse_blue_response(raw_blue_text)
             )
-            defended_response = mask_sensitive(bundle.defended_response).strip()
+            # 정책: UI/DB로 가는 응답은 원문. 외부 공유 산출물(PDF/외부 ZIP)에서만 별도 마스킹.
+            defended_response = bundle.defended_response.strip()
             if not defended_response:
                 bundle = build_fallback_blue_bundle(
                     req.category,
@@ -930,7 +959,7 @@ async def sitegpt_blue_defense(
                     judge_detail,
                     reason=bundle.defense_rationale or "empty defended_response",
                 )
-                defended_response = mask_sensitive(bundle.defended_response).strip()
+                defended_response = bundle.defended_response.strip()
             if not defended_response:
                 raise RuntimeError("Blue Agent failed to produce a defended_response")
 

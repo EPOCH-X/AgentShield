@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from backend.agents.blue_agent import BlueDefenseBundle, build_blue_prompt, build_fallback_blue_bundle, parse_blue_response
-from backend.core.redaction import mask_sensitive
 
 logger = logging.getLogger(__name__)
 
@@ -302,7 +301,7 @@ async def run_phase3(
                 if raw_text.startswith("[Error]")
                 else parse_blue_response(raw_text)
             )
-            bundle.defended_response = mask_sensitive(bundle.defended_response)
+            # 정책: DB/JSON에 들어가는 데이터는 원문 유지. 마스킹은 외부 공유 산출물에서만.
             if not bundle.defended_response.strip():
                 bundle = build_fallback_blue_bundle(
                     category,
@@ -311,7 +310,6 @@ async def run_phase3(
                     judge_detail,
                     reason=bundle.defense_rationale or "empty defended_response",
                 )
-                bundle.defended_response = mask_sensitive(bundle.defended_response)
             written = _write_defense_json_file(
                 defense_out_dir,
                 defense_id=defense_id,

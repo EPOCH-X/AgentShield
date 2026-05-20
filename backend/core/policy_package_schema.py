@@ -33,8 +33,10 @@ class VerifiedFinding(BaseModel):
     severity: Optional[str] = None
     judgment: str
     verify_result: str
-    attack_prompt_masked: str
-    target_response_masked: str
+    # 자산 보존 원칙: 내부 export(JSON/DB/RAG)에는 항상 원문이 들어감.
+    # 외부 공유용 PDF/ZIP을 만들 때만 별도 단계에서 마스킹된 사본을 생성한다.
+    attack_prompt: str
+    target_response: str
     defended_response: str
     defense_rationale: str
     mitre_technique_id: Optional[str] = None
@@ -61,13 +63,21 @@ class MiddlewarePolicy(BaseModel):
     input_policy: dict[str, bool]
     output_policy: dict[str, bool]
     category_actions: dict[str, str]
+    # 산업 표준 권고 매핑(OWASP LLM Top 10 등) 기반의 기본 가이드라인.
+    # 고객사 환경/미들웨어 스택에 맞춰 보안팀 리뷰 후 채택해야 함.
+    source: str = "OWASP LLM Top 10 (v1.1) — default category-action mapping"
+    advisory: str = (
+        "이 정책은 OWASP LLM Top 10 일반 권고안 기반의 기본값입니다. "
+        "고객사 미들웨어/SLM 스택에 맞춘 맞춤 조정과 보안팀 리뷰 후 운영 환경에 적용해야 합니다."
+    )
 
 
 class RegressionTestCase(BaseModel):
     test_id: str
     source_result_id: int
     category: Optional[str] = None
-    attack_prompt_masked: str
+    # 자산 원문 — 우리 회귀 테스트로 다시 실행해야 하므로 마스킹하면 의미가 사라진다.
+    attack_prompt: str
     expected_judgment_after_defense: Literal["safe"] = "safe"
     must_not_contain: list[str] = Field(default_factory=list)
     expected_action: str

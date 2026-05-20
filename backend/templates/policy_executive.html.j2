@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>AgentShield Executive Summary · {{ session_id[:8] }}</title>
+<style>
+  @page { size: A4; margin: 22mm 18mm; }
+  body {
+    font-family: -apple-system, "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    color: #0f172a;
+    font-size: 11pt;
+    line-height: 1.55;
+  }
+  header {
+    border-bottom: 2px solid #1e293b;
+    padding-bottom: 8mm;
+    margin-bottom: 8mm;
+  }
+  .brand {
+    font-size: 10pt;
+    letter-spacing: 0.18em;
+    color: #64748b;
+    text-transform: uppercase;
+    margin-bottom: 4mm;
+  }
+  h1 { font-size: 22pt; margin: 0 0 2mm 0; }
+  .meta { font-size: 9.5pt; color: #475569; }
+  .meta span { margin-right: 6mm; }
+  h2 {
+    font-size: 13pt;
+    margin: 8mm 0 3mm 0;
+    padding-bottom: 1mm;
+    border-bottom: 1px solid #cbd5e1;
+  }
+  .stats {
+    display: flex;
+    gap: 4mm;
+    margin: 4mm 0;
+  }
+  .stat-card {
+    flex: 1;
+    border: 1px solid #cbd5e1;
+    border-radius: 3mm;
+    padding: 3mm 4mm;
+  }
+  .stat-card .label { font-size: 8.5pt; color: #64748b; text-transform: uppercase; letter-spacing: 0.12em; }
+  .stat-card .value { font-size: 18pt; font-weight: 700; margin-top: 1mm; }
+  .stat-card.vuln .value { color: #b91c1c; }
+  .stat-card.safe .value { color: #047857; }
+  .stat-card.verified .value { color: #6d28d9; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 3mm 0;
+    font-size: 10pt;
+  }
+  th, td {
+    border: 1px solid #cbd5e1;
+    padding: 2.5mm 3mm;
+    text-align: left;
+    vertical-align: top;
+  }
+  th { background: #f1f5f9; font-weight: 700; }
+  .pill {
+    display: inline-block;
+    padding: 0.5mm 2mm;
+    border-radius: 1.5mm;
+    font-size: 8.5pt;
+    font-weight: 700;
+  }
+  .pill.high { background: #fee2e2; color: #991b1b; }
+  .pill.critical { background: #fecaca; color: #7f1d1d; }
+  .pill.medium { background: #fef3c7; color: #92400e; }
+  .pill.low { background: #d1fae5; color: #065f46; }
+  .note {
+    background: #f8fafc;
+    border-left: 3px solid #6d28d9;
+    padding: 3mm 4mm;
+    margin: 4mm 0;
+    font-size: 9.5pt;
+    color: #475569;
+  }
+  footer {
+    position: fixed;
+    bottom: 8mm;
+    left: 18mm;
+    right: 18mm;
+    text-align: center;
+    font-size: 8.5pt;
+    color: #94a3b8;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 2mm;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">AgentShield · LLM Security Validation</div>
+  <h1>Executive Summary · 경영진 요약 보고서</h1>
+  <div class="meta">
+    <span>Session: <b>{{ session_id }}</b></span>
+    <span>Generated: <b>{{ generated_at }}</b></span>
+    <span>Status: <b>{{ manifest.package_status }}</b></span>
+  </div>
+</header>
+
+<h2>한눈에 보기</h2>
+<div class="stats">
+  <div class="stat-card vuln">
+    <div class="label">총 Vulnerable</div>
+    <div class="value">{{ manifest.total_findings }}</div>
+  </div>
+  <div class="stat-card verified">
+    <div class="label">Phase 4 검증 통과</div>
+    <div class="value">{{ manifest.verified_safe_count }}</div>
+  </div>
+  <div class="stat-card safe">
+    <div class="label">회귀 테스트</div>
+    <div class="value">{{ regression_count }}</div>
+  </div>
+</div>
+
+<h2>카테고리별 위험 분포</h2>
+<table>
+  <thead>
+    <tr>
+      <th>OWASP 카테고리</th>
+      <th>Verified Safe</th>
+      <th>권장 액션</th>
+      <th>참조</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for cat in category_summary %}
+    <tr>
+      <td><b>{{ cat.code }}</b> · {{ cat.name }}</td>
+      <td>{{ cat.verified_count }}건</td>
+      <td>{{ cat.action_label_ko }} <span style="color:#64748b">({{ cat.default_action }})</span></td>
+      <td style="font-size:8.5pt;color:#64748b">{{ cat.reference_url }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>의사결정 권고</h2>
+<div class="note">
+  본 리포트는 LLM 서비스의 보안 위험을 자동으로 재현하고, Phase 4 재검증을 통과한 방어 방안을 바탕으로
+  <b>출시·보류·수정·재점검</b> 의사결정 근거를 제공합니다.
+  하단 카테고리별 매핑은 OWASP LLM Top 10 권고안 기반이며, 운영 환경 적용 전 보안팀 리뷰가 필요합니다.
+</div>
+
+<h2>다음 단계 (Action Items)</h2>
+<table>
+  <thead>
+    <tr>
+      <th>카테고리</th>
+      <th>고쳐야 할 지점</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for cat in category_summary %}
+    <tr>
+      <td><b>{{ cat.code }}</b></td>
+      <td>
+        <ul style="margin: 0; padding-left: 4mm;">
+          {% for target in cat.fix_targets %}<li>{{ target }}</li>{% endfor %}
+        </ul>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<footer>
+  AgentShield · {{ generated_at }} · 본 문서에는 민감 정보가 마스킹되어 있습니다 (외부 공유용)
+</footer>
+</body>
+</html>

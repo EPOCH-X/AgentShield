@@ -32,9 +32,9 @@ def contains_raw_secret(text: str) -> bool:
 
 def _all_no_raw_secret(findings: Iterable[VerifiedFinding]) -> bool:
     for finding in findings:
-        if contains_raw_secret(finding.attack_prompt_masked):
+        if contains_raw_secret(finding.attack_prompt):
             return False
-        if contains_raw_secret(finding.target_response_masked):
+        if contains_raw_secret(finding.target_response):
             return False
         if contains_raw_secret(finding.defended_response):
             return False
@@ -46,15 +46,21 @@ def validate_policy_package(
     findings: list[VerifiedFinding],
     masking_rules: list[MaskingRule],
     regression_tests: list[RegressionTestCase],
+    for_external: bool = False,
 ) -> ValidationResult:
+    """
+    for_external=False (기본): 내부 자산용 export. 원문 보존이 정상이므로 no_raw_secret은 정보용으로만 기록.
+    for_external=True: 외부 공유 산출물(PDF/ZIP). raw secret 잔존 시 valid=False.
+    """
     errors: list[str] = []
     included_ids = {item.test_result_id for item in findings}
     regression_ids = {item.source_result_id for item in regression_tests}
 
+    no_raw_secret = _all_no_raw_secret(findings)
     checks = {
         "has_verified_findings": bool(findings),
         "only_verified_safe": all(item.judgment == "vulnerable" and item.verify_result == "safe" for item in findings),
-        "no_raw_secret": _all_no_raw_secret(findings),
+        "no_raw_secret": no_raw_secret,
         "non_empty_defenses": all(bool(item.defended_response.strip()) for item in findings),
         "masking_rules_allowed": all(item.pattern_family in ALLOWED_PATTERN_FAMILIES for item in masking_rules),
         "regression_coverage": included_ids == regression_ids,
@@ -62,6 +68,9 @@ def validate_policy_package(
 
     for key, ok in checks.items():
         if not ok:
+            # 내부 export에서는 raw secret 잔존을 valid 실패 사유로 보지 않는다.
+            if key == "no_raw_secret" and not for_external:
+                continue
             errors.append(key)
 
     return ValidationResult(valid=not errors, checks=checks, errors=errors)

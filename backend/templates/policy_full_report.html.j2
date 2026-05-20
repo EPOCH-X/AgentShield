@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<title>AgentShield Full Report · {{ session_id[:8] }}</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm; }
+  body {
+    font-family: -apple-system, "Apple SD Gothic Neo", "Noto Sans CJK KR", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    color: #0f172a;
+    font-size: 10pt;
+    line-height: 1.5;
+  }
+  header { border-bottom: 2px solid #1e293b; padding-bottom: 6mm; margin-bottom: 6mm; }
+  .brand { font-size: 9pt; letter-spacing: 0.18em; color: #64748b; text-transform: uppercase; margin-bottom: 2mm; }
+  h1 { font-size: 18pt; margin: 0; }
+  .meta { font-size: 9pt; color: #475569; margin-top: 2mm; }
+  .meta span { margin-right: 5mm; }
+
+  .finding {
+    border: 1px solid #cbd5e1;
+    border-radius: 3mm;
+    padding: 4mm 5mm;
+    margin: 5mm 0;
+    page-break-inside: avoid;
+  }
+  .finding-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid #e2e8f0;
+    padding-bottom: 2mm;
+    margin-bottom: 3mm;
+  }
+  .finding-title { font-size: 12pt; font-weight: 700; }
+  .pill { display: inline-block; padding: 0.5mm 2mm; border-radius: 1.5mm; font-size: 8.5pt; font-weight: 700; margin-left: 2mm; }
+  .pill.high { background: #fee2e2; color: #991b1b; }
+  .pill.critical { background: #fecaca; color: #7f1d1d; }
+  .pill.medium { background: #fef3c7; color: #92400e; }
+  .pill.low { background: #d1fae5; color: #065f46; }
+  .pill.verified { background: #ede9fe; color: #5b21b6; }
+
+  .section-label {
+    font-size: 8.5pt;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #64748b;
+    margin: 3mm 0 1.5mm 0;
+  }
+  pre {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 2mm;
+    padding: 2.5mm 3mm;
+    font-size: 9pt;
+    font-family: ui-monospace, Menlo, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.45;
+    max-height: 80mm;
+    overflow: hidden;
+  }
+  pre.before { border-left: 3px solid #b91c1c; background: #fef2f2; }
+  pre.after { border-left: 3px solid #047857; background: #ecfdf5; }
+  pre.rationale { border-left: 3px solid #6d28d9; background: #faf5ff; }
+
+  .action-block {
+    background: #faf5ff;
+    border: 1px solid #ddd6fe;
+    border-radius: 2mm;
+    padding: 3mm 4mm;
+    margin-top: 3mm;
+  }
+  .action-block .head { font-size: 9pt; font-weight: 700; color: #5b21b6; margin-bottom: 1.5mm; }
+  .action-block ul { margin: 0; padding-left: 4mm; }
+  .action-block li { font-size: 9pt; margin: 0.5mm 0; }
+
+  footer {
+    text-align: center;
+    font-size: 8pt;
+    color: #94a3b8;
+    margin-top: 6mm;
+    padding-top: 2mm;
+    border-top: 1px solid #e2e8f0;
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">AgentShield · Full Report</div>
+  <h1>스캔 결과 상세 보고서</h1>
+  <div class="meta">
+    <span>Session: <b>{{ session_id }}</b></span>
+    <span>Generated: <b>{{ generated_at }}</b></span>
+    <span>Total Findings: <b>{{ findings|length }}</b></span>
+  </div>
+</header>
+
+{% for f in findings %}
+<div class="finding">
+  <div class="finding-header">
+    <div>
+      <span class="finding-title">{{ f.category }} · {{ f.category_name }}</span>
+      <span class="pill {{ f.severity }}">{{ f.severity }}</span>
+      <span class="pill verified">VERIFIED SAFE</span>
+    </div>
+    <div style="font-size: 8.5pt; color: #94a3b8;">#{{ '%03d' % loop.index }}</div>
+  </div>
+
+  <div class="section-label">공격 프롬프트 (AgentShield 자산 · 마스킹 적용)</div>
+  <pre>{{ f.attack_prompt }}</pre>
+
+  <div class="section-label">BEFORE · 방어 전 응답</div>
+  <pre class="before">{{ f.target_response }}</pre>
+
+  <div class="section-label">AFTER · 방어 후 응답 (Phase 4 검증 통과)</div>
+  <pre class="after">{{ f.defended_response }}</pre>
+
+  {% if f.defense_rationale %}
+  <div class="section-label">Blue Agent · 방어 근거</div>
+  <pre class="rationale">{{ f.defense_rationale }}</pre>
+  {% endif %}
+
+  {% if f.action_label_ko %}
+  <div class="action-block">
+    <div class="head">조치 항목 · 권장 액션: {{ f.action_label_ko }} ({{ f.default_action }})</div>
+    <ul>
+      {% for target in f.fix_targets %}<li>{{ target }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endfor %}
+
+<footer>AgentShield · {{ generated_at }} · 외부 공유용 (민감 정보 마스킹 적용)</footer>
+</body>
+</html>

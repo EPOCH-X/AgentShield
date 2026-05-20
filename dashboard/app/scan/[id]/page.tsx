@@ -32,6 +32,7 @@ interface LogEntry {
   levelCls: string;
   msg: string;
   alert?: boolean;
+  count?: number;
 }
 
 type ScanStatus = Awaited<ReturnType<typeof getScanStatus>>;
@@ -199,10 +200,19 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
       ERROR: "text-error",
       DONE: "text-tertiary font-black",
     };
-    setLogs((prev) => [
-      ...prev.slice(-100),
-      { time, level, levelCls: levelCls[level] || "text-on-surface-variant", msg, alert },
-    ]);
+    setLogs((prev) => {
+      // 직전 라인과 동일하면 새 라인 추가 대신 카운트만 증가 — 폴링 반복 출력 방지
+      const last = prev[prev.length - 1];
+      if (last && last.level === level && last.msg === msg) {
+        const next = prev.slice();
+        next[next.length - 1] = { ...last, time, count: (last.count ?? 1) + 1 };
+        return next;
+      }
+      return [
+        ...prev.slice(-100),
+        { time, level, levelCls: levelCls[level] || "text-on-surface-variant", msg, alert, count: 1 },
+      ];
+    });
   }
 
   function stopLiveIntervals() {
@@ -499,7 +509,12 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
                   <div key={i} className={`flex gap-4 ${log.alert ? "py-1.5 px-2.5 rounded-lg bg-error/10 border-l-2 border-error -mx-2 my-1.5" : ""}`}>
                     <span className="text-on-surface-variant/20 select-none min-w-[58px]">{log.time}</span>
                     <span className={log.levelCls}>[{log.level}]</span>
-                    <span className={log.alert ? "text-on-error-container font-bold" : "text-on-surface-variant/70"}>{log.msg}</span>
+                    <span className={log.alert ? "text-on-error-container font-bold" : "text-on-surface-variant/70"}>
+                      {log.msg}
+                      {log.count && log.count > 1 && (
+                        <span className="ml-2 text-on-surface-variant/40 font-mono text-[9px]">× {log.count}</span>
+                      )}
+                    </span>
                   </div>
                 ))}
                 {isRunning && (

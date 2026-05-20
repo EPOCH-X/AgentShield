@@ -1108,6 +1108,35 @@ backend가 Docker로 돌고 있다면 컨테이너 내부의 `localhost`는 컨�
 - `/overview` 라우트 삭제 + 잔존 링크 정리.
 - 대시보드 목업/하드코딩 시연 데이터 일괄 제거 (`dashboard/lib/devBackendMock.ts`, `dashboard/lib/mockClientData.ts` 등).
 
+### 보안 회사 포지셔닝 정렬 (2026-05 추가)
+
+- **마스킹 정책 재정렬 — 자산은 원문 / 외부 공유만 마스킹**
+  - DB · `results/review_exports/*.json` · `data/policy_packages/*.json` · RAG 인덱스 = **항상 원문**. AgentShield가 다시 읽어 분석/회귀 테스트에 쓰는 자산이기 때문.
+  - `redaction.py`의 함수명을 `mask_sensitive` → `mask_for_external_share`로 변경하고 docstring에 사용 범위 명시. 기존 `mask_sensitive` 호출 위치들(phase3_blue_agent / scan.py / phase5_policy_export 의 _build_verified_findings)에서 제거.
+  - 마스킹이 살아있는 곳은 두 군데뿐 — ① 대시보드 공격 프롬프트 표시(`maskAttackPayload`) ② 외부 공유 PDF/HTML 생성 시(`_redact_findings_for_external_share`).
+  - VerifiedFinding 스키마 필드명 `attack_prompt_masked` / `target_response_masked` → `attack_prompt` / `target_response`로 변경. 원문임을 명확히.
+  - `policy_package_validator.validate_policy_package(..., for_external=False)` 추가 — 내부 export에서는 raw secret 잔존을 valid 실패 사유로 보지 않음.
+
+- **하드코딩 → `data/owasp_guidance.yaml` 외부화**
+  - 카테고리(LLM01/02/06/07) → action 매핑, fix_targets, must_not_contain, input/output_policy_flag, OWASP 참조 URL, 기본 severity를 yaml 한 파일에 모아 보안팀이 관리.
+  - `backend/core/owasp_guidance.py` 로더 모듈 신설.
+  - `phase5_policy_export._build_middleware_policy`, `_build_regression_tests`, `_expected_action`이 yaml에서 읽어옴.
+  - 대시보드 `ACTION_GUIDE` 하드코딩 제거 → `/api/v1/policy-export/guidance` API로 원격 조회. 단일 소스.
+  - `MiddlewarePolicy` 스키마에 `source`, `advisory` 필드 추가하여 패키지 자체에 출처가 명시되도록.
+
+- **Phase 5 외부 공유 산출물 — PDF/HTML 보고서**
+  - `backend/templates/policy_executive.html.j2` (경영진 요약 1-2장) + `policy_full_report.html.j2` (카드 long-form).
+  - `backend/core/pdf_export.py` — Jinja2 렌더링 + WeasyPrint lazy import. WeasyPrint 미설치 환경에서도 HTML은 항상 생성되고, PDF는 가능할 때만 생성. macOS는 `brew install pango`가 추가로 필요.
+  - 스캔 종료 시 자동 생성 위치: `data/policy_packages/<sid>/reports/{executive_summary,full_report}.{html,pdf}`.
+  - 보고서는 외부 배포용이므로 `mask_for_external_share` 적용한 사본을 템플릿에 전달.
+  - 다운로드 엔드포인트: `GET /api/v1/policy-export/{session_id}/report/{filename}` (경로 탈주 방지). 대시보드 리포트 페이지 상단 패널에 PDF/HTML 다운로드 버튼.
+  - `GET /api/v1/policy-export/{session_id}` 응답에 `reports`(파일별 다운로드 URL) 포함.
+
+- **데이터 품질 / UI 잡음 제거**
+  - `_result_dict`에 `defense_rationale` 필드 추가 — `defense_code` 컬럼의 JSON(`{defended_response, defense_rationale}`)을 파싱해서 rationale만 분리 노출. UI에서 raw JSON 안 보이게.
+  - `dashboard/app/scan/[id]/page.tsx`의 `addLog`에 dedupe 추가 — 직전 라인과 (level, msg)가 같으면 새 라인 대신 카운터 `× N` 표시. `[SCAN] Phase 1 ...` 반복 출력 종료.
+  - `testbed/target_chatbot/config.py`의 `LLM_DEFAULT_NUM_PREDICT` 1024 → 2048. 응답이 토큰 한도로 끊겨 보이던 케이스 완화.
+
 ## 보안 및 윤리 원칙
 
 AgentShield는 authorized security testing과 defensive validation을 목적으로 합니다.

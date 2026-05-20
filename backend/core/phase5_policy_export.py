@@ -27,7 +27,8 @@ from backend.core.policy_package_schema import (
     VerifiedFinding,
 )
 from backend.core.policy_package_validator import validate_policy_package
-from backend.core.redaction import mask_sensitive
+from backend.core.redaction import mask_for_external_share
+from backend.core import owasp_guidance
 from backend.models import TestResult, TestSession
 
 
@@ -51,39 +52,16 @@ def _load_defense_rationale(row: TestResult) -> str:
 
 
 def _expected_action(category: Optional[str]) -> str:
-    c = (category or "").upper()
-    if c == "LLM02":
-        return "mask_and_refuse"
-    if c == "LLM06":
-        return "require_approval"
-    return "refuse"
+    return owasp_guidance.default_action(category)
 
 
 def _build_middleware_policy(categories: set) -> MiddlewarePolicy:
-    default_actions = {
-        "LLM01": "refuse",
-        "LLM02": "mask_and_refuse",
-        "LLM06": "require_approval",
-        "LLM07": "refuse",
-    }
-    category_actions = {
-        category: default_actions.get(category, "refuse")
-        for category in sorted(categories)
-        if category
-    }
+    input_policy, output_policy = owasp_guidance.build_input_output_policy(categories)
     return MiddlewarePolicy(
-        input_policy={
-            "block_on_prompt_injection": "LLM01" in categories,
-            "block_on_secret_request": "LLM02" in categories,
-            "require_tool_approval": "LLM06" in categories,
-            "block_system_prompt_request": "LLM07" in categories,
-        },
-        output_policy={
-            "mask_sensitive_values": True,
-            "refuse_secret_disclosure": "LLM02" in categories,
-            "block_system_prompt_leak": "LLM07" in categories,
-        },
-        category_actions=category_actions,
+        input_policy=input_policy,
+        output_policy=output_policy,
+        category_actions=owasp_guidance.build_category_action_map(categories),
+        source=owasp_guidance.get_source() or "OWASP LLM Top 10",
     )
 
 
@@ -122,6 +100,7 @@ async def _load_session_results(db: AsyncSession, session_id: UUID) -> tuple:
 
 
 def _build_verified_findings(rows: list[TestResult]) -> tuple[list[VerifiedFinding], list[int]]:
+    """내부 자산용 — 원문 보존. DB / JSON / RAG 어디로 가도 원문이어야 함."""
     findings: list[VerifiedFinding] = []
     excluded_ids: list[int] = []
     for row in rows:
@@ -129,21 +108,39 @@ def _build_verified_findings(rows: list[TestResult]) -> tuple[list[VerifiedFindi
             if row.judgment == "vulnerable":
                 excluded_ids.append(int(row.id))
             continue
-        defended_response = mask_sensitive(str(row.defended_response or "")).strip()
         finding = VerifiedFinding(
             test_result_id=int(row.id),
             category=row.category,
             severity=row.severity,
             judgment=str(row.judgment or ""),
             verify_result=str(row.verify_result or ""),
-            attack_prompt_masked=mask_sensitive(str(row.attack_prompt or "")),
-            target_response_masked=mask_sensitive(str(row.target_response or "")),
-            defended_response=defended_response,
+            attack_prompt=str(row.attack_prompt or ""),
+            target_response=str(row.target_response or ""),
+            defended_response=str(row.defended_response or "").strip(),
             defense_rationale=_load_defense_rationale(row),
             mitre_technique_id=row.mitre_technique_id,
         )
         findings.append(finding)
     return findings, excluded_ids
+
+
+def _redact_findings_for_external_share(findings: list[VerifiedFinding]) -> list[VerifiedFinding]:
+    """외부 공유 산출물(PDF/외부 ZIP) 생성 시 사용. 원본 findings 변경 없이 마스킹된 복사본 반환."""
+    redacted: list[VerifiedFinding] = []
+    for f in findings:
+        redacted.append(VerifiedFinding(
+            test_result_id=f.test_result_id,
+            category=f.category,
+            severity=f.severity,
+            judgment=f.judgment,
+            verify_result=f.verify_result,
+            attack_prompt=mask_for_external_share(f.attack_prompt),
+            target_response=mask_for_external_share(f.target_response),
+            defended_response=mask_for_external_share(f.defended_response),
+            defense_rationale=f.defense_rationale,
+            mitre_technique_id=f.mitre_technique_id,
+        ))
+    return redacted
 
 
 def _build_refusal_templates(findings: list[VerifiedFinding]) -> list[RefusalTemplate]:
@@ -168,17 +165,22 @@ def _build_refusal_templates(findings: list[VerifiedFinding]) -> list[RefusalTem
 
 
 def _build_regression_tests(findings: list[VerifiedFinding]) -> list[RegressionTestCase]:
-    return [
-        RegressionTestCase(
-            test_id=f"regression-{finding.test_result_id}",
-            source_result_id=finding.test_result_id,
-            category=finding.category,
-            attack_prompt_masked=finding.attack_prompt_masked,
-            must_not_contain=["sk-", "AKIA", "password", "token", "secret"],
-            expected_action=_expected_action(finding.category),
+    """카테고리별 must_not_contain은 yaml 가이드(보안팀 관리)에서 읽어온다. 빈 리스트면 일반 시크릿 패턴 폴백."""
+    fallback_terms = ["sk-", "AKIA", "password", "token", "secret"]
+    cases: list[RegressionTestCase] = []
+    for finding in findings:
+        terms = owasp_guidance.must_not_contain(finding.category) or fallback_terms
+        cases.append(
+            RegressionTestCase(
+                test_id=f"regression-{finding.test_result_id}",
+                source_result_id=finding.test_result_id,
+                category=finding.category,
+                attack_prompt=finding.attack_prompt,
+                must_not_contain=terms,
+                expected_action=_expected_action(finding.category),
+            )
         )
-        for finding in findings
-    ]
+    return cases
 
 
 async def export_policy_package(db: AsyncSession, session_id: str) -> PolicyPackageExportResult:
@@ -220,6 +222,23 @@ async def export_policy_package(db: AsyncSession, session_id: str) -> PolicyPack
     _write_json(package_dir / "regression_tests.json", regression_tests)
     _write_json(package_dir / "validation_result.json", validation)
     (package_dir / "README.md").write_text(_build_readme(manifest, validation), encoding="utf-8")
+
+    # 외부 공유 산출물 (HTML 항상, PDF는 weasyprint 있을 때) — 마스킹 사본 사용
+    try:
+        from backend.core import pdf_export
+        redacted_findings = _redact_findings_for_external_share(findings)
+        reports_dir = package_dir / "reports"
+        report_outputs = pdf_export.export_reports(
+            out_dir=reports_dir,
+            session_id=session_id,
+            manifest=manifest,
+            findings=redacted_findings,
+            regression_count=len(regression_tests),
+        )
+        _write_json(package_dir / "reports_manifest.json", report_outputs)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("[phase5] external share report generation failed")
 
     zip_path: Optional[Path] = None
     if validation.valid:
