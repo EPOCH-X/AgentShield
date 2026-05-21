@@ -14,7 +14,6 @@ const navItems = [
   { icon: "science", label: "시연", href: "/demo" },
   { icon: "account_tree", label: "파이프라인 시각화", href: "/visualization" },
   { icon: "visibility", label: "모니터링 및 위반", href: "/monitoring" },
-  { icon: "admin_panel_settings", label: "관리자", href: "/monitoring/admin" },
 ];
 
 export default function DashboardLayout({ children }: DashboardLayoutProps) {
@@ -40,10 +39,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
     if (href === "/scan") return pathname === "/scan" || pathname.startsWith("/scan/");
     if (href === "/demo") return pathname === "/demo";
     if (href === "/visualization") return pathname === "/visualization";
-    if (href === "/monitoring") return pathname === "/monitoring";
-    if (href === "/monitoring/admin") {
-      return pathname === "/monitoring/admin" || pathname.startsWith("/monitoring/admin/");
-    }
+    if (href === "/monitoring") return pathname === "/monitoring" || pathname.startsWith("/monitoring/");
     return pathname === href || (href !== "/" && pathname.startsWith(href));
   }
 

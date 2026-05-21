@@ -1,13 +1,17 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import DashboardLayout from "../../components/DashboardLayout";
+import MonitoringChatPanel from "../../components/MonitoringChatPanel";
+import MonitoringPoliciesPanel from "../../components/MonitoringPoliciesPanel";
+import MonitoringEmployeesPanel from "../../components/MonitoringEmployeesPanel";
 import {
   getMonitoringDashboard,
   getViolations,
   Violation,
 } from "../../lib/api";
+
+type MonitoringTab = "violations" | "policies" | "employees";
 
 function visiblePageNumbers(current: number, total: number, max = 5): number[] {
   if (total <= 0) return [];
@@ -110,6 +114,7 @@ export default function MonitoringPage() {
   const [typeFilter, setTypeFilter] = useState("");
   const [selectedViolation, setSelectedViolation] = useState<Violation | null>(null);
   const [page, setPage] = useState(1);
+  const [tab, setTab] = useState<MonitoringTab>("violations");
   const PAGE_SIZE = 10;
 
   const loadDashboard = useCallback(async () => {
@@ -215,7 +220,9 @@ export default function MonitoringPage() {
 
   return (
     <DashboardLayout>
-      <div className="p-10 space-y-8 max-w-[1700px] mx-auto w-full">
+      <div className="p-6 lg:p-10 max-w-[1820px] mx-auto w-full">
+       <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-6">
+        <div className="space-y-8 min-w-0">
 
         {/* ─── 헤더 ─── */}
         <div className="flex items-end justify-between">
@@ -231,11 +238,7 @@ export default function MonitoringPage() {
               직원 AI 사용 현황을 실시간으로 감시하고 정책 위반을 탐지합니다.
             </p>
             <p className="text-[11px] text-outline pt-0.5">
-              정책 규칙 편집은{" "}
-              <Link href="/monitoring/admin" className="text-primary/90 hover:text-primary font-bold underline-offset-2 hover:underline">
-                관리자
-              </Link>
-              화면에서 할 수 있습니다.
+              정책 규칙·직원 관리는 아래 <span className="text-primary/90 font-bold">보안 정책 룰</span> / <span className="text-primary/90 font-bold">직원 목록</span> 탭에서 처리합니다.
             </p>
           </div>
 
@@ -314,6 +317,39 @@ export default function MonitoringPage() {
           ))}
         </div>
 
+        {/* ─── 탭 네비게이션 ─── */}
+        <div className="flex items-center gap-1 border-b border-white/8">
+          {[
+            { id: "violations" as const, label: "위반 내역", icon: "report" },
+            { id: "policies"   as const, label: "보안 정책 룰", icon: "policy" },
+            { id: "employees"  as const, label: "직원 목록", icon: "groups" },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-bold transition-all relative"
+              style={{
+                color: tab === t.id ? "var(--primary, #0ea5a5)" : "rgba(255,255,255,0.45)",
+              }}
+            >
+              <span className="material-symbols-outlined text-base">{t.icon}</span>
+              {t.label}
+              {tab === t.id && (
+                <span className="absolute left-0 right-0 -bottom-px h-0.5 bg-primary rounded-full" />
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* ─── 탭: 정책 룰 ─── */}
+        {tab === "policies" && <MonitoringPoliciesPanel />}
+
+        {/* ─── 탭: 직원 목록 ─── */}
+        {tab === "employees" && <MonitoringEmployeesPanel />}
+
+        {/* ─── 탭: 위반 내역 (기본) ─── */}
+        {tab === "violations" && (
+        <>
         {/* ─── 필터 바 ─── */}
         <div
           className="p-4 rounded-2xl flex flex-wrap gap-4 items-end border"
@@ -695,6 +731,15 @@ export default function MonitoringPage() {
             </div>
           );
         })()}
+        </>
+        )}
+        </div>
+
+        {/* ─── 우측 1:1 챗봇 (lg 이상에서 sticky) ─── */}
+        <aside className="lg:sticky lg:top-4 lg:self-start lg:h-[calc(100vh-8rem)] min-h-[460px]">
+          <MonitoringChatPanel onMessageProcessed={loadDashboard} />
+        </aside>
+       </div>
       </div>
     </DashboardLayout>
   );

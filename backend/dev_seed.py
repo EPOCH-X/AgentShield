@@ -200,9 +200,14 @@ async def seed() -> None:
 
         await s.flush()
 
-        # ── 3. 직원 ───────────────────────────────────────────────────────────
+        # ── 3. 직원 (모니터링 데모 시드) ──────────────────────────────────────
         emp_map: dict[str, Employee] = {}
-        for d in EMPLOYEES:
+        if not settings.DEV_SEED_INCLUDE_MOCK_MONITORING:
+            print("[seed] 모니터링 모의 직원/위반/사용로그 시드 스킵 (DEV_SEED_INCLUDE_MOCK_MONITORING=false)")
+            EMPLOYEES_TO_SEED: list[dict] = []
+        else:
+            EMPLOYEES_TO_SEED = EMPLOYEES
+        for d in EMPLOYEES_TO_SEED:
             existing = await s.scalar(
                 select(Employee).where(Employee.employee_id == d["employee_id"]).limit(1)
             )
@@ -292,10 +297,14 @@ async def seed() -> None:
             added.append(f"usage_logs×{len(log_rows)}")
 
         # ── 7. 데모 스캔 세션 + 결과 ─────────────────────────────────────────
-        demo_sess_count = await s.scalar(
-            select(func.count()).select_from(TestSession)
-            .where(TestSession.project_name == "데모 스캔 세션")
-        ) or 0
+        if not settings.DEV_SEED_INCLUDE_MOCK_MONITORING:
+            print("[seed] 데모 스캔 세션 시드 스킵 (DEV_SEED_INCLUDE_MOCK_MONITORING=false)")
+            demo_sess_count = 1  # 아래 분기를 건너뛰기 위해 0이 아닌 값
+        else:
+            demo_sess_count = await s.scalar(
+                select(func.count()).select_from(TestSession)
+                .where(TestSession.project_name == "데모 스캔 세션")
+            ) or 0
         if demo_sess_count == 0:
             demo_sess = TestSession(
                 target_api_url="https://demo-target.agentshield.io/chat",

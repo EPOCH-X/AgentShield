@@ -351,7 +351,7 @@ def process_monitor_request_with_dependencies(
 ) -> MonitorChatResponse:
     context = extract_request_context(payload)
 
-    p1_result = detect_confidential_leak(context.latest_message)
+    p1_result = detect_confidential_leak(context.latest_message, employee_id=context.employee_id)
     if p1_result.blocked and p1_result.severity == "high":
         return finalize_response(
             context,

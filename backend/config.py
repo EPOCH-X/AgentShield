@@ -102,6 +102,8 @@ class AppSettings:
 
     # Dev seed
     DEV_SEED_INCLUDE_ATTACK_PATTERNS: bool = os.getenv("DEV_SEED_INCLUDE_ATTACK_PATTERNS", "false").lower() == "true"
+    # 모니터링 데모 시드(직원·위반·사용 로그·데모 스캔 세션)를 넣을지. 기본은 OFF — 운영 흐름에서 실제 챗봇 입력만 보여줌.
+    DEV_SEED_INCLUDE_MOCK_MONITORING: bool = os.getenv("DEV_SEED_INCLUDE_MOCK_MONITORING", "false").lower() == "true"
 
     # Red Agent
     RED_MAX_ATTACK_CHARS: int = int(os.getenv("RED_MAX_ATTACK_CHARS", 8000))
