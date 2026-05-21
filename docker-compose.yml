@@ -77,6 +77,8 @@ services:
       - ./backend:/app/backend
       - ./adapters:/app/adapters
       - ./data:/app/data
+      - ./monitoring_proxy:/app/monitoring_proxy
+      - ./scripts:/app/scripts
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 
 volumes:

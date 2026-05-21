@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import DashboardLayout from "../../components/DashboardLayout";
-import ChatbotTestModal from "../../components/ChatbotTestModal";
 import {
   startScan,
   manualCheck,
@@ -138,7 +137,6 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [recentScans, setRecentScans] = useState<RecentScan[]>([]);
-  const [chatbotTestOpen, setChatbotTestOpen] = useState(false);
   const [showSiteGptDemo, setShowSiteGptDemo] = useState(false);
   const [siteGptSdkStatus, setSiteGptSdkStatus] = useState<SiteGptSdkStatus>("idle");
   const [siteGptSdkDetail, setSiteGptSdkDetail] = useState("");
@@ -171,7 +169,8 @@ export default function ScanPage() {
       const stored = localStorage.getItem("recent_scans");
       if (stored) {
         const parsed = JSON.parse(stored);
-        setRecentScans(parsed.length > 0 ? parsed : []);
+        // 과거 저장 시점에 10개가 남아있던 경우에도 9개까지만 노출.
+        setRecentScans(Array.isArray(parsed) ? parsed.slice(0, 9) : []);
       } else {
         setRecentScans([]);
       }
@@ -558,7 +557,7 @@ export default function ScanPage() {
         status: data.status || "queued",
         created_at: new Date().toISOString(),
       };
-      const updated = [newScan, ...recentScans].slice(0, 10);
+      const updated = [newScan, ...recentScans].slice(0, 9);
       localStorage.setItem("recent_scans", JSON.stringify(updated));
       setRecentScans(updated);
       setError("");
@@ -731,42 +730,18 @@ export default function ScanPage() {
                 )}
               </div>
 
-              {/* 챗봇 테스트 */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-primary/15 bg-primary/5 px-5 py-4">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-primary text-xl">forum</span>
-                  </div>
-                  <div>
-                    <p className="text-sm font-extrabold text-on-surface font-headline">
-                      테스트베드 챗봇 직접 호출
-                    </p>
-                    <p className="mt-1 text-xs text-on-surface-variant/70">
-                      한 문장 프롬프트를 보내 실제 타겟 응답과 도구 호출 여부를 확인합니다.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setChatbotTestOpen(true)}
-                  className="shrink-0 inline-flex items-center justify-center gap-2 rounded-2xl border border-primary/25 bg-white/5 px-5 py-3 text-sm font-extrabold text-primary transition-all hover:-translate-y-0.5 hover:bg-primary/10 hover:border-primary/45"
-                >
-                  <span className="material-symbols-outlined text-lg">chat</span>
-                  챗봇 테스트
-                </button>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-3">
+              {/* 부가 도구 — SiteGPT 데모 토글 */}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
                 <button
                   type="button"
                   onClick={() => setShowSiteGptDemo((prev) => !prev)}
-                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-secondary/30 bg-secondary/10 px-5 py-3 text-sm font-extrabold text-secondary transition-all hover:-translate-y-0.5 hover:border-secondary/50 hover:bg-secondary/20"
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-secondary/25 bg-secondary/5 px-4 py-2 text-xs font-bold text-secondary transition-all hover:bg-secondary/15 hover:border-secondary/45"
                 >
-                  <span className="material-symbols-outlined text-lg">language</span>
-                  {showSiteGptDemo ? "Demo to SiteGPT 닫기" : "Demo to SiteGPT"}
+                  <span className="material-symbols-outlined text-base">language</span>
+                  {showSiteGptDemo ? "SiteGPT 데모 닫기" : "SiteGPT 데모 열기"}
                 </button>
-                <p className="text-xs text-on-surface-variant/70">
-                  같은 화면에서 SiteGPT 데모 위젯을 확인합니다.
+                <p className="text-[11px] text-on-surface-variant/50">
+                  · 단발 챗봇 호출은 <span className="text-primary/70 font-semibold">모니터링</span> 페이지 우측 1:1 챗봇에서 진행하세요.
                 </p>
               </div>
 
@@ -1097,28 +1072,7 @@ export default function ScanPage() {
           )}
         </section>
 
-        {/* 팁 */}
-        <div className="bg-primary/5 p-5 rounded-2xl border-l-4 border-primary/60 flex items-start gap-4">
-          <span
-            className="material-symbols-outlined text-primary neon-glow-primary shrink-0"
-            style={{ fontVariationSettings: "'FILL' 1" }}
-          >
-            lightbulb
-          </span>
-          <p className="text-[11px] text-on-surface-variant leading-relaxed font-medium">
-            <span className="font-bold text-on-surface uppercase tracking-wider">관제 최적화 팁 · </span>
-            운영 엔드포인트의 경우 속도 제한을 피하기 위해 &apos;잠입&apos; 모드를 권장합니다.
-            스캔 중 대상 서비스에 실제 요청이 전송됩니다.
-          </p>
-        </div>
-
       </div>
-      <ChatbotTestModal
-        open={chatbotTestOpen}
-        onClose={() => setChatbotTestOpen(false)}
-        targetUrl={targetUrl}
-        apiKey={targetApiKey}
-      />
     </DashboardLayout>
   );
 }
