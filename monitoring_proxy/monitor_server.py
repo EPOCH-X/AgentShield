@@ -38,6 +38,7 @@ from monitoring_proxy.services import (
     get_default_intent_review_llm_client,
     mask_response_content,
     review_request_intent,
+    review_response_intent,
     save_usage_log,
 )
 
@@ -219,6 +220,18 @@ def should_review_request_intent(
     p1_result: P1DetectionResult,
     p2_result: P2DetectionResult,
 ) -> bool:
+    """P4 LLM 의도 검토를 실행할지 결정.
+
+    [정책] 보안사 등급 보호를 위해 기본 always-on. 패턴 매처(P1/P2)가 못 잡는 사회공학 공격
+    (예: 'Q3 reconciliation' 가장한 destructive action 요청)도 LLM이 의미적으로 판정한다.
+
+    LLM 호출 비용·지연을 줄이려면 MONITORING_P4_ALWAYS_ON=false 로 끄고, 그 경우 P1/P2가
+    needs_llm_review 를 올린 케이스만 검토한다 (성능 모드).
+    """
+    import os
+    always_on = os.getenv("MONITORING_P4_ALWAYS_ON", "true").lower() == "true"
+    if always_on:
+        return True
     return p1_result.needs_llm_review or p2_result.needs_llm_review
 
 
@@ -424,10 +437,40 @@ def process_monitor_request_with_dependencies(
         employee_context={"employee_id": context.employee_id},
     )
     forward_response: ForwardResponse = forwarder_fn(forward_request)
-    response_content = masking_fn(
-        forward_response.content or "Monitoring proxy accepted message.",
-    )
+    raw_response_content = forward_response.content or "Monitoring proxy accepted message."
+    response_content = masking_fn(raw_response_content)
     forward_tool_trace = list(forward_response.tool_trace or [])
+
+    # P5 — 응답 사후 검사. 입력측 P1/P2/P4가 못 잡은 사회공학 공격에 대해 챗봇 응답이
+    # destructive action을 약속하거나 시크릿을 노출한 경우 응답 자체를 차단한다.
+    import os
+    p5_enabled = os.getenv("MONITORING_P5_OUTPUT_REVIEW", "true").lower() == "true"
+    if p5_enabled:
+        review_client = llm_client
+        if review_client is None and llm_client_factory is not None:
+            review_client = llm_client_factory()
+        output_review = review_response_intent(
+            message=context.latest_message,
+            response=raw_response_content,
+            employee_context={"employee_id": context.employee_id},
+            llm_client=review_client,
+        )
+        if output_review.judgment == "violation":
+            block_response = build_monitor_response(
+                context,
+                content="응답 사후 검사에서 정책 위반 의도가 감지되어 차단되었습니다.",
+                blocked=True,
+                stage="p5_output_review",
+                severity="medium",
+                reason=output_review.reason,
+            )
+            return finalize_response(
+                context,
+                block_response,
+                build_blocked_record_plan("p5_output_review"),
+                save_usage_log_fn=save_usage_log_fn,
+                create_violation_record_fn=create_violation_record_fn,
+            )
 
     if p2_result.category != "normal":
         response = build_monitor_response(

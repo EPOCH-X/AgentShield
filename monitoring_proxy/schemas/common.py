@@ -8,6 +8,7 @@ StageType = Literal[
     "p2_inappropriate_use",
     "p3_rate_limit",
     "p4_intent_review",
+    "p5_output_review",
 ]
 SeverityType = Literal["high", "medium", "low"]
 LimitType = Literal["hourly", "daily", "repeated_query"]

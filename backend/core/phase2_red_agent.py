@@ -341,12 +341,16 @@ async def propose_red_mutation_for_manual_demo(
     )
     retry_prompt = red_prompt
     code_mutation_enabled = _adaptive_code_mutation_enabled()
+    # SFT 데이터셋 품질 검증을 추론(공격 생성) 시점에도 적용할지.
+    # 학습은 이미 끝났으므로 데모/시연/실제 스캔 모두 default "off" — Red Agent의 자율 공격을
+    # SFT 패턴 검출기가 가로막지 못하게 한다. ENV 우선순위: SITEGPT_RED > DEMO_RED > RED_SFT > "off"
     validation_mode = os.getenv(
         "SITEGPT_RED_VALIDATION_MODE",
-        os.getenv("DEMO_RED_VALIDATION_MODE", "penalty"),
+        os.getenv("DEMO_RED_VALIDATION_MODE",
+                  os.getenv("RED_SFT_VALIDATION_MODE", "off")),
     ).strip().lower()
     if validation_mode not in {"strict", "penalty", "off"}:
-        validation_mode = "penalty"
+        validation_mode = "off"
     validation_penalty_reason = ""
 
     for generation_attempt in range(1, generation_attempts + 1):
@@ -708,6 +712,14 @@ async def run_phase2(
                 generation_attempts = _red_generation_attempts("RED_AGENT_GENERATION_ATTEMPTS", default="3")
                 retry_prompt = red_prompt
                 code_mutation_enabled = _adaptive_code_mutation_enabled()
+                # SFT 검증 토글 — 학습은 끝났으므로 default off. sitegpt 경로와 동일 ENV 체인을 따른다.
+                scan_validation_mode = os.getenv(
+                    "RED_SFT_VALIDATION_MODE",
+                    os.getenv("DEMO_RED_VALIDATION_MODE", "off"),
+                ).strip().lower()
+                if scan_validation_mode not in {"strict", "penalty", "off"}:
+                    scan_validation_mode = "off"
+
                 for generation_attempt in range(1, generation_attempts + 1):
                     # 4. Red Agent LLM 변형 생성
                     new_attack_raw: str = await llm.generate(retry_prompt, role="red")
@@ -726,12 +738,25 @@ async def run_phase2(
                     if not _stripped_attack or new_attack.lstrip().startswith("[Error]"):
                         invalid_reason = "empty generation" if not _stripped_attack else "LLM error response"
                     else:
-                        is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+                        if scan_validation_mode == "off":
+                            is_valid, invalid_reason = True, ""
+                        else:
+                            is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+                        if not is_valid and scan_validation_mode == "penalty":
+                            logger.info("[phase2] SFT validation penalty (still accepted): %s", invalid_reason)
+                            is_valid = True
+                            invalid_reason = ""
                         if is_valid and code_mutation_enabled:
                             # 4-b. 코드 기반 변형 엔진 연결.
                             new_attack, code_mutation_strategy = apply_code_mutation(new_attack, rnd)
                             new_attack = normalize_attack_prompt_output(new_attack)
-                            is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+                            if scan_validation_mode == "off":
+                                is_valid, invalid_reason = bool(new_attack.strip()), ""
+                            else:
+                                is_valid, invalid_reason = validate_attack_prompt_output(new_attack)
+                            if not is_valid and scan_validation_mode == "penalty":
+                                is_valid = True
+                                invalid_reason = ""
                             if is_valid:
                                 break
                             invalid_reason = f"code mutation rejected: {invalid_reason}"

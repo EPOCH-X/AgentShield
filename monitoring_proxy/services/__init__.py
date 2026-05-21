@@ -9,6 +9,7 @@ from monitoring_proxy.services.forwarder import build_forward_request, forward_t
 from monitoring_proxy.services.intent_review import (
     get_default_intent_review_llm_client,
     review_request_intent,
+    review_response_intent,
 )
 from monitoring_proxy.services.persistence import create_violation_record, save_usage_log
 
@@ -21,5 +22,6 @@ __all__ = [
     "get_default_intent_review_llm_client",
     "mask_response_content",
     "review_request_intent",
+    "review_response_intent",
     "save_usage_log",
 ]
