@@ -84,6 +84,9 @@ const SANCTION_META: Record<string, { label: string; color: string }> = {
   masked: { label: "마스킹 처리됨", color: "#0ea5a5" },
 };
 
+const VIOLATION_TABLE_COLUMNS = "80px 170px minmax(420px, 1fr) 100px 140px 130px";
+const VIOLATION_TABLE_MIN_WIDTH = 1040;
+
 const AVATAR_COLORS = ["#0ea5a5", "#a78bfa", "#f97316", "#22c55e", "#ef4444", "#60a5fa"];
 
 function avatarColor(id: string | number) {
@@ -164,7 +167,7 @@ export default function MonitoringPage() {
 
   const paged = violations.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const totalPages = Math.ceil(violations.length / PAGE_SIZE);
-  const criticalCount = violations.filter((v) => v.severity === "critical").length;
+  const actionRequiredCount = violations.filter((v) => v.severity === "critical" || v.severity === "high").length;
 
   function formatDate(iso: string) {
     const d = new Date(iso);
@@ -194,11 +197,11 @@ export default function MonitoringPage() {
     {
       icon: "priority_high",
       label: "심각한 경고",
-      value: loading ? "—" : criticalCount,
+      value: loading ? "—" : actionRequiredCount,
       sub: "ACTION REQUIRED",
       accent: "#ef4444",
-      accentBg: criticalCount > 0 ? "rgba(239,68,68,0.1)" : "rgba(239,68,68,0.04)",
-      pulse: criticalCount > 0,
+      accentBg: actionRequiredCount > 0 ? "rgba(239,68,68,0.1)" : "rgba(239,68,68,0.04)",
+      pulse: actionRequiredCount > 0,
     },
     {
       icon: "group",
@@ -236,9 +239,6 @@ export default function MonitoringPage() {
             </h2>
             <p className="text-on-surface-variant text-sm">
               직원 AI 사용 현황을 실시간으로 감시하고 정책 위반을 탐지합니다.
-            </p>
-            <p className="text-[11px] text-outline pt-0.5">
-              정책 규칙·직원 관리는 아래 <span className="text-primary/90 font-bold">보안 정책 룰</span> / <span className="text-primary/90 font-bold">직원 목록</span> 탭에서 처리합니다.
             </p>
           </div>
 
@@ -418,10 +418,13 @@ export default function MonitoringPage() {
           className="rounded-2xl overflow-hidden shadow-2xl"
           style={{ border: "1px solid rgba(255,255,255,0.06)" }}
         >
+          <div className="overflow-x-auto">
           {/* 테이블 헤더 */}
           <div
-            className="grid grid-cols-[80px_1fr_2fr_100px_140px_130px] px-6 py-4 border-b"
+            className="grid px-6 py-4 border-b"
             style={{
+              gridTemplateColumns: VIOLATION_TABLE_COLUMNS,
+              minWidth: VIOLATION_TABLE_MIN_WIDTH,
               background: "rgba(255,255,255,0.03)",
               borderColor: "rgba(255,255,255,0.08)",
             }}
@@ -439,12 +442,12 @@ export default function MonitoringPage() {
           {/* 테이블 바디 */}
           <div className="divide-y divide-white/[0.04]">
             {loading ? (
-              <div className="py-20 flex flex-col items-center gap-4">
+              <div className="py-20 flex flex-col items-center gap-4" style={{ minWidth: VIOLATION_TABLE_MIN_WIDTH }}>
                 <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
                 <p className="text-sm text-on-surface-variant">데이터 불러오는 중...</p>
               </div>
             ) : paged.length === 0 ? (
-              <div className="py-20 text-center">
+              <div className="py-20 text-center" style={{ minWidth: VIOLATION_TABLE_MIN_WIDTH }}>
                 <p className="text-sm text-on-surface-variant">위반 내역이 없습니다.</p>
               </div>
             ) : (
@@ -460,8 +463,10 @@ export default function MonitoringPage() {
                   <div
                     key={v.id}
                     onClick={() => setSelectedViolation(v)}
-                    className={`grid grid-cols-[80px_1fr_2fr_100px_140px_130px] px-6 py-4 items-center cursor-pointer group transition-all ${sev.rowGlow}`}
+                    className={`grid px-6 py-4 items-center cursor-pointer group transition-all ${sev.rowGlow}`}
                     style={{
+                      gridTemplateColumns: VIOLATION_TABLE_COLUMNS,
+                      minWidth: VIOLATION_TABLE_MIN_WIDTH,
                       background: isCritical ? "rgba(239,68,68,0.03)" : "transparent",
                     }}
                     onMouseEnter={(e) => {
@@ -477,7 +482,7 @@ export default function MonitoringPage() {
                     </span>
 
                     {/* 직원 */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
                       <div
                         className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
                         style={{ background: gender.bg, border: `1px solid ${gender.border}` }}
@@ -489,25 +494,30 @@ export default function MonitoringPage() {
                           person
                         </span>
                       </div>
-                      <div>
-                        <p className="text-sm font-bold text-white group-hover:text-primary transition-colors">
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-white group-hover:text-primary transition-colors truncate">
                           {v.employee_name || v.employee_id}
                         </p>
-                        <p className="text-[10px] text-on-surface-variant/50 uppercase font-bold tracking-tight">
+                        <p className="text-[10px] text-on-surface-variant/50 uppercase font-bold tracking-tight truncate">
                           {v.department || "—"}
                         </p>
                       </div>
                     </div>
 
                     {/* 위반 내용 */}
-                    <div className="flex items-center gap-2.5 pr-4">
+                    <div className="flex items-center gap-2.5 pr-4 min-w-0 overflow-hidden">
                       <span
                         className="material-symbols-outlined text-base shrink-0 transition-colors"
                         style={{ color: sev.text }}
                       >
                         {icon}
                       </span>
-                      <span className="text-sm text-on-surface/80 truncate">{v.description}</span>
+                      <span
+                        className="block min-w-0 overflow-x-auto whitespace-nowrap text-sm text-on-surface/80 overscroll-x-contain"
+                        title={v.description}
+                      >
+                        {v.description}
+                      </span>
                     </div>
 
                     {/* 심각도 배지 */}
@@ -551,6 +561,7 @@ export default function MonitoringPage() {
           <div
             className="px-6 py-4 flex justify-between items-center border-t"
             style={{
+              minWidth: VIOLATION_TABLE_MIN_WIDTH,
               background: "rgba(255,255,255,0.02)",
               borderColor: "rgba(255,255,255,0.06)",
             }}
@@ -587,6 +598,7 @@ export default function MonitoringPage() {
                 <span className="material-symbols-outlined text-sm">chevron_right</span>
               </button>
             </div>
+          </div>
           </div>
         </div>
 

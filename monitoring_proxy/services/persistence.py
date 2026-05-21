@@ -16,6 +16,7 @@ from uuid import UUID
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
+from backend.db_urls import make_sync_database_url
 from monitoring_proxy.schemas import UsageLogEntry, ViolationRecordInput
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ logger = logging.getLogger(__name__)
 @lru_cache(maxsize=1)
 def _sync_engine():
     from backend.config import settings
-    sync_url = settings.DATABASE_URL.replace("+asyncpg", "")
+    sync_url = make_sync_database_url(settings.DATABASE_URL)
     return create_engine(sync_url, pool_pre_ping=True, future=True)
 
 

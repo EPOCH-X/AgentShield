@@ -6,6 +6,7 @@ from backend.models.employee import Employee
 from backend.models.usage_log import UsageLog
 from backend.models.violation import Violation
 from backend.models.policy_rule import PolicyRule
+from backend.models.audit_log import AuditLog
 
 __all__ = [
     "User",
@@ -16,4 +17,5 @@ __all__ = [
     "UsageLog",
     "Violation",
     "PolicyRule",
+    "AuditLog",
 ]

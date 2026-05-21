@@ -15,13 +15,14 @@ def _load_active_rules() -> list[dict]:
     실패 시 빈 리스트(고정 패턴만으로 동작)."""
     try:
         from sqlalchemy import create_engine, select
-        from backend.database import DATABASE_URL
+        from backend.config import settings
+        from backend.db_urls import make_sync_database_url
         from backend.models.policy_rule import PolicyRule
     except Exception:
         return []
 
     try:
-        sync_url = DATABASE_URL.replace("+asyncpg", "")
+        sync_url = make_sync_database_url(settings.DATABASE_URL)
         engine = create_engine(sync_url, pool_pre_ping=True, future=True)
         with engine.connect() as conn:
             rows = conn.execute(

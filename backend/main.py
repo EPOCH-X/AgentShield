@@ -2,10 +2,12 @@
 [R7] FastAPI 앱 엔트리포인트
 """
 
+import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.database import init_db
 import backend.models  # noqa: F401 — ORM 테이블을 Base.metadata에 등록
@@ -25,12 +27,43 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+# ── Security headers ─────────────────────────────────────────────────────────
+# OWASP 권장 보안 헤더. HSTS는 HTTPS 환경에서만 의미가 있으므로 ENV로 토글.
+_ENABLE_HSTS = os.getenv("SECURITY_ENABLE_HSTS", "false").lower() == "true"
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        if _ENABLE_HSTS:
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
+        return response
+
+
+app.add_middleware(SecurityHeadersMiddleware)
+
+
+# ── CORS — 명시적 허용 메서드/헤더 ────────────────────────────────────────────
+# 와일드카드(`*`)는 credentials=True 와 결합 시 권장되지 않는다.
+_CORS_ORIGINS = [
+    o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:3000").split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=_CORS_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Requested-With"],
+    expose_headers=["Content-Disposition"],
+    max_age=600,
 )
 
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])

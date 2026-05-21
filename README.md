@@ -193,8 +193,8 @@ Phase 4까지 끝난 세션을 입력으로 받아, 운영팀과 보안팀이 �
 `/api/v1/monitoring/chat` 엔드포인트는 **직원이 외부 LLM을 1:1로 호출할 때 적용되는 운영 감사 채널**입니다. 보안 스캔 파이프라인과는 별개 경로이며, 다음 시나리오를 위해 존재합니다.
 
 - 직원이 운영 LLM에 보내는 질문을 정책 검사(P1: 기밀, P2: 부적절, P3: rate, P4: intent review)로 필터
-- 정책 위반 시 차단하고 위반 기록을 PostgreSQL에 적재
-- 허용된 요청은 forwarder가 타겟 챗봇으로 전달
+- 정책 위반 시 차단하고 위반 기록을 AgentShield 앱 DB PostgreSQL에 적재
+- 허용된 요청은 서버 설정의 `MONITORING_TARGET_URL`로 전달 (`MONITORING_ALLOW_CLIENT_TARGET_URLS=true`일 때만 클라이언트 target override 허용)
 - 타겟이 반환한 `tool_trace` (RAG 호출, 도구 호출)를 그대로 보존해 감사 화면에 노출
 
 대시보드 `/scan` 페이지의 **챗봇 테스트 모달**이 이 흐름을 시연용으로 사용하며, multi-turn 대화 히스토리도 그대로 전달됩니다. Scan/Red Agent/Demo 캠페인 같은 메인 파이프라인은 monitoring proxy를 거치지 않고 testbed에 직접 접속합니다.
@@ -940,7 +940,8 @@ PY
 
 | 변수 | 설명 |
 | --- | --- |
-| `DATABASE_URL` | AgentShield 메인 PostgreSQL |
+| `AGENTSHIELD_DATABASE_URL` | AgentShield 앱 DB. 기능 A scan 결과와 기능 B monitoring audit를 저장한다 |
+| `DATABASE_URL` | 기존 배포 호환용 fallback. `AGENTSHIELD_DATABASE_URL`이 있으면 사용하지 않는다 |
 | `OLLAMA_BASE_URL` | 로컬 스크립트/로컬 백엔드에서 사용할 Ollama URL |
 | `DOCKER_OLLAMA_BASE_URL` | Docker backend에서 host Ollama로 접근할 URL |
 | `OLLAMA_MODEL` | Target chatbot 기본 모델 |
@@ -954,6 +955,8 @@ PY
 | `PHASE2_MAX_ROUNDS` | Red Agent 최대 라운드 (대시보드/스크립트의 단일 소스. `RED_CAMPAIGN_ROUNDS`가 명시되면 그것이 우선) |
 | `RED_CAMPAIGN_ROUNDS` | demo `/api/demo/red-adaptive` 라운드 override. 미설정 시 `PHASE2_MAX_ROUNDS` fallback |
 | `TARGET_LOCAL_REWRITE_HOST` | backend가 컨테이너 안일 때 사용자가 입력한 `localhost`/`127.0.0.1`를 자동 치환할 호스트 (기본: `host.docker.internal`) |
+| `MONITORING_TARGET_URL` | 1:1 monitoring proxy가 forward할 서버 측 target URL |
+| `MONITORING_ALLOW_CLIENT_TARGET_URLS` | `false`이면 monitoring API가 클라이언트 target URL/API key를 무시하고 서버 설정만 사용 |
 | `TESTBED_SECURITY_MODE` | testbed chatbot 보안 모드 (`weak` / `medium` / `strict`) |
 | `TESTBED_DB_URL` | testbed PostgreSQL |
 | `TOOL_GATEWAY_URL` | testbed tool gateway URL |

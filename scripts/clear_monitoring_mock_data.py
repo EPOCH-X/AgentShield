@@ -1,11 +1,11 @@
 """
-이미 INSERT 된 dev_seed 모니터링 모의 데이터(employees / violations / usage_logs / 데모 스캔 세션)를 일괄 삭제.
+이미 INSERT 된 dev_seed 모니터링 모의 데이터(employees / violations / usage_logs / policy_rules / 데모 스캔 세션)를 일괄 삭제.
 
 dev_seed.py 가 더 이상 mock을 시드하지 않게 바뀌었지만, 과거 부팅에서 들어간 row 는 그대로 남아있다.
 실제 운영/시연 흐름에서 챗봇 입력만 보이게 하려면 이 스크립트를 한 번 실행한다.
 
 사용법:
-    python -m scripts.clear_monitoring_mock_data           # 모의 직원/위반/사용로그 삭제 (데모 스캔은 유지)
+    python -m scripts.clear_monitoring_mock_data           # 모의 직원/위반/사용로그/정책 삭제 (데모 스캔은 유지)
     python -m scripts.clear_monitoring_mock_data --all     # 데모 스캔 세션까지 삭제
 """
 
@@ -18,10 +18,12 @@ import sys
 from sqlalchemy import delete, select
 
 from backend.database import async_session
-from backend.models import Employee, TestResult, TestSession, UsageLog, Violation
+from backend.dev_seed import EMPLOYEES, POLICIES
+from backend.models import Employee, PolicyRule, TestResult, TestSession, UsageLog, Violation
 
 
-MOCK_EMPLOYEE_IDS = ["E-1001", "E-1002", "E-1003", "E-1004", "E-1005"]
+MOCK_EMPLOYEE_IDS = [row["employee_id"] for row in EMPLOYEES]
+MOCK_POLICY_NAMES = [row["rule_name"] for row in POLICIES]
 DEMO_SESSION_NAME = "데모 스캔 세션"
 
 
@@ -36,15 +38,30 @@ async def _delete_mock_monitoring(also_demo_scan: bool) -> None:
         ]
 
         if emp_ids:
-            v_count = await s.scalar(
-                select(Violation.id).where(Violation.employee_id.in_(emp_ids))
-            )
+            violation_count = len((
+                await s.scalars(select(Violation.id).where(Violation.employee_id.in_(emp_ids)))
+            ).all())
+            usage_count = len((
+                await s.scalars(select(UsageLog.id).where(UsageLog.employee_id.in_(emp_ids)))
+            ).all())
             await s.execute(delete(Violation).where(Violation.employee_id.in_(emp_ids)))
             await s.execute(delete(UsageLog).where(UsageLog.employee_id.in_(emp_ids)))
             await s.execute(delete(Employee).where(Employee.id.in_(emp_ids)))
-            print(f"[clear] mock 직원 {len(emp_ids)}명 + 연관 violations/usage_logs 삭제")
+            print(
+                f"[clear] mock 직원 {len(emp_ids)}명 + "
+                f"연관 violations {violation_count}건 / usage_logs {usage_count}건 삭제"
+            )
         else:
             print("[clear] mock 직원 row 없음 — 스킵")
+
+        policy_ids = (
+            await s.scalars(select(PolicyRule.id).where(PolicyRule.rule_name.in_(MOCK_POLICY_NAMES)))
+        ).all()
+        if policy_ids:
+            await s.execute(delete(PolicyRule).where(PolicyRule.id.in_(policy_ids)))
+            print(f"[clear] mock 정책 {len(policy_ids)}건 삭제")
+        else:
+            print("[clear] mock 정책 row 없음 — 스킵")
 
         if also_demo_scan:
             sess = await s.scalar(

@@ -31,13 +31,19 @@ class AppSettings:
     TARGET_CONTRACT_TIMEOUT: int = int(os.getenv("TARGET_CONTRACT_TIMEOUT", 30))
 
     # PostgreSQL
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://agentshield:agentshield@localhost:5432/agentshield",
+    # AGENTSHIELD_DATABASE_URL is the canonical application DB for both
+    # feature A scan results and feature B monitoring audit records. DATABASE_URL
+    # remains as a backward-compatible fallback for existing deployments.
+    AGENTSHIELD_DATABASE_URL: str = os.getenv("AGENTSHIELD_DATABASE_URL", "").strip()
+    DATABASE_URL: str = (
+        AGENTSHIELD_DATABASE_URL
+        or os.getenv("DATABASE_URL", "").strip()
+        or "postgresql+asyncpg://agentshield:agentshield@localhost:5432/agentshield"
     )
 
-    # JWT
-    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "change-me-in-production")
+    # JWT — 운영에서는 ENV(JWT_SECRET_KEY)가 반드시 설정되어야 한다.
+    # 빈 값/기본 시드/너무 짧은 값(32자 미만)을 받으면 부팅을 거부한다.
+    JWT_SECRET_KEY: str = os.getenv("JWT_SECRET_KEY", "")
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 60 * 24
 
@@ -87,6 +93,9 @@ class AppSettings:
     MONITORING_PROXY_URL: str = os.getenv(
         "MONITORING_PROXY_URL", "http://localhost:8002"
     )
+    MONITORING_ALLOW_CLIENT_TARGET_URLS: bool = (
+        os.getenv("MONITORING_ALLOW_CLIENT_TARGET_URLS", "false").lower() == "true"
+    )
 
     # Target adapter
     TARGET_ADAPTER_OPENAI_MODEL: str = os.getenv(
@@ -130,3 +139,18 @@ class AppSettings:
 
 
 settings = AppSettings()
+
+
+def _validate_security_settings() -> None:
+    """부팅 시 운영 보안 위협 시드를 검출 — 기본 시크릿/짧은 시크릿 거부."""
+    insecure_seeds = {"", "change-me-in-production", "secret", "changeme", "dev", "test"}
+    key = (settings.JWT_SECRET_KEY or "").strip()
+    if key in insecure_seeds or len(key) < 32:
+        raise RuntimeError(
+            "JWT_SECRET_KEY is missing or insecure. "
+            "Set ENV `JWT_SECRET_KEY` to a strong random string (>=32 chars). "
+            "Example: `python -c 'import secrets; print(secrets.token_urlsafe(48))'`"
+        )
+
+
+_validate_security_settings()

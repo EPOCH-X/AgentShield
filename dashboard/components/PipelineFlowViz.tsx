@@ -475,24 +475,7 @@ function LoopArrow({ active }: { active: boolean }) {
             </filter>
           )}
         </defs>
-        <path
-          d="M 92 2 C 92 26, 8 26, 8 2"
-          fill="none"
-          stroke={active ? "#ef4444" : "rgba(255,255,255,0.1)"}
-          strokeWidth={active ? "2" : "1"}
-          strokeDasharray={active ? "5 3" : "3 5"}
-          markerEnd="url(#loopArrowHead)"
-          filter={active ? "url(#loopGlow)" : undefined}
-          style={{
-            transition: "stroke 0.4s, stroke-width 0.4s",
-            animation: active ? "glowBreath 1.4s ease-in-out infinite" : "none",
-          }}
-        />
-        {active && (
-          <text x="50" y="25" textAnchor="middle" fontSize="6" fill="rgba(239,68,68,0.7)" fontWeight="bold">
-            취약 재공격 루프
-          </text>
-        )}
+        
       </svg>
     </div>
   );

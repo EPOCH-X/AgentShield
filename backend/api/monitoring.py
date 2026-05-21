@@ -3,24 +3,29 @@
 """
 
 from datetime import date
+import logging
 import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select, func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.config import settings
 from backend.database import get_db
 from backend.api.auth import get_current_user, UserInfo
 from backend.models import Employee, Violation, PolicyRule, UsageLog
 from monitoring_proxy.monitor_server import (
     MonitorChatRequest as ProxyMonitorChatRequest,
     MonitorChatResponse as ProxyMonitorChatResponse,
-    process_monitor_request,
+    process_monitor_request_with_dependencies,
 )
+from monitoring_proxy.schemas import UsageLogEntry, ViolationRecordInput
 from monitoring_proxy.services import get_default_intent_review_llm_client
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -28,6 +33,103 @@ DEFAULT_MONITORING_TARGET_URL = os.getenv(
     "MONITORING_TARGET_URL",
     os.getenv("TESTBED_CHAT_URL", "http://127.0.0.1:8010/chat"),
 )
+
+
+class MonitoringAuditBuffer:
+    """Collect audit records emitted by the pure monitoring proxy pipeline."""
+
+    def __init__(self) -> None:
+        self.usage_logs: list[UsageLogEntry] = []
+        self.violations: list[ViolationRecordInput] = []
+
+    def save_usage_log(self, entry: UsageLogEntry) -> UsageLogEntry:
+        local_id = entry.id if entry.id is not None else -(len(self.usage_logs) + 1)
+        captured = entry.model_copy(update={"id": local_id})
+        self.usage_logs.append(captured)
+        return captured
+
+    def create_violation_record(self, record: ViolationRecordInput) -> ViolationRecordInput:
+        self.violations.append(record)
+        return record
+
+
+def _normalize_employee_id(employee_id: str) -> str:
+    value = (employee_id or "").strip()
+    if not value or len(value) > 50 or any(ord(ch) < 32 for ch in value):
+        raise ValueError("invalid employee_id")
+    return value
+
+
+async def _resolve_employee_uuid(db: AsyncSession, employee_id: str):
+    normalized = _normalize_employee_id(employee_id)
+    emp = await db.scalar(select(Employee).where(Employee.employee_id == normalized))
+    if emp:
+        return emp.id
+
+    emp = Employee(
+        employee_id=normalized,
+        name=normalized,
+        department="unknown",
+        role="user",
+        status="active",
+    )
+    db.add(emp)
+    await db.flush()
+    return emp.id
+
+
+async def _persist_monitoring_audit_records(
+    db: AsyncSession,
+    audit: MonitoringAuditBuffer,
+) -> None:
+    """Persist monitoring audit records through the same DB session as reads."""
+    if not audit.usage_logs and not audit.violations:
+        return
+
+    local_log_ids: dict[int, int] = {}
+    last_log_id: int | None = None
+
+    for entry in audit.usage_logs:
+        emp_uuid = await _resolve_employee_uuid(db, entry.employee_id)
+        log = UsageLog(
+            employee_id=emp_uuid,
+            request_content=entry.request_content,
+            response_content=entry.response_content,
+            target_service=entry.target_service,
+            policy_violation=entry.policy_violation,
+            severity=entry.severity,
+            action_taken=entry.action_taken,
+        )
+        db.add(log)
+        await db.flush()
+        if entry.id is not None:
+            local_log_ids[entry.id] = log.id
+        last_log_id = log.id
+
+    for record in audit.violations:
+        emp_uuid = (
+            await _resolve_employee_uuid(db, record.employee_id)
+            if record.employee_id
+            else None
+        )
+        evidence_log_id = record.evidence_log_id
+        if evidence_log_id is not None and evidence_log_id in local_log_ids:
+            evidence_log_id = local_log_ids[evidence_log_id]
+        elif evidence_log_id is None:
+            evidence_log_id = last_log_id
+
+        violation = Violation(
+            employee_id=emp_uuid,
+            violation_type=record.violation_type,
+            severity=record.severity or "medium",
+            description=record.description,
+            evidence_log_id=evidence_log_id,
+            sanction=record.sanction,
+            resolved=record.resolved,
+        )
+        db.add(violation)
+
+    await db.commit()
 
 
 # ── 대시보드 ──────────────────────────────────────────────────────────────────
@@ -241,24 +343,42 @@ async def create_policy(
 @router.post("/chat", response_model=ProxyMonitorChatResponse)
 async def monitored_chat(
     body: ProxyMonitorChatRequest,
+    db: AsyncSession = Depends(get_db),
     user: UserInfo = Depends(get_current_user),
 ):
     """
     Dashboard 1:1 chatbot traffic through the monitoring proxy.
 
-    The proxy checks input policy, forwards allowed traffic to the target LLM,
-    masks the output, and writes usage/violation records for the monitoring page.
+    The proxy checks input policy, forwards allowed traffic to the configured
+    target LLM, masks the output, and emits usage/violation records. The API
+    route owns persistence so dashboard reads and writes always use the same
+    AgentShield application database.
     """
 
-    updates = {}
-    if not body.target_url:
+    updates = {"employee_id": user.username}
+    if settings.MONITORING_ALLOW_CLIENT_TARGET_URLS:
+        if not body.target_url:
+            updates["target_url"] = DEFAULT_MONITORING_TARGET_URL
+    else:
         updates["target_url"] = DEFAULT_MONITORING_TARGET_URL
-    if not body.employee_id:
-        updates["employee_id"] = user.username
-    if updates:
-        body = body.model_copy(update=updates)
+        updates["target_api_key"] = None
+        updates["target_provider"] = None
+        updates["target_model"] = None
+    body = body.model_copy(update=updates)
 
-    return process_monitor_request(
+    audit = MonitoringAuditBuffer()
+    response = process_monitor_request_with_dependencies(
         body,
         llm_client_factory=get_default_intent_review_llm_client,
+        save_usage_log_fn=audit.save_usage_log,
+        create_violation_record_fn=audit.create_violation_record,
     )
+
+    try:
+        await _persist_monitoring_audit_records(db, audit)
+    except (SQLAlchemyError, ValueError):
+        await db.rollback()
+        logger.exception("[monitoring] audit persistence failed")
+        raise HTTPException(status_code=500, detail="모니터링 감사 로그 저장에 실패했습니다.")
+
+    return response
