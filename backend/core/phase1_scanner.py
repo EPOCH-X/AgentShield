@@ -2,6 +2,7 @@
 """Phase 1 scanner: load attack patterns, call target, judge responses."""
 
 import asyncio
+import inspect
 import logging
 import uuid
 from typing import Any, Dict, List, Optional
@@ -332,7 +333,9 @@ async def _execute_attack_pattern(
             reason=error_reason or "unknown",
         )
         if on_result:
-            on_result(entry)
+            maybe_coro = on_result(entry)
+            if inspect.isawaitable(maybe_coro):
+                await maybe_coro
         return entry
 
     logger.debug(f"[Phase1] Target OK: category={category}, resp_len={len(target_response)}")
@@ -391,7 +394,9 @@ async def _execute_attack_pattern(
         logger.warning(f"[Phase1] DB save failed: {e}")
 
     if on_result:
-        on_result(entry)
+        maybe_coro = on_result(entry)
+        if inspect.isawaitable(maybe_coro):
+            await maybe_coro
 
     return entry
 

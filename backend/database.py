@@ -4,6 +4,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
 
 from backend.config import settings
 
@@ -28,3 +29,15 @@ async def init_db():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_total INTEGER DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_false_refusals INTEGER DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_rate NUMERIC(5, 4) DEFAULT 0"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS mitre_technique_id VARCHAR(20)"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS p_vulnerable DOUBLE PRECISION"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS p_safe DOUBLE PRECISION"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS probability_judgment VARCHAR(20)"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS consensus_judgment VARCHAR(20)"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS judgment_alignment VARCHAR(20)"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS reason_sources JSONB"))
+        await conn.execute(text("ALTER TABLE test_results ADD COLUMN IF NOT EXISTS matched_patterns JSONB"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_results_mitre ON test_results(mitre_technique_id)"))
