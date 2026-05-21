@@ -37,12 +37,123 @@ interface LogEntry {
 
 type ScanStatus = Awaited<ReturnType<typeof getScanStatus>>;
 
-// 결과 카드 — 공격→응답→판정→방어 4단계 순차 표시
+const PHASE_ACCENTS: Record<number, { icon: string; cls: string; line: string }> = {
+  1: { icon: "radar", cls: "text-primary border-primary/25 bg-primary/10", line: "from-primary/70" },
+  2: { icon: "neurology", cls: "text-error border-error/25 bg-error/10", line: "from-error/70" },
+  3: { icon: "shield", cls: "text-tertiary border-tertiary/25 bg-tertiary/10", line: "from-tertiary/70" },
+  4: { icon: "fact_check", cls: "text-blue-300 border-blue-300/25 bg-blue-300/10", line: "from-blue-300/70" },
+};
+
+const VERIFY_CONFIG: Record<string, { label: string; cls: string }> = {
+  blocked: { label: "차단됨", cls: "text-tertiary border-tertiary/20 bg-tertiary/5" },
+  safe: { label: "차단됨", cls: "text-tertiary border-tertiary/20 bg-tertiary/5" },
+  mitigated: { label: "완화됨", cls: "text-tertiary border-tertiary/20 bg-tertiary/5" },
+  bypassed: { label: "우회됨", cls: "text-error border-error/20 bg-error/5" },
+  unsafe: { label: "우회됨", cls: "text-error border-error/20 bg-error/5" },
+};
+
+function compactText(value?: string | null) {
+  return String(value || "").trim();
+}
+
+function looksLikeDefensePath(value: string) {
+  return /^data\/phase3_defenses\/.+\.json$/i.test(value.trim());
+}
+
+function phaseTitle(result: ScanResult) {
+  if (result.phase === 1) return "시드 공격 판정";
+  if (result.phase === 2) return `Red Agent R${result.round ?? "?"}`;
+  if (result.phase === 3) return "Blue Agent 방어 생성";
+  if (result.phase === 4) return "Phase 4 방어 검증";
+  return `Phase ${result.phase}`;
+}
+
+function phaseSubtitle(result: ScanResult) {
+  if (result.phase === 1) return "DB 시드 공격 -> 타겟 응답 -> Judge 판정";
+  if (result.phase === 2) return "Safe 시드 기반 적응형 공격 -> 타겟 응답 -> Judge 재판정";
+  if (result.phase === 3) return "취약 결과 기반 방어 응답 생성";
+  if (result.phase === 4) return "Blue 방어 적용 후 우회 여부 재검증";
+  return "파이프라인 결과";
+}
+
+function detailText(result: ScanResult) {
+  const raw = compactText(result.summary || result.detail);
+  if (!raw) return `${result.category || "LLM"} 카테고리 판정 상세가 아직 비어 있습니다.`;
+  if (result.phase === 4 && looksLikeDefensePath(raw)) {
+    const verdict = VERIFY_CONFIG[String(result.verify_result || "").toLowerCase()]?.label || "검증 완료";
+    return `${verdict}. 방어 결과 파일은 메타 정보로 분리 표시됩니다.`;
+  }
+  return raw;
+}
+
+function probabilityText(result: ScanResult) {
+  if (typeof result.p_vulnerable === "number") {
+    return `${Math.round(result.p_vulnerable * 100)}% risk`;
+  }
+  if (typeof result.judgment_confidence === "number") {
+    return `${Math.round(result.judgment_confidence * 100)}% conf`;
+  }
+  return "n/a";
+}
+
+function MetaPill({ label, value }: { label: string; value?: string | number | null }) {
+  if (value === undefined || value === null || value === "") return null;
+  return (
+    <span className="inline-flex min-w-0 items-center gap-1 rounded-lg border border-white/10 bg-white/[0.04] px-2.5 py-1 font-mono text-[10px] text-on-surface-variant">
+      <span className="shrink-0 text-on-surface-variant/45">{label}</span>
+      <span className="truncate text-on-surface/75">{value}</span>
+    </span>
+  );
+}
+
+function TextPanel({
+  icon,
+  label,
+  value,
+  tone = "default",
+  mono = false,
+}: {
+  icon: string;
+  label: string;
+  value: string;
+  tone?: "default" | "primary" | "error" | "tertiary";
+  mono?: boolean;
+}) {
+  const tones = {
+    default: "bg-white/5 border-white/10 text-on-surface-variant",
+    primary: "bg-primary/10 border-primary/20 text-primary",
+    error: "bg-error/10 border-error/20 text-error",
+    tertiary: "bg-tertiary/10 border-tertiary/20 text-tertiary",
+  };
+  return (
+    <div className="flex gap-3" style={{ animation: "slideInLeft 0.35s ease-out" }}>
+      <div className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border ${tones[tone]}`}>
+        <span className="material-symbols-outlined text-[15px]" style={{ fontVariationSettings: "'FILL' 1" }}>{icon}</span>
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="mb-1 text-[10px] font-black uppercase tracking-[0.18em] text-on-surface-variant/55">{label}</p>
+        <div className="max-h-36 overflow-y-auto overflow-x-auto rounded-xl border border-white/5 bg-black/15 px-3 py-2">
+          <p className={`${mono ? "font-mono" : ""} whitespace-pre-wrap break-words text-xs leading-5 text-on-surface/80`}>
+            {value || "—"}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 결과 카드 — 시드/라운드/판정/방어 검증 흐름을 한눈에 표시
 function ResultCard({ result, index }: { result: ScanResult; index: number }) {
   const [step, setStep] = useState(0); // 0=공격 1=응답 2=판정 3=방어
   const sev = SEVERITY_CONFIG[result.severity] ?? SEVERITY_CONFIG.medium;
   const jud = JUDGMENT_CONFIG[result.judgment] ?? JUDGMENT_CONFIG.ambiguous;
   const isVulnerable = result.judgment === "vulnerable";
+  const phase = PHASE_ACCENTS[result.phase] ?? PHASE_ACCENTS[1];
+  const verify = VERIFY_CONFIG[String(result.verify_result || "").toLowerCase()];
+  const sourcePath = compactText(result.detail);
+  const showSourcePath = result.phase === 4 && looksLikeDefensePath(sourcePath);
+  const attackLabel = result.phase === 2 ? "Red Agent 공격 프롬프트" : result.phase === 4 ? "검증 공격 프롬프트" : "시드 공격 프롬프트";
+  const responseLabel = result.phase === 4 ? "방어 적용 후 응답" : "테스트베드 챗봇 응답";
 
   useEffect(() => {
     // 카드 등장 후 각 스텝을 0.7초 간격으로 순차 공개
@@ -56,93 +167,76 @@ function ResultCard({ result, index }: { result: ScanResult; index: number }) {
 
   return (
     <div
-      className="glass-panel rounded-2xl overflow-hidden border border-white/5 shadow-lg flex-shrink-0"
+      className={`glass-panel group relative flex-shrink-0 overflow-hidden rounded-2xl border shadow-lg transition-all duration-300 hover:-translate-y-0.5 hover:border-white/15 ${
+        isVulnerable ? "border-error/15 shadow-error/10" : "border-white/5"
+      }`}
       style={{ animation: "slideInUp 0.4s ease-out both" }}
     >
-      {/* 카드 헤더 */}
-      <div className={`px-5 py-3 flex items-center justify-between border-b border-white/5 ${isVulnerable ? "bg-error/5" : "bg-tertiary/5"}`}>
-        <div className="flex items-center gap-3">
-          <span className="text-[10px] font-mono text-on-surface-variant/40">#{String(index + 1).padStart(3, "0")}</span>
-          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full border ${sev.cls}`}>{sev.label}</span>
-          <span className="text-[10px] font-mono text-primary/60 bg-primary/5 px-2 py-0.5 rounded">{result.category}</span>
-          <span className="text-[10px] text-on-surface-variant/40">Phase {result.phase}</span>
-        </div>
-        {step >= 2 && (
-          <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-[10px] font-black ${jud.cls}`}
-               style={{ animation: "fadeIn 0.3s ease-out" }}>
-            <span className="material-symbols-outlined text-[12px]" style={{ fontVariationSettings: "'FILL' 1" }}>{jud.icon}</span>
-            {jud.label}
+      <div className={`absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r ${phase.line} via-white/20 to-transparent`} />
+
+      <div className={`border-b border-white/5 px-5 py-4 ${isVulnerable ? "bg-error/5" : "bg-white/[0.025]"}`}>
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[10px] text-on-surface-variant/45">#{String(index + 1).padStart(3, "0")}</span>
+              <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-black ${phase.cls}`}>
+                <span className="material-symbols-outlined text-[13px]" style={{ fontVariationSettings: "'FILL' 1" }}>{phase.icon}</span>
+                {phaseTitle(result)}
+              </span>
+              <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black ${sev.cls}`}>{sev.label}</span>
+              <span className="rounded-lg bg-primary/5 px-2.5 py-1 font-mono text-[10px] text-primary/70">{result.category || "LLM"}</span>
+            </div>
+            <p className="font-headline text-base font-black text-on-surface">{phaseSubtitle(result)}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <MetaPill label="seed" value={result.seed_id || (result.phase === 4 ? result.seed_id : undefined)} />
+              <MetaPill label="pattern" value={result.attack_pattern_id} />
+              <MetaPill label="round" value={result.round ? `R${result.round}` : undefined} />
+              <MetaPill label="sub" value={result.subcategory} />
+              <MetaPill label="judge" value={probabilityText(result)} />
+              {result.mitre_technique_id && <MetaPill label="mitre" value={result.mitre_technique_id} />}
+            </div>
           </div>
-        )}
+          {step >= 2 && (
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <div className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black ${jud.cls}`}
+                   style={{ animation: "fadeIn 0.3s ease-out" }}>
+                <span className="material-symbols-outlined text-[14px]" style={{ fontVariationSettings: "'FILL' 1" }}>{jud.icon}</span>
+                {jud.label}
+              </div>
+              {verify && (
+                <span className={`rounded-full border px-3 py-1.5 text-[10px] font-black ${verify.cls}`}>
+                  {verify.label}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
-      <div className="p-5 space-y-3">
-        {/* Step 1: 판정 이유 */}
-        <div className="flex gap-3">
-          <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-error/10 border border-error/20 flex items-center justify-center mt-0.5">
-            <span className="material-symbols-outlined text-[12px] text-error/70" style={{ fontVariationSettings: "'FILL' 1" }}>psychology</span>
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-[9px] font-black text-error/60 uppercase tracking-widest mb-1">판정 에이전트 · 위험 판단 이유</p>
-            <p className="text-xs text-on-surface/80 leading-relaxed line-clamp-2" style={{ whiteSpace: "pre-line" }}>
-              {(result.summary || `${result.category} 카테고리 취약점이 탐지되었습니다.`).replace(/\. /g, ".\n")}
-            </p>
-          </div>
-        </div>
+      <div className="space-y-3 p-5">
+        <TextPanel icon="input" label={attackLabel} value={compactText(result.attack_prompt)} tone={result.phase === 2 ? "error" : "primary"} />
 
-        {/* Step 2: 챗봇 응답 */}
         {step >= 1 && (
-          <div className="flex gap-3" style={{ animation: "slideInLeft 0.35s ease-out" }}>
-            <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center mt-0.5">
-              <span className="text-[10px]">💬</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[9px] font-black text-primary/60 uppercase tracking-widest mb-1">챗봇 응답</p>
-              <p className="text-xs font-mono text-on-surface-variant/70 leading-relaxed line-clamp-2">
-                {result.target_response || "— 응답 없음 —"}
-              </p>
-            </div>
-          </div>
+          <TextPanel icon="forum" label={responseLabel} value={compactText(result.target_response)} tone="primary" mono />
         )}
 
-        {/* Step 3: Judge 판정 */}
         {step >= 2 && (
-          <div className="flex gap-3" style={{ animation: "slideInLeft 0.35s ease-out" }}>
-            <div className={`flex-shrink-0 w-6 h-6 rounded-lg flex items-center justify-center mt-0.5 ${isVulnerable ? "bg-error/10 border border-error/20" : "bg-tertiary/10 border border-tertiary/20"}`}>
-              <span className="text-[10px]">⚖</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[9px] font-black text-on-surface-variant/50 uppercase tracking-widest mb-1">Judge 판정</p>
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-black ${isVulnerable ? "text-error" : "text-tertiary"}`}>{jud.label}</span>
-                {result.verify_result && (
-                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-bold border ${result.verify_result === "blocked" ? "text-tertiary border-tertiary/20 bg-tertiary/5" : "text-error border-error/20 bg-error/5"}`}>
-                    {result.verify_result === "blocked" ? "차단됨" : "우회됨"}
-                  </span>
-                )}
-              </div>
-            </div>
-          </div>
+          <TextPanel icon="psychology" label="Judge 판정 근거" value={detailText(result).replace(/\. /g, ".\n")} tone={isVulnerable ? "error" : "tertiary"} />
         )}
 
-        {/* Step 4: 방어 코드 (취약 + defense_code 있을 때만) */}
         {step >= 3 && result.defense_code && (
-          <div className="flex gap-3" style={{ animation: "slideInLeft 0.35s ease-out" }}>
-            <div className="flex-shrink-0 w-6 h-6 rounded-lg bg-blue-500/10 border border-blue-400/20 flex items-center justify-center mt-0.5">
-              <span className="text-[10px]">🛡</span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-[9px] font-black text-blue-400/60 uppercase tracking-widest mb-1">방어 생성</p>
-              <pre className="text-[10px] font-mono text-tertiary/80 bg-black/20 border border-tertiary/10 rounded-lg px-3 py-2 overflow-x-auto leading-relaxed max-h-24 whitespace-pre-wrap">
-                {result.defense_code}
-              </pre>
-            </div>
-          </div>
+          <TextPanel icon="shield" label="Blue Agent 방어 생성" value={compactText(result.defense_rationale || result.defense_code)} tone="tertiary" mono />
         )}
 
-        {/* step 3 완료됐는데 방어코드 없을 때 */}
-        {step >= 3 && !result.defense_code && (
-          <div className="text-[9px] text-on-surface-variant/30 text-right font-mono">방어 코드 없음</div>
+        {step >= 3 && result.defended_response && (
+          <TextPanel icon="verified" label="방어 응답" value={compactText(result.defended_response)} tone="tertiary" mono />
+        )}
+
+        {step >= 3 && showSourcePath && (
+          <div className="flex items-center justify-end gap-2 text-right font-mono text-[10px] text-on-surface-variant/35">
+            <span className="material-symbols-outlined text-[13px]">folder_open</span>
+            <span className="max-w-full truncate">{sourcePath}</span>
+          </div>
         )}
       </div>
     </div>
@@ -279,11 +373,9 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
         } catch {
           r = [];
         }
-        const fresh = r.filter((x) => !seenIds.current.has(x.id));
-        fresh.forEach((x) => seenIds.current.add(x.id));
-        if (fresh.length > 0) {
-          setDisplayedResults(fresh.slice().reverse());
-        }
+        pendingQueue.current = [];
+        seenIds.current = new Set(r.map((x) => x.id));
+        setDisplayedResults(r.slice().reverse());
         stopLiveIntervals();
       } else if (s.status === "failed") {
         addLog("ERROR", s.error_message || "스캔 중 오류가 발생했습니다.");
@@ -531,19 +623,33 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
           {/* 오른쪽: 실시간 결과 피드 */}
           <div className="lg:col-span-8 flex flex-col gap-4">
             {/* 피드 헤더 */}
-            <div className="flex items-center justify-between px-1">
-              <div className="flex items-center gap-3">
-                <span className="text-[10px] font-black uppercase tracking-[0.25em] text-on-surface-variant/60">
-                  실시간 결과 피드
-                </span>
+            <div className="glass-panel flex items-center justify-between gap-4 rounded-2xl border border-white/10 px-5 py-4 shadow-lg">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="material-symbols-outlined text-primary" style={{ fontVariationSettings: "'FILL' 1" }}>dynamic_feed</span>
+                  <span className="font-headline text-sm font-black uppercase tracking-[0.18em] text-on-surface">
+                    실시간 결과 피드
+                  </span>
+                  {isRunning && (
+                    <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-black text-primary">
+                      LIVE
+                    </span>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-on-surface-variant/55">
+                  시드 공격, Red Agent 라운드, Judge 판정, Blue 방어 검증을 최신순으로 추적합니다.
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-3">
                 {isRunning && pendingQueue.current.length > 0 && (
-                  <span className="text-[9px] font-bold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full animate-pulse">
+                  <span className="animate-pulse rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[10px] font-bold text-primary">
                     +{pendingQueue.current.length} 대기 중
                   </span>
                 )}
-              </div>
-              <div className="flex items-center gap-2 text-[9px] text-on-surface-variant/40 font-mono">
-                {displayedResults.length > 0 && `${displayedResults.length}건 표시됨`}
+                <div className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-right font-mono">
+                  <p className="text-[10px] text-on-surface-variant/45">VISIBLE</p>
+                  <p className="text-sm font-black text-on-surface">{displayedResults.length}</p>
+                </div>
               </div>
             </div>
 

@@ -11,6 +11,14 @@ function e(key: string, fallback = "") {
   return String(process.env[key] || fallback);
 }
 
+function redValidationMode() {
+  const mode = e(
+    "DEMO_RED_VALIDATION_MODE",
+    e("RED_SFT_VALIDATION_MODE", "off"),
+  ).trim().toLowerCase();
+  return ["strict", "penalty", "off"].includes(mode) ? mode : "off";
+}
+
 function normalizeCategory(value: unknown) {
   const category = String(value || "").trim().toUpperCase();
   return ["LLM01", "LLM02", "LLM06", "LLM07"].includes(category) ? category : "LLM02";
@@ -73,6 +81,9 @@ function toRound(record: Record<string, unknown>) {
     attack_len: attack.length,
     response_len: response.length,
     generation_attempts: attempts,
+    validation_mode: record.validation_mode,
+    validation_passed: record.validation_passed,
+    validation_penalty_reason: record.validation_penalty_reason,
     generation_failed: judge.judgment === "generation_failed",
   };
 }
@@ -83,7 +94,7 @@ function runRedAdaptive(prompt: string, category: string): Promise<{ status: num
   // 단일 소스: RED_CAMPAIGN_ROUNDS가 명시되어 있으면 그것, 없으면 PHASE2_MAX_ROUNDS(backend의 설정값) fallback
   const rounds = e("RED_CAMPAIGN_ROUNDS", e("PHASE2_MAX_ROUNDS", "5"));
   const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
-  const validationMode = e("DEMO_RED_VALIDATION_MODE", "penalty");
+  const validationMode = redValidationMode();
   const continueAfterSuccess = e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "true").toLowerCase() === "true";
   const stopOnVulnerable = e("DEMO_RED_STOP_ON_VULNERABLE", "false").toLowerCase() === "true";
 
@@ -99,6 +110,7 @@ function runRedAdaptive(prompt: string, category: string): Promise<{ status: num
         "--seed", "57",
         "--category", category,
         "--subcategory", defaultSubcategory(category),
+        "--validation-mode", validationMode,
         "--initial-prompt-stdin",
         ...(continueAfterSuccess ? ["--continue-after-success"] : []),
         ...(stopOnVulnerable ? ["--stop-on-vulnerable"] : []),
@@ -112,6 +124,8 @@ function runRedAdaptive(prompt: string, category: string): Promise<{ status: num
           RED_CAMPAIGN_STOP_ON_VULNERABLE: stopOnVulnerable ? "true" : "false",
           RED_CAMPAIGN_GENERATION_ATTEMPTS: generationAttempts,
           RED_CAMPAIGN_VALIDATION_MODE: validationMode,
+          RED_SFT_VALIDATION_MODE: validationMode,
+          DEMO_RED_VALIDATION_MODE: validationMode,
           DEMO_RED_API_KEY_PROMPT: "true",
         },
       }
@@ -140,7 +154,7 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
   // 단일 소스: RED_CAMPAIGN_ROUNDS가 명시되어 있으면 그것, 없으면 PHASE2_MAX_ROUNDS(backend의 설정값) fallback
   const rounds = e("RED_CAMPAIGN_ROUNDS", e("PHASE2_MAX_ROUNDS", "5"));
   const generationAttempts = e("DEMO_RED_GENERATION_ATTEMPTS", e("RED_CAMPAIGN_GENERATION_ATTEMPTS", "8"));
-  const validationMode = e("DEMO_RED_VALIDATION_MODE", "penalty");
+  const validationMode = redValidationMode();
   const continueAfterSuccess = e("DEMO_RED_CONTINUE_AFTER_SUCCESS", "true").toLowerCase() === "true";
   const stopOnVulnerable = e("DEMO_RED_STOP_ON_VULNERABLE", "false").toLowerCase() === "true";
   const campaignId = `demo-red-${Date.now().toString(36)}`;
@@ -166,7 +180,11 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
-      send(controller, { type: "status", detail: "Red Agent 라운드 실행 시작", campaign_id: campaignId });
+      send(controller, {
+        type: "status",
+        detail: `Red Agent R1 공격 생성 중 (SFT validation ${validationMode})`,
+        campaign_id: campaignId,
+      });
       const child = spawn(
         python,
         [
@@ -197,6 +215,8 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
             RED_CAMPAIGN_STOP_ON_VULNERABLE: stopOnVulnerable ? "true" : "false",
             RED_CAMPAIGN_GENERATION_ATTEMPTS: generationAttempts,
             RED_CAMPAIGN_VALIDATION_MODE: validationMode,
+            RED_SFT_VALIDATION_MODE: validationMode,
+            DEMO_RED_VALIDATION_MODE: validationMode,
             DEMO_RED_API_KEY_PROMPT: "true",
           },
         },

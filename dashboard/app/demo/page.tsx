@@ -68,6 +68,9 @@ type AdaptiveRound = {
   attack_len?: number;
   response_len?: number;
   generation_attempts?: number;
+  validation_mode?: string;
+  validation_passed?: boolean;
+  validation_penalty_reason?: string;
   generation_failed?: boolean;
 };
 
@@ -1068,7 +1071,7 @@ export default function DemoPage() {
   }
 
   async function runAdaptiveCampaign(prompt: string, targetResponse = "", category = activeCategory) {
-    setAdaptiveState({ status: "loading", rounds: [] });
+    setAdaptiveState({ status: "loading", rounds: [], detail: "Red Agent R1 공격 생성 중" });
     seenAdaptiveRoundKeysRef.current.clear();
 
     try {
@@ -1108,6 +1111,7 @@ export default function DemoPage() {
           if (event.type === "status" && event.detail) {
             const detail = String(event.detail);
             const stopped = /vulnerable|취약|중지|완료/.test(detail);
+            setAdaptiveState((prev) => ({ ...prev, detail }));
             setAttackState({ status: stopped ? "live" : "loading", detail });
           }
           if (event.type === "round" && event.round) {
@@ -1138,11 +1142,18 @@ export default function DemoPage() {
               });
             }
             lastRound = round;
+            // Judge 가 약한 신호(strength=1~2)에도 'vulnerable' 라벨을 붙이는 케이스가 있어,
+            // success/best_round 판정은 (1) backend 가 명시적으로 success=true 로 표기했거나
+            // (2) judgment === 'vulnerable' && success_strength >= 3 인 경우에만 인정한다.
+            const isStrongSuccess = (
+              round.success === true ||
+              (round.judgment === "vulnerable" && (round.success_strength ?? 0) >= 3)
+            );
             setAdaptiveState((prev) => ({
               ...prev,
               rounds: [...prev.rounds, round],
-              success: prev.success || round.judgment === "vulnerable" || Boolean(round.success),
-              best_round: round.judgment === "vulnerable" ? round.round ?? prev.best_round : prev.best_round,
+              success: prev.success || isStrongSuccess,
+              best_round: isStrongSuccess ? round.round ?? prev.best_round : prev.best_round,
             }));
             const streamedJudge = judgeFromAdaptiveRound(round, category);
             if (streamedJudge && !round.generation_failed) {
@@ -1158,8 +1169,14 @@ export default function DemoPage() {
                     ? `R${round.round ?? ""} 타겟 호출 실패: ${round.detail || "오류"}`
                     : round.judgment === "vulnerable"
                   ? `R${round.round ?? ""} 취약 판정. 후속 분석 진행`
-                  : `R${round.round ?? ""} 판정 완료. 다음 라운드 준비 중`,
+                  : `R${round.round ?? ""} 안전 판정. Red Agent R${(round.round ?? 0) + 1} 공격 생성 중`,
             });
+            if (!round.generation_failed && round.judgment !== "error" && round.judgment !== "vulnerable") {
+              setAdaptiveState((prev) => ({
+                ...prev,
+                detail: `R${round.round ?? ""} 안전 판정. Red Agent R${(round.round ?? 0) + 1} 공격 생성 중`,
+              }));
+            }
             if (!streamedJudge && round.judgment === "vulnerable" && round.attack_prompt && round.target_response) {
               void runJudge(String(round.attack_prompt), String(round.target_response), setAttackJudge, resolveDemoCategory(round.category, category));
             }
@@ -1394,8 +1411,18 @@ export default function DemoPage() {
                   attackMessages.map((message, idx) => <ChatBubble key={`${message.role}-${idx}`} message={message} />)
                 )}
                 {attackState.status === "loading" && (
-                  <div className="mr-auto rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-on-surface-variant">
-                    응답 생성 중...
+                  <div className="mr-auto max-w-[82%] rounded-2xl border border-primary/20 bg-primary/10 p-4 text-sm text-on-surface">
+                    <div className="flex items-center gap-2">
+                      <span className="agent-pulse h-2 w-2 shrink-0 rounded-full bg-primary" />
+                      <span className="font-black text-primary">{attackState.detail || "테스트베드 응답 생성 중"}</span>
+                    </div>
+                    {adaptiveState.status === "loading" && (
+                      <div className="mt-3 grid gap-2 rounded-xl border border-white/10 bg-black/15 p-3 font-mono text-[11px] text-on-surface-variant sm:grid-cols-3">
+                        <span>rounds={adaptiveState.rounds.length}</span>
+                        <span>validation={adaptiveState.rounds.at(-1)?.validation_mode || "off"}</span>
+                        <span>agent=red</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 {attackState.status === "error" && attackState.detail && (
@@ -1503,7 +1530,18 @@ export default function DemoPage() {
                       <p className="rounded-lg bg-black/20 px-2 py-1 font-mono text-[11px] text-on-surface-variant">
                         attack_len={round.attack_len ?? 0}
                       </p>
+                      <p className="rounded-lg bg-black/20 px-2 py-1 font-mono text-[11px] text-on-surface-variant">
+                        attempts={round.generation_attempts ?? "-"}
+                      </p>
+                      <p className="rounded-lg bg-black/20 px-2 py-1 font-mono text-[11px] text-on-surface-variant">
+                        validation={round.validation_mode || "off"}
+                      </p>
                     </div>
+                    {round.detail && (
+                      <p className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded-lg border border-white/10 bg-black/20 px-2 py-1 text-[11px] leading-5 text-on-surface-variant">
+                        {round.detail}
+                      </p>
+                    )}
                     {round.exploit_type && (
                       <p className="mt-2 break-words rounded-lg bg-black/20 px-2 py-1 font-mono text-[11px] text-primary">
                         {round.exploit_type}

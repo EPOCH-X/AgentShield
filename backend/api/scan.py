@@ -201,10 +201,13 @@ def _result_dict(r: TestResult, session_id: str) -> dict:
         "id":            r.id,
         "session_id":    session_id,
         "phase":         r.phase,
+        "attack_pattern_id": r.attack_pattern_id,
+        "seed_id":       r.seed_id,
         "round":         r.round,
         "attack_prompt": r.attack_prompt,
         "target_response": r.target_response,
         "judgment":      r.judgment,
+        "judgment_confidence": r.judgment_confidence,
         "manual_review_needed": r.manual_review_needed,
         "severity":      r.severity,
         "category":      r.category,
@@ -367,18 +370,37 @@ async def _persist_phase4_summary(
 ) -> None:
     rows: list[TestResult] = []
     for item in phase4_result.get("details", []):
+        verdict = str(item.get("verdict") or "")
+        defense_id = str(item.get("defense_id") or "")
+        source_file = str(item.get("source_file") or "")
+        judge_detail = str(item.get("judge_detail") or "").strip()
+        phase4_sources = item.get("reason_sources") if isinstance(item.get("reason_sources"), dict) else {}
+        if not judge_detail:
+            judge_detail = (
+                f"Phase4 방어 검증 결과: {'방어 성공' if verdict == 'safe' else '방어 우회 가능'}"
+                + (f" (defense_id={defense_id})" if defense_id else "")
+            )
         rows.append(
             TestResult(
                 session_id=session_id,
                 phase=4,
-                seed_id=str(item.get("defense_id") or ""),
-                attack_prompt=str(item.get("attack_prompt") or item.get("defense_id") or "phase4-check"),
+                seed_id=defense_id,
+                attack_prompt=str(item.get("attack_prompt") or defense_id or "phase4-check"),
                 target_response=str(item.get("response_after_defense") or ""),
-                judgment="safe" if item.get("verdict") == "safe" else "vulnerable",
+                judgment="safe" if verdict == "safe" else "vulnerable",
+                judgment_confidence=item.get("judgment_confidence"),
                 severity="medium",
                 category=item.get("category"),
-                detail=str(item.get("source_file") or ""),
-                verify_result=item.get("verdict"),
+                detail=judge_detail,
+                verify_result="blocked" if verdict == "safe" else "bypassed",
+                mitre_technique_id=item.get("mitre_technique_id"),
+                p_vulnerable=item.get("p_vulnerable"),
+                p_safe=item.get("p_safe"),
+                probability_judgment=item.get("probability_judgment"),
+                consensus_judgment=item.get("consensus_judgment"),
+                judgment_alignment=item.get("judgment_alignment"),
+                reason_sources={**phase4_sources, "phase4_source_file": source_file} if source_file else phase4_sources,
+                matched_patterns=item.get("matched_patterns"),
             )
         )
     db.add_all(rows)

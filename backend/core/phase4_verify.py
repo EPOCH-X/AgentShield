@@ -220,10 +220,12 @@ async def _run_phase4(
                     "source_file": str(payload.get("_source_file", "")),
                     "response_after_defense": defended_response,
                     "attack_prompt": attack_prompt,
+                    "judge_detail": "방어 응답이 비어 있어 우회 가능으로 처리되었습니다.",
                 }
             )
             continue
 
+        judge_result: dict[str, Any] = {}
         try:
             judge_result = await full_judge(
                 category,
@@ -250,6 +252,16 @@ async def _run_phase4(
                 "source_file": str(payload.get("_source_file", "")),
                 "response_after_defense": defended_response,
                 "attack_prompt": attack_prompt,
+                "judge_detail": str(judge_result.get("detail") or ""),
+                "judgment_confidence": judge_result.get("confidence"),
+                "p_vulnerable": judge_result.get("p_vulnerable"),
+                "p_safe": judge_result.get("p_safe"),
+                "probability_judgment": judge_result.get("probability_judgment"),
+                "consensus_judgment": judge_result.get("consensus_judgment"),
+                "judgment_alignment": judge_result.get("judgment_alignment"),
+                "reason_sources": judge_result.get("reason_sources"),
+                "matched_patterns": judge_result.get("matched_patterns"),
+                "mitre_technique_id": judge_result.get("mitre_technique_id"),
             }
         )
 

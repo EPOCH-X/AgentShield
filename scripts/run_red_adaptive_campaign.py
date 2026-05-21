@@ -615,6 +615,8 @@ async def run_campaign(args: argparse.Namespace) -> int:
         AdaptiveRedAgent,
         analyze_defense_signal,
         build_red_prompt,
+        check_hardcoded_sample_leak,
+        check_prompt_scaffold_leak,
         detect_chatbot_domain,
         extract_techniques,
         multilingual_attack_guidance,
@@ -918,7 +920,21 @@ async def run_campaign(args: argparse.Namespace) -> int:
                         max_tokens=int(args.red_max_tokens or settings.RED_AGENT_NUM_PREDICT),
                     )
                     mutated_prompt = normalize_attack_prompt_output(str(raw_generation or ""))
-                    if args.validation_mode == "off":
+                    # 파이프라인 분리 안전장치 — validation_mode 와 무관하게 항상 작동.
+                    # scaffold leak(내부 prompt echo)과 hardcoded sample leak(가짜 credential)을 차단해
+                    # Judge가 false positive를 만들지 않게 한다.
+                    if mutated_prompt.strip():
+                        _scaffold_ok, _scaffold_reason = check_prompt_scaffold_leak(mutated_prompt)
+                        _hardcoded_ok, _hardcoded_reason = check_hardcoded_sample_leak(mutated_prompt)
+                    else:
+                        _scaffold_ok, _scaffold_reason = True, ""
+                        _hardcoded_ok, _hardcoded_reason = True, ""
+
+                    if not _scaffold_ok:
+                        valid, invalid_reason = False, _scaffold_reason
+                    elif not _hardcoded_ok:
+                        valid, invalid_reason = False, _hardcoded_reason
+                    elif args.validation_mode == "off":
                         valid, invalid_reason = bool(mutated_prompt.strip()), ""
                     else:
                         valid, invalid_reason = validate_attack_prompt_output(mutated_prompt)
@@ -1455,6 +1471,14 @@ def _resolve_max_attack_chars(args: argparse.Namespace) -> int:
     return int(settings.RED_MAX_ATTACK_CHARS)
 
 
+def _default_validation_mode() -> str:
+    mode = os.getenv(
+        "DEMO_RED_VALIDATION_MODE",
+        os.getenv("RED_SFT_VALIDATION_MODE", "off"),
+    ).strip().lower()
+    return mode if mode in {"strict", "penalty", "off"} else "off"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run a no-DB/no-Chroma adaptive Red Agent campaign.")
     parser.add_argument("--input", default=os.getenv("ATTACK_PATTERN_PATH", "data/파인튜닝원본데이터/accepted.jsonl"))
@@ -1475,11 +1499,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--validation-mode",
         choices=["strict", "penalty", "off"],
-        default=os.getenv("RED_CAMPAIGN_VALIDATION_MODE", "strict"),
+        default=_default_validation_mode(),
         help=(
             "strict: invalid red output blocks the round. "
             "penalty: invalid non-empty output is sent and tagged for reward penalty. "
-            "off: only empty output is blocked. env: RED_CAMPAIGN_VALIDATION_MODE"
+            "off: only empty output is blocked. env: DEMO_RED_VALIDATION_MODE / RED_SFT_VALIDATION_MODE"
         ),
     )
     parser.add_argument("--seeds", type=int,

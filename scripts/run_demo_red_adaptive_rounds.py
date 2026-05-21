@@ -23,16 +23,32 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 CAMPAIGN_SCRIPT = PROJECT_ROOT / "scripts" / "run_red_adaptive_campaign.py"
 
 
+def default_validation_mode() -> str:
+    mode = os.getenv(
+        "DEMO_RED_VALIDATION_MODE",
+        os.getenv("RED_SFT_VALIDATION_MODE", "off"),
+    ).strip().lower()
+    return mode if mode in {"strict", "penalty", "off"} else "off"
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run demo Red Agent adaptive rounds.")
     parser.add_argument("--target-url", default=os.getenv("TESTBED_CHAT_URL", "http://127.0.0.1:8010/chat"))
     parser.add_argument("--red-model", default=os.getenv("RED_CAMPAIGN_MODEL") or os.getenv("OLLAMA_RED_MODEL"))
     parser.add_argument("--rounds", type=int, default=5)
+    parser.add_argument("--red-generation-attempts", type=int, default=int(os.getenv("RED_CAMPAIGN_GENERATION_ATTEMPTS", "3")))
+    parser.add_argument(
+        "--validation-mode",
+        choices=["strict", "penalty", "off"],
+        default=default_validation_mode(),
+    )
     parser.add_argument("--seed", type=int, default=57)
     parser.add_argument("--category", default="LLM02")
     parser.add_argument("--subcategory", default="config-extraction")
     parser.add_argument("--initial-prompt", default="")
     parser.add_argument("--initial-prompt-stdin", action="store_true")
+    parser.add_argument("--continue-after-success", action="store_true")
+    parser.add_argument("--stop-on-vulnerable", action="store_true")
     parser.add_argument("--timeout", type=int, default=600)
     return parser.parse_args()
 
@@ -154,10 +170,14 @@ def main() -> int:
         "1",
         "--rounds",
         str(args.rounds),
+        "--red-generation-attempts",
+        str(args.red_generation_attempts),
         "--seed",
         str(args.seed),
         "--category",
         args.category,
+        "--validation-mode",
+        args.validation_mode,
         "--campaign-id",
         campaign_id,
         "--conversation-mode",
@@ -165,6 +185,10 @@ def main() -> int:
         "--no-probe-seed-as-round-zero",
         "--verify-tool-execution",
     ]
+    if args.continue_after_success:
+        cmd.append("--continue-after-success")
+    if args.stop_on_vulnerable:
+        cmd.append("--stop-on-vulnerable")
     if args.red_model:
         cmd.extend(["--red-model", str(args.red_model)])
 
@@ -176,6 +200,12 @@ def main() -> int:
             capture_output=True,
             timeout=args.timeout,
             check=False,
+            env={
+                **os.environ,
+                "DEMO_RED_VALIDATION_MODE": args.validation_mode,
+                "RED_SFT_VALIDATION_MODE": args.validation_mode,
+                "RED_CAMPAIGN_VALIDATION_MODE": args.validation_mode,
+            },
         )
         combined_output = f"{proc.stdout}\n{proc.stderr}"
         raw_path = find_raw_path(combined_output)
