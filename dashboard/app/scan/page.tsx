@@ -150,6 +150,7 @@ export default function ScanPage() {
   const [mutationRoundCount, setMutationRoundCount] = useState(0);
   const [demoUsedTechniques, setDemoUsedTechniques] = useState<string[]>([]);
   const [demoUsedFailureModes, setDemoUsedFailureModes] = useState<string[]>([]);
+  const [demoRoundHistory, setDemoRoundHistory] = useState<Array<Record<string, unknown>>>([]);
   const [lastSeedPrompt, setLastSeedPrompt] = useState("");
   const [demoCategory, setDemoCategory] = useState("LLM01");
   const [demoLogs, setDemoLogs] = useState<DemoLogEntry[]>([]);
@@ -157,6 +158,8 @@ export default function ScanPage() {
   const [demoSeedsBanner, setDemoSeedsBanner] = useState<DemoSeedsBanner>(null);
   const [siteGptReport, setSiteGptReport] = useState<SiteGptPhaseReport | null>(null);
   const demoLogPanelRef = useRef<HTMLDivElement | null>(null);
+  const demoAbortRef = useRef<AbortController | null>(null);
+  const demoStoppedRef = useRef(false);
 
   const loadDemoSeedsForVector = useCallback(async (_vectorId: string): Promise<string[]> => {
     setDemoSeedsBanner(null);
@@ -177,6 +180,14 @@ export default function ScanPage() {
     } catch {
       setRecentScans([]);
     }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      demoStoppedRef.current = true;
+      demoAbortRef.current?.abort();
+      demoAbortRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -256,12 +267,16 @@ export default function ScanPage() {
     }
     setError("");
     setDemoLoading(true);
+    demoAbortRef.current?.abort();
+    demoAbortRef.current = null;
+    demoStoppedRef.current = false;
     setDemoLogs([]);
     setDemoResponseInput("");
     setPhase1SeedIndex(0);
     setMutationRoundCount(0);
     setDemoUsedTechniques([]);
     setDemoUsedFailureModes([]);
+    setDemoRoundHistory([]);
     setLastSeedPrompt("");
     setDemoCurrentPrompt("");
     setDemoActive(false);
@@ -295,8 +310,10 @@ export default function ScanPage() {
       setMutationRoundCount(0);
       setDemoUsedTechniques([]);
       setDemoUsedFailureModes([]);
+      setDemoRoundHistory([]);
       setLastSeedPrompt(firstPrompt);
       setDemoActive(true);
+      demoStoppedRef.current = false;
       appendDemoLog("info", "Phase1 #1 시작");
       setSiteGptSdkDetail(`Phase1 #1 · Phase2 최대 ${maxRounds}회 변형 (시드 전송)`);
       sendAttackPrompt(firstPrompt, `시드 (변형 0/${maxRounds})`);
@@ -322,6 +339,10 @@ export default function ScanPage() {
 
     setError("");
     setDemoLoading(true);
+    demoAbortRef.current?.abort();
+    const demoAbort = new AbortController();
+    demoAbortRef.current = demoAbort;
+    demoStoppedRef.current = false;
     const pastedResponse = demoResponseInput.trim();
     appendDemoLog("info", `[응답] 타겟 응답 입력 (${pastedResponse.length}자):`);
     appendDemoLog("info", `  └ ${pastedResponse}`);
@@ -336,11 +357,13 @@ export default function ScanPage() {
           attack_prompt: demoCurrentPrompt,
           target_response: pastedResponse,
           category: demoCategory,
-        });
+        }, { signal: demoAbort.signal });
       } catch (err: unknown) {
+        if (demoAbort.signal.aborted || demoStoppedRef.current) return;
         const msg = err instanceof Error ? err.message : "manual-check 요청 실패";
         appendDemoLog("error", `수동 판정 실패(비-vulnerable 처리): ${msg}`);
       }
+      if (demoAbort.signal.aborted || demoStoppedRef.current) return;
 
       const verdict = result?.judgment || "ambiguous";
       const severity = result?.severity ? `, severity=${result.severity}` : "";
@@ -369,6 +392,21 @@ export default function ScanPage() {
         appendDemoLog("info", `[판결문] ${finalDetail}`);
       }
 
+      const currentRoundRecord: Record<string, unknown> = {
+        round: mutationRoundCount,
+        attack_prompt: demoCurrentPrompt,
+        target_response: pastedResponse,
+        judgment: verdict,
+        severity: result?.severity || null,
+        judge_detail: finalDetail,
+        p_vulnerable: pVuln ?? null,
+        p_safe: pSafe ?? null,
+        techniques: demoUsedTechniques,
+        failure_mode: demoUsedFailureModes[demoUsedFailureModes.length - 1] || null,
+      };
+      const nextRoundHistory = [...demoRoundHistory, currentRoundRecord].slice(-12);
+      setDemoRoundHistory(nextRoundHistory);
+
       if (verdict === "vulnerable") {
         setDemoActive(false);
         setSiteGptSdkDetail("취약 판정 감지. Phase3 Blue Agent와 Phase4 검증을 실행합니다.");
@@ -380,7 +418,8 @@ export default function ScanPage() {
             target_response: pastedResponse,
             judge_detail: finalDetail,
             max_attempts: 3,
-          });
+          }, { signal: demoAbort.signal });
+          if (demoAbort.signal.aborted || demoStoppedRef.current) return;
           const attemptLogs = Array.isArray(blue.attempt_logs) ? blue.attempt_logs : [];
           const attemptCount = Math.max(Number(blue.attempt_count || attemptLogs.length || 1), 1);
           for (const row of attemptLogs) {
@@ -396,6 +435,7 @@ export default function ScanPage() {
           const defendedResponseKo = await translateToKorean(blue.defended_response);
           const defenseRationaleKo = await translateToKorean(blue.defense_rationale);
           const defenseJudgeDetailKo = await translateToKorean(defenseJudgeDetail);
+          if (demoAbort.signal.aborted || demoStoppedRef.current) return;
           setSiteGptReport({
             category: demoCategory,
             attack_prompt: demoCurrentPrompt,
@@ -429,6 +469,7 @@ export default function ScanPage() {
             );
           }
         } catch (err: unknown) {
+          if (demoAbort.signal.aborted || demoStoppedRef.current) return;
           const msg = err instanceof Error ? err.message : "Blue 방어 생성 실패";
           appendDemoLog("error", `[Phase3/4] ${msg}`);
           setSiteGptSdkDetail(`Phase3/4 실패: ${msg}`);
@@ -446,6 +487,7 @@ export default function ScanPage() {
         setMutationRoundCount(0);
         setDemoUsedTechniques([]);
         setDemoUsedFailureModes([]);
+        setDemoRoundHistory([]);
         setLastSeedPrompt(nextSeedPrompt);
         appendDemoLog(
           "info",
@@ -472,10 +514,13 @@ export default function ScanPage() {
               judge_detail: finalDetail,
               used_techniques: demoUsedTechniques,
               used_failure_modes: demoUsedFailureModes,
+              round_history: nextRoundHistory,
               target_url: targetUrl.trim() || undefined,
-            });
+            }, { signal: demoAbort.signal });
+            if (demoAbort.signal.aborted || demoStoppedRef.current) return;
             break;
           } catch (err: unknown) {
+            if (demoAbort.signal.aborted || demoStoppedRef.current) return;
             lastError = err;
             if (attempt < 2) {
               appendDemoLog("info", "[Red 에이전트] 백엔드 재생성 실패 감지. 프론트 재요청 1회 실행.");
@@ -484,6 +529,7 @@ export default function ScanPage() {
         }
         if (!red) throw lastError || new Error("Red 변형 생성 실패");
       } catch (err: unknown) {
+        if (demoAbort.signal.aborted || demoStoppedRef.current) return;
         const msg = err instanceof Error ? err.message : "알 수 없는 오류";
         setError(`Red 변형 요청에 실패했습니다: ${msg}`);
         appendDemoLog("error", `Red 변형 요청 실패: ${msg}`);
@@ -491,6 +537,7 @@ export default function ScanPage() {
       }
 
       setDemoUsedTechniques((prev) => [...prev, ...(red.techniques || [])]);
+      if (demoAbort.signal.aborted || demoStoppedRef.current) return;
       if (red.failure_mode) {
         setDemoUsedFailureModes((prev) => [...prev, red.failure_mode as string]);
       }
@@ -505,10 +552,14 @@ export default function ScanPage() {
         `Red 변형 R${nextMutationCount}/${phase2MaxRounds} (${red.techniques?.join(",") || "n/a"})`,
       );
     } catch (err: unknown) {
+      if (demoAbort.signal.aborted || demoStoppedRef.current) return;
       const msg = err instanceof Error ? err.message : "알 수 없는 오류";
       setError(`Demo 처리 중 오류: ${msg}`);
       appendDemoLog("error", `Demo 처리 오류: ${msg}`);
     } finally {
+      if (demoAbortRef.current === demoAbort) {
+        demoAbortRef.current = null;
+      }
       setDemoLoading(false);
     }
   }
@@ -575,6 +626,10 @@ export default function ScanPage() {
   }, [demoLogs]);
 
   function stopDemoLoop() {
+    demoStoppedRef.current = true;
+    demoAbortRef.current?.abort();
+    demoAbortRef.current = null;
+    setDemoLoading(false);
     setDemoActive(false);
     setSiteGptSdkDetail("Demo 루프를 수동 중지했습니다.");
     appendDemoLog("info", "사용자 요청으로 Demo 중지");

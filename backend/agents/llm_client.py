@@ -7,6 +7,7 @@ Ollama로 Gemma 4 E2B를 로컬 실행하고, 역할별 LoRA 어댑터를 전환
 """
 
 import asyncio
+import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Type
@@ -19,6 +20,7 @@ from backend.config import settings
 
 root = str(Path(__file__).resolve().parents[2])
 load_dotenv()
+logger = logging.getLogger(__name__)
 
 
 class AgentShieldLLM:
@@ -107,6 +109,12 @@ class AgentShieldLLM:
             self.model = None
             self.tokenizer = None
             self.current_local_base_path = None
+
+    @staticmethod
+    def _default_max_tokens_for_role(role: str) -> int:
+        if role == "red":
+            return int(settings.RED_AGENT_NUM_PREDICT)
+        return int(settings.LLM_DEFAULT_NUM_PREDICT)
 
     @staticmethod
     def _load_peft_model(base_model: Any, adapter_path: str) -> Any:
@@ -283,6 +291,14 @@ class AgentShieldLLM:
                     payload["format"] = response_model.model_json_schema()
 
                 try:
+                    logger.info(
+                        "[ollama] REQUEST: model=%s role=%s num_predict=%s num_ctx=%s prompt_len=%d",
+                        payload.get("model"),
+                        role,
+                        options.get("num_predict"),
+                        options.get("num_ctx"),
+                        len(prompt or ""),
+                    )
                     response = await client.post(url, json=payload)
                     if response.status_code == 404:
                         fallback_model = role_config["ollama_model"]
@@ -326,13 +342,15 @@ class AgentShieldLLM:
         self,
         prompt: str,
         role: str = "base",
-        max_tokens: int = 2048,
+        max_tokens: Optional[int] = None,
         response_model: Optional[Type[BaseModel]] = None,
         system_prompt_override: Optional[str] = None,
         options_override: Optional[Dict[str, Any]] = None,
     ) -> Any:
         """역할에 맞는 모델로 텍스트 또는 구조화된 응답을 생성한다."""
         self.switch_role(role)
+        if max_tokens is None:
+            max_tokens = self._default_max_tokens_for_role(role)
         role_config = self.role_configs.get(role, self.role_configs["base"])
         options = {
             "num_predict": max_tokens,

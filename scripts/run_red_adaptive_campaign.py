@@ -727,6 +727,7 @@ async def run_campaign(args: argparse.Namespace) -> int:
             current_detail = attack.get("detail") or ""
             used_techniques: list[str] = []
             used_failure_modes: list[str] = []
+            round_history: list[dict[str, Any]] = []
             adaptive_agent = AdaptiveRedAgent(red_model or "")
             rounds: list[dict[str, Any]] = []
             seed_success = False
@@ -893,6 +894,8 @@ async def run_campaign(args: argparse.Namespace) -> int:
                     target_failure_mode=target_failure_mode,
                     judge_detail=current_detail,
                     domain_context=domain_context,
+                    round_history=round_history,
+                    conversation_mode=args.conversation_mode,
                 )
                 # LLM06 echo 2회 이상: raw tool syntax 금지 피드백 삽입
                 if category == "LLM06" and echo_count >= 2:
@@ -1205,6 +1208,21 @@ async def run_campaign(args: argparse.Namespace) -> int:
                 }
                 leaked_canaries = _annotate_real_value_leak(round_entry, mutated_prompt, target_response)
                 rounds.append(round_entry)
+                round_history.append(
+                    {
+                        "round": rnd,
+                        "attack_prompt": mutated_prompt,
+                        "target_response": target_response,
+                        "judgment": verdict.get("judgment"),
+                        "severity": verdict.get("severity"),
+                        "judge_detail": verdict.get("detail", ""),
+                        "p_vulnerable": verdict.get("p_vulnerable"),
+                        "p_safe": verdict.get("p_safe"),
+                        "techniques": round_entry["mutation_techniques"],
+                        "failure_mode": verdict.get("failure_mode") or target_failure_mode,
+                    }
+                )
+                round_history = round_history[-12:]
                 _live_append({
                     "ts": _utc_now(),
                     "seed_index": seed_index,

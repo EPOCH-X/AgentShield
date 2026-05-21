@@ -89,7 +89,6 @@ export default function PipelineFlowViz({
   status,
   vulnerableCount,
   completedTests,
-  latestAttackPrompt,
 }: Props) {
   const isRunning = status === "running" || status === "pending";
   const isDone = status === "completed";
@@ -164,9 +163,9 @@ export default function PipelineFlowViz({
         }
       `}} />
 
-      <div className="glass-panel rounded-[2rem] p-7 shadow-xl overflow-hidden">
+      <div className="glass-panel rounded-[2rem] p-5 shadow-xl overflow-hidden">
         {/* 헤더 */}
-        <div className="flex items-center justify-between mb-7">
+        <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <span className="text-[10px] font-black uppercase tracking-[0.3em] text-on-surface-variant/60">
               LangGraph Pipeline
@@ -229,8 +228,8 @@ export default function PipelineFlowViz({
                     {/* 메인 박스 */}
                     <div
                       style={{
-                        width: 64,
-                        height: 64,
+                        width: 56,
+                        height: 56,
                         borderRadius: "1rem",
                         border: isActive
                           ? `2px solid ${node.color}`
@@ -259,7 +258,7 @@ export default function PipelineFlowViz({
                         opacity: !isActive && !done ? 0.35 : 1,
                       }}
                     >
-                      <span style={{ fontSize: 24, lineHeight: 1 }}>{node.emoji}</span>
+                      <span style={{ fontSize: 22, lineHeight: 1 }}>{node.emoji}</span>
 
                       {/* 완료 배지 */}
                       {done && !isActive && (
@@ -286,7 +285,7 @@ export default function PipelineFlowViz({
                     }}
                   >
                     <p
-                      className="text-[11px] font-black leading-tight transition-all duration-400"
+                      className="text-[13px] font-black leading-tight transition-all duration-400"
                       style={{
                         color: isActive ? "#ffffff" : done ? "rgba(255,255,255,0.5)" : "rgba(255,255,255,0.2)",
                         textShadow: isActive ? `0 0 10px ${node.color}` : "none",
@@ -295,27 +294,11 @@ export default function PipelineFlowViz({
                       {node.label}
                     </p>
                     <p
-                      className="text-[9px] mt-0.5"
+                      className="text-[11px] mt-1 font-semibold"
                       style={{ color: isActive ? `${node.color}cc` : "rgba(255,255,255,0.2)" }}
                     >
                       {node.sub}
                     </p>
-
-                    {/* 공격 프롬프트 미리보기 */}
-                    {node.id === 0 && isActive && latestAttackPrompt && (
-                      <div
-                        className="mt-1.5 px-1.5 py-1 rounded-lg"
-                        style={{
-                          maxWidth: 100,
-                          background: "rgba(239,68,68,0.08)",
-                          border: "1px solid rgba(239,68,68,0.2)",
-                        }}
-                      >
-                        <p className="text-[8px] font-mono text-red-400/80 truncate">
-                          {latestAttackPrompt}
-                        </p>
-                      </div>
-                    )}
 
                     {/* 루프 카운터 */}
                     {node.id === 2 && vulnerableCount > 0 && (
@@ -336,7 +319,7 @@ export default function PipelineFlowViz({
 
                 {/* 커넥터 화살표 */}
                 {i < NODES.length - 1 && (
-                  <div className="flex items-center mt-8 mx-0.5 flex-shrink-0">
+                  <div className="flex items-center mt-7 mx-0.5 flex-shrink-0">
                     <ConnectorArrow
                       active={isNextActive}
                       done={isNodeDone(node.id, phase, isDone)}
@@ -351,13 +334,13 @@ export default function PipelineFlowViz({
 
         {/* 루프백 화살표 */}
         {(phase <= 2 || isRunning) && (
-          <div className="relative mt-5 px-1">
+          <div className="relative mt-3 px-1">
             <LoopArrow active={loopActive} />
           </div>
         )}
 
         {/* 하단 상태 */}
-        <div className="mt-5 pt-4 border-t border-white/5 flex items-center justify-between">
+        <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between">
           <div className="flex items-center gap-2 text-[10px] text-on-surface-variant/50">
             <span className="material-symbols-outlined text-[12px]">swap_horiz</span>
             {completedTests}회 벡터 처리
@@ -439,7 +422,7 @@ function ConnectorArrow({
 
 function LoopArrow({ active }: { active: boolean }) {
   return (
-    <div className="relative h-7">
+    <div className="relative h-4">
       <svg
         viewBox="0 0 100 28"
         className="absolute left-0 top-0 h-full"

@@ -117,6 +117,8 @@ class AppSettings:
     # Red Agent
     RED_MAX_ATTACK_CHARS: int = int(os.getenv("RED_MAX_ATTACK_CHARS", 8000))
     RED_SFT_SEED_CODE_MUTATION: bool = os.getenv("RED_SFT_SEED_CODE_MUTATION", "true").lower() == "true"
+    RED_CAMPAIGN_CONVERSATION_MODE: str = os.getenv("RED_CAMPAIGN_CONVERSATION_MODE", "single").strip().lower()
+    RED_CAMPAIGN_MAX_HISTORY_TURNS: int = int(os.getenv("RED_CAMPAIGN_MAX_HISTORY_TURNS", 6))
 
     # Phase 2
     PHASE2_MAX_ROUNDS: int = int(os.getenv("PHASE2_MAX_ROUNDS", 5))

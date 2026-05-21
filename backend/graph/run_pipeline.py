@@ -26,7 +26,7 @@ from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
 import json
-from typing import Optional
+from typing import Any, Optional
 
 import httpx
 
@@ -480,6 +480,8 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
         # B: 라운드 간 사용된 기법 추적
         used_techniques: list[str] = []
         used_failure_modes: list[str] = []
+        round_history: list[dict[str, Any]] = []
+        conversation_mode = settings.RED_CAMPAIGN_CONVERSATION_MODE if settings.RED_CAMPAIGN_CONVERSATION_MODE in {"single", "multi"} else "single"
 
         for rnd in range(1, max_rounds + 1):
             t0 = time.time()
@@ -525,6 +527,8 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                 target_failure_mode=target_failure_mode,
                 judge_detail=current_judge_detail,
                 domain_context=domain_context,
+                round_history=round_history,
+                conversation_mode=conversation_mode,
             )
             try:
                 new_attack, raw_llm_response = await generate_mutation(client, red_prompt)
@@ -657,6 +661,19 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                     "reason_sources": verdict.get("reason_sources"),
                     "matched_patterns": verdict.get("matched_patterns"),
                 })
+                round_history.append({
+                    "round": rnd,
+                    "attack_prompt": new_attack,
+                    "target_response": target_response,
+                    "judgment": "vulnerable",
+                    "severity": verdict.get("severity"),
+                    "judge_detail": verdict.get("detail", ""),
+                    "p_vulnerable": verdict.get("p_vulnerable"),
+                    "p_safe": verdict.get("p_safe"),
+                    "techniques": current_techniques,
+                    "failure_mode": verdict.get("failure_mode") or target_failure_mode,
+                })
+                round_history = round_history[-12:]
                 # C: 성공 공격 정보를 다른 카테고리에 공유
                 techniques_used = current_techniques
                 intel_summary = (
@@ -700,6 +717,8 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                             harvest_mode=True,
                             prior_successes=harvest_successes,
                             success_anchor=harvest_anchor,
+                            round_history=round_history,
+                            conversation_mode=conversation_mode,
                         )
 
                         try:
@@ -895,6 +914,19 @@ async def run_phase2(safe_attacks, client, llm, use_llm_judge, max_rounds, harve
                     "reason_sources": verdict.get("reason_sources"),
                     "matched_patterns": verdict.get("matched_patterns"),
                 })
+                round_history.append({
+                    "round": rnd,
+                    "attack_prompt": new_attack,
+                    "target_response": target_response,
+                    "judgment": verdict["judgment"],
+                    "severity": verdict.get("severity"),
+                    "judge_detail": verdict.get("detail", ""),
+                    "p_vulnerable": verdict.get("p_vulnerable"),
+                    "p_safe": verdict.get("p_safe"),
+                    "techniques": round_techniques if new_attack else [],
+                    "failure_mode": verdict.get("failure_mode") or target_failure_mode,
+                })
+                round_history = round_history[-12:]
                 current_prompt = new_attack
                 current_response = target_response
                 current_judge_detail = verdict.get("detail", "")

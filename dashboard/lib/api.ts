@@ -173,9 +173,10 @@ export async function postSitegptRedMutation(payload: {
   judge_detail?: string;
   used_techniques?: string[];
   used_failure_modes?: string[];
+  round_history?: Array<Record<string, unknown>>;
   cross_category_intel?: Record<string, string>;
   target_url?: string;
-}): Promise<{
+}, options: { signal?: AbortSignal } = {}): Promise<{
   mutated_prompt: string;
   techniques: string[];
   failure_mode?: string | null;
@@ -192,9 +193,11 @@ export async function postSitegptRedMutation(payload: {
       judge_detail: payload.judge_detail ?? "",
       used_techniques: payload.used_techniques ?? [],
       used_failure_modes: payload.used_failure_modes ?? [],
+      round_history: payload.round_history ?? [],
       cross_category_intel: payload.cross_category_intel,
       target_url: payload.target_url,
     }),
+    signal: options.signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -209,7 +212,7 @@ export async function postSitegptBlueDefense(payload: {
   target_response: string;
   judge_detail?: string;
   max_attempts?: number;
-}): Promise<{
+}, options: { signal?: AbortSignal } = {}): Promise<{
   defended_response: string;
   defense_rationale: string;
   attack_judge: Record<string, unknown>;
@@ -232,6 +235,7 @@ export async function postSitegptBlueDefense(payload: {
       judge_detail: payload.judge_detail ?? "",
       max_attempts: payload.max_attempts ?? 3,
     }),
+    signal: options.signal,
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -244,7 +248,7 @@ export async function manualCheck(payload: {
   attack_prompt: string;
   target_response: string;
   category?: string;
-}): Promise<{
+}, options: { signal?: AbortSignal } = {}): Promise<{
   judgment: string;
   severity?: string | null;
   detail?: string;
@@ -267,6 +271,7 @@ export async function manualCheck(payload: {
   const res = await apiFetch("/api/v1/scan/manual-check", {
     method: "POST",
     body: JSON.stringify(payload),
+    signal: options.signal,
   });
   if (!res.ok) throw new Error("수동 판정 요청에 실패했습니다.");
   return res.json();

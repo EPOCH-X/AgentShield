@@ -164,6 +164,17 @@ export default function ReportPage({ params }: { params: { id: string } }) {
   const total      = results.length;
   const vulnerable = results.filter((r) => r.judgment === "vulnerable").length;
   const safe       = results.filter((r) => r.judgment === "safe").length;
+  const reviewCount = results.filter((r) => !["safe", "vulnerable"].includes(String(r.judgment))).length;
+
+  function resultKind(result: ScanResult) {
+    if (result.judgment === "vulnerable") {
+      return { label: "취약점", icon: "gpp_bad" };
+    }
+    if (result.judgment === "safe") {
+      return { label: "안전 항목", icon: "verified_user" };
+    }
+    return { label: "검토 항목", icon: "rule" };
+  }
 
   if (loading) {
     return (
@@ -277,6 +288,48 @@ export default function ReportPage({ params }: { params: { id: string } }) {
             </button>
           </div>
         </div>
+
+        {/* Phase 5 정책 패키지 상태 — 취약점이 없어도 상태 박스는 항상 표시 */}
+        {!policyPkg && (
+          <div className="anim-fade-up rounded-2xl border overflow-hidden"
+            style={{ background: "rgba(14,165,165,0.055)", borderColor: "rgba(14,165,165,0.22)", animationDelay: "80ms" }}>
+            <div className="flex items-center gap-2.5 px-5 py-3.5"
+              style={{ background: "rgba(14,165,165,0.08)", borderBottom: "1px solid rgba(14,165,165,0.16)" }}>
+              <span className="material-symbols-outlined text-base" style={{ color: "#5eead4", fontVariationSettings: "'FILL' 1" }}>policy</span>
+              <p className="text-xs font-black uppercase tracking-widest" style={{ color: "#99f6e4" }}>
+                Phase 5 · Guardrail Policy Package
+              </p>
+              <span className="ml-auto text-[10px] text-white/30 font-mono">SESSION {sessionId.slice(0, 8).toUpperCase()}</span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 p-4">
+              <div className="rounded-xl px-4 py-3 border" style={{ background: "rgba(0,0,0,0.3)", borderColor: "rgba(14,165,165,0.18)" }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1">패키지 상태</p>
+                <p className="text-base font-black text-tertiary">
+                  {vulnerable > 0 ? "생성 대기" : "생성 대상 없음"}
+                </p>
+              </div>
+              <div className="rounded-xl px-4 py-3 border" style={{ background: "rgba(0,0,0,0.3)", borderColor: "rgba(14,165,165,0.18)" }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1">조치 대상 Findings</p>
+                <p className="text-base font-black text-white">
+                  {vulnerable}<span className="text-white/30 text-sm font-medium ml-1">/ {total}</span>
+                </p>
+              </div>
+              <div className="rounded-xl px-4 py-3 border" style={{ background: "rgba(0,0,0,0.3)", borderColor: "rgba(14,165,165,0.18)" }}>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-white/40 mb-1">검토 필요</p>
+                <p className="text-base font-black text-white">
+                  {reviewCount}<span className="text-white/30 text-sm font-medium ml-1">건</span>
+                </p>
+              </div>
+            </div>
+
+            <div className="px-5 pb-4 text-xs leading-relaxed text-white/50">
+              {vulnerable > 0
+                ? "취약 결과가 있지만 Phase 5 정책 패키지가 아직 생성되지 않았습니다. 스캔 완료 후 자동 생성 로그 또는 policy-export 엔드포인트를 확인하세요."
+                : "취약 판정이 없어 별도 가드레일 정책 패키지와 회귀 테스트 파일은 생성하지 않습니다. 아래 목록은 발견된 취약점이 아니라 테스트된 카테고리별 안전 결과입니다."}
+            </div>
+          </div>
+        )}
 
         {/* 정책 패키지 패널 — Actionable Evidence */}
         {policyPkg && (
@@ -429,6 +482,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
               const sev     = SEVERITY_CFG[r.severity as keyof typeof SEVERITY_CFG] ?? SEVERITY_CFG.medium;
               const catMeta = CATEGORY_META[r.category];
               const isVuln  = r.judgment === "vulnerable";
+              const kind    = resultKind(r);
               const delay   = (i * 180 + 120) + "ms";
               const isOpen  = openSet.has(r.id);
 
@@ -443,7 +497,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                         {i + 1}
                       </div>
                       <span className="text-xs font-black tracking-widest uppercase" style={{ color: sev.color }}>
-                        취약점 {String(i + 1).padStart(2, "0")}
+                        {kind.label} {String(i + 1).padStart(2, "0")}
                       </span>
                       <span className="text-xs text-white/20 font-mono">/ {results.length}</span>
                     </div>
@@ -466,7 +520,7 @@ export default function ReportPage({ params }: { params: { id: string } }) {
                           style={{ background: sev.bg, border: `2px solid ${sev.border}` }}>
                           <span className="material-symbols-outlined text-3xl verdict-glow"
                             style={{ color: sev.color, fontVariationSettings: "'FILL' 1" }}>
-                            {isVuln ? "gpp_bad" : "verified_user"}
+                            {kind.icon}
                           </span>
                         </div>
                       </div>

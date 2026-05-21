@@ -114,8 +114,9 @@ class SiteGptRedMutationRequest(BaseModel):
     target_response: str
     rnd: int = Field(..., ge=1, alias="round")
     judge_detail: str = ""
-    used_techniques: list[str] = []
-    used_failure_modes: list[str] = []
+    used_techniques: list[str] = Field(default_factory=list)
+    used_failure_modes: list[str] = Field(default_factory=list)
+    round_history: list[dict[str, Any]] = Field(default_factory=list)
     cross_category_intel: Optional[dict[str, str]] = None
     target_url: Optional[str] = None
 
@@ -912,6 +913,7 @@ async def sitegpt_red_mutation(
             used_failure_modes=req.used_failure_modes,
             cross_category_intel=req.cross_category_intel,
             target_url=req.target_url,
+            round_history=req.round_history,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e

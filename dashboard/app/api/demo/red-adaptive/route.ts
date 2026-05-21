@@ -126,7 +126,6 @@ function runRedAdaptive(prompt: string, category: string): Promise<{ status: num
           RED_CAMPAIGN_VALIDATION_MODE: validationMode,
           RED_SFT_VALIDATION_MODE: validationMode,
           DEMO_RED_VALIDATION_MODE: validationMode,
-          DEMO_RED_API_KEY_PROMPT: "true",
         },
       }
     );
@@ -217,7 +216,6 @@ function streamRedAdaptive(prompt: string, targetResponse: string, category: str
             RED_CAMPAIGN_VALIDATION_MODE: validationMode,
             RED_SFT_VALIDATION_MODE: validationMode,
             DEMO_RED_VALIDATION_MODE: validationMode,
-            DEMO_RED_API_KEY_PROMPT: "true",
           },
         },
       );
