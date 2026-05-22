@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.exc import SQLAlchemyError
@@ -293,6 +293,16 @@ class PolicyCreate(BaseModel):
     action:    str = "warn"
 
 
+class PolicyUpdate(BaseModel):
+    """부분 업데이트 — None이 아닌 필드만 갱신. is_active 토글 + 메타 수정 모두 지원."""
+    rule_name: Optional[str] = None
+    rule_type: Optional[str] = None
+    pattern:   Optional[str] = None
+    severity:  Optional[str] = None
+    action:    Optional[str] = None
+    is_active: Optional[bool] = None
+
+
 def _policy_dict(p: PolicyRule) -> dict:
     return {
         "id":         p.id,
@@ -315,9 +325,46 @@ async def list_policies(
     return [_policy_dict(p) for p in rows]
 
 
+async def _audit_policy_action(
+    db: AsyncSession,
+    *,
+    actor: str,
+    action: str,
+    request: Optional[Request],
+    rule: PolicyRule,
+    detail: Optional[str] = None,
+) -> None:
+    """정책 CRUD 액션을 audit_logs에 기록 — 보안팀이 누가 언제 어떤 룰을 만들었는지 추적."""
+    from backend.models.audit_log import AuditLog
+    try:
+        ip = request.client.host if request and request.client else None
+        ua = request.headers.get("user-agent") if request else None
+        async with db.begin_nested():
+            db.add(AuditLog(
+                actor=actor[:100],
+                action=action[:50],
+                resource=f"policy_rule:{rule.id}",
+                ip_address=ip,
+                user_agent=ua[:255] if ua else None,
+                detail=detail or f"name={rule.rule_name} severity={rule.severity} action={rule.action} active={rule.is_active}",
+            ))
+    except Exception:
+        logger.exception("[monitoring] policy audit log insert failed (non-fatal)")
+
+
+def _invalidate_policy_cache_safe() -> None:
+    """모니터링 프록시 룰 캐시를 즉시 비워서 다음 요청부터 새 룰 반영."""
+    try:
+        from monitoring_proxy.policies._db import invalidate_policy_cache
+        invalidate_policy_cache()
+    except Exception:
+        logger.exception("[monitoring] policy cache invalidate failed (non-fatal)")
+
+
 @router.post("/policies", status_code=201)
 async def create_policy(
     body: PolicyCreate,
+    request: Request,
     db:   AsyncSession = Depends(get_db),
     user: UserInfo     = Depends(get_current_user),
 ):
@@ -333,9 +380,89 @@ async def create_policy(
         is_active=True,
     )
     db.add(rule)
+    await db.flush()
+    await _audit_policy_action(db, actor=user.username, action="policy_create", request=request, rule=rule)
     await db.commit()
     await db.refresh(rule)
+    _invalidate_policy_cache_safe()
     return _policy_dict(rule)
+
+
+@router.patch("/policies/{policy_id}")
+async def update_policy(
+    policy_id: int,
+    body: PolicyUpdate,
+    request: Request,
+    db:   AsyncSession = Depends(get_db),
+    user: UserInfo     = Depends(get_current_user),
+):
+    """is_active 토글 + 룰 메타 수정. None이 아닌 필드만 갱신."""
+    rule = await db.get(PolicyRule, policy_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="해당 정책을 찾을 수 없습니다.")
+
+    changes: list[str] = []
+    if body.rule_name is not None:
+        if not body.rule_name.strip():
+            raise HTTPException(status_code=422, detail="rule_name이 비어 있을 수 없습니다.")
+        changes.append(f"rule_name:{rule.rule_name}→{body.rule_name}")
+        rule.rule_name = body.rule_name
+    if body.rule_type is not None:
+        changes.append(f"rule_type:{rule.rule_type}→{body.rule_type}")
+        rule.rule_type = body.rule_type
+    if body.pattern is not None:
+        changes.append("pattern_updated")
+        rule.pattern = body.pattern
+    if body.severity is not None:
+        changes.append(f"severity:{rule.severity}→{body.severity}")
+        rule.severity = body.severity
+    if body.action is not None:
+        changes.append(f"action:{rule.action}→{body.action}")
+        rule.action = body.action
+    if body.is_active is not None:
+        changes.append(f"is_active:{rule.is_active}→{body.is_active}")
+        rule.is_active = body.is_active
+
+    if not changes:
+        return _policy_dict(rule)
+
+    await _audit_policy_action(
+        db,
+        actor=user.username,
+        action="policy_update",
+        request=request,
+        rule=rule,
+        detail="; ".join(changes),
+    )
+    await db.commit()
+    await db.refresh(rule)
+    _invalidate_policy_cache_safe()
+    return _policy_dict(rule)
+
+
+@router.delete("/policies/{policy_id}", status_code=204)
+async def delete_policy(
+    policy_id: int,
+    request: Request,
+    db:   AsyncSession = Depends(get_db),
+    user: UserInfo     = Depends(get_current_user),
+):
+    rule = await db.get(PolicyRule, policy_id)
+    if rule is None:
+        raise HTTPException(status_code=404, detail="해당 정책을 찾을 수 없습니다.")
+
+    await _audit_policy_action(
+        db,
+        actor=user.username,
+        action="policy_delete",
+        request=request,
+        rule=rule,
+        detail=f"deleted name={rule.rule_name} severity={rule.severity} action={rule.action}",
+    )
+    await db.delete(rule)
+    await db.commit()
+    _invalidate_policy_cache_safe()
+    return None
 
 
 # ── 모니터링 프록시 채팅 ──────────────────────────────────────────────────────

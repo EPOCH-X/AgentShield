@@ -50,6 +50,9 @@ def _load_active_rules() -> list[dict]:
     except Exception:
         logger.exception("[monitoring_proxy] PolicyRule DB 조회 실패 — 고정 패턴으로 폴백")
         return []
+    finally:
+        if "engine" in locals():
+            engine.dispose()
 
 
 def load_rules_by_severity(severity_set: set[str]) -> list[dict]:
@@ -69,6 +72,11 @@ def _cached_rules() -> list[dict]:
     import time
     token = int(time.time() // 60)
     return list(_cached_rules_inner(token))
+
+
+def invalidate_policy_cache() -> None:
+    """admin이 PolicyRule을 추가·수정·삭제했을 때 캐시를 즉시 비워서 다음 요청부터 새 룰 반영."""
+    _cached_rules_inner.cache_clear()
 
 
 def match_rule(text: str, rule: dict) -> Optional[str]:

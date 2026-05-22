@@ -10,7 +10,15 @@ from backend.config import settings
 
 DATABASE_URL = settings.DATABASE_URL
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
+engine = create_async_engine(
+    settings.DATABASE_URL,
+    echo=False,
+    pool_pre_ping=True,
+    pool_size=settings.DB_POOL_SIZE,
+    max_overflow=settings.DB_MAX_OVERFLOW,
+    pool_timeout=settings.DB_POOL_TIMEOUT,
+    pool_recycle=settings.DB_POOL_RECYCLE,
+)
 async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -29,6 +37,7 @@ async def init_db():
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS categories TEXT"))
         await conn.execute(text("ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_total INTEGER DEFAULT 0"))
         await conn.execute(text("ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_false_refusals INTEGER DEFAULT 0"))
         await conn.execute(text("ALTER TABLE test_sessions ADD COLUMN IF NOT EXISTS frr_rate NUMERIC(5, 4) DEFAULT 0"))

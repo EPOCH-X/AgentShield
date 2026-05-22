@@ -14,6 +14,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import async_session, get_db
@@ -334,6 +335,28 @@ def _normalize_categories(raw: Optional[list[str]]) -> Optional[list[str]]:
     return cleaned or None
 
 
+def _encode_categories(categories: Optional[list[str]]) -> Optional[str]:
+    return json.dumps(categories, ensure_ascii=False) if categories else None
+
+
+def _decode_categories(raw: Any) -> Optional[list[str]]:
+    if not raw:
+        return None
+    if isinstance(raw, list):
+        return _normalize_categories(raw)
+    if not isinstance(raw, str):
+        return None
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        decoded = [part.strip() for part in raw.split(",") if part.strip()]
+    return _normalize_categories(decoded if isinstance(decoded, list) else None)
+
+
+def _scan_summary(session_id: str) -> dict[str, Any]:
+    return SCAN_SUMMARIES.setdefault(session_id, {})
+
+
 async def _persist_phase1_results(
     db: AsyncSession,
     *,
@@ -505,6 +528,10 @@ async def _execute_scan_background(
 ) -> None:
     print(f"[scan:{session_id}] background scan started target={target_url}", flush=True)
     logger.info("[scan:%s] background scan started target=%s", session_id, target_url)
+    _scan_summary(session_id).update({
+        "status": "running",
+        "categories": categories,
+    })
 
     async with async_session() as db:
         session = await db.scalar(select(TestSession).where(TestSession.id == UUID(session_id)))
@@ -529,13 +556,14 @@ async def _execute_scan_background(
                 max_failed_attempts=5,
                 categories=categories,
             )
-            SCAN_SUMMARIES[session_id] = {
+            _scan_summary(session_id).update({
+                "status": "completed",
                 "termination_reason": final_state.get("termination_reason") or "",
                 "failed_attempts": int(final_state.get("failed_attempts") or 0),
                 "attempted_count": len(final_state.get("attempted_seed_ids") or []),
                 "attack_success": bool(final_state.get("attack_success")),
                 "error_message": "",
-            }
+            })
 
             await _persist_phase4_summary(
                 db,
@@ -557,13 +585,14 @@ async def _execute_scan_background(
                 session.completed_at = datetime.utcnow()
                 await db.commit()
                 await _auto_export_session(db, session_id=session_id, session_status="cancelled")
-            SCAN_SUMMARIES[session_id] = {
+            _scan_summary(session_id).update({
+                "status": "cancelled",
                 "termination_reason": "cancelled",
                 "failed_attempts": 0,
                 "attempted_count": 0,
                 "attack_success": False,
                 "error_message": "",
-            }
+            })
             print(f"[scan:{session_id}] background scan cancelled", flush=True)
             logger.info("[scan:%s] background scan cancelled", session_id)
             raise
@@ -575,13 +604,14 @@ async def _execute_scan_background(
                 session.completed_at = datetime.utcnow()
                 await db.commit()
                 await _auto_export_session(db, session_id=session_id, session_status="failed")
-            SCAN_SUMMARIES[session_id] = {
+            _scan_summary(session_id).update({
+                "status": "failed",
                 "termination_reason": "failed",
                 "failed_attempts": 0,
                 "attempted_count": 0,
                 "attack_success": False,
                 "error_message": f"{exc.__class__.__name__}: {str(exc)}",
-            }
+            })
             print(f"[scan:{session_id}] background scan failed", flush=True)
             logger.exception("[scan:%s] background scan failed", session_id)
 
@@ -594,9 +624,11 @@ async def start_scan(
 ):
     """보안 스캔 시작 — session row를 만든 뒤 백그라운드에서 Phase 1~4를 실행한다."""
 
+    normalized_categories = _normalize_categories(req.categories)
     session = TestSession(
         target_api_url=req.target_url,
         project_name=req.project_name or "LLM Security Scan",
+        categories=_encode_categories(normalized_categories),
         status="queued",
     )
     db.add(session)
@@ -607,7 +639,15 @@ async def start_scan(
     print(f"[scan:{session_id}] scan accepted and queued target={req.target_url}", flush=True)
     logger.info("[scan:%s] scan accepted and queued target=%s", session_id, req.target_url)
     bounded_max_phase = max(2, min(4, int(req.max_phase or 2)))
-    normalized_categories = _normalize_categories(req.categories)
+    SCAN_SUMMARIES[session_id] = {
+        "status": "queued",
+        "categories": normalized_categories,
+        "termination_reason": "",
+        "failed_attempts": 0,
+        "attempted_count": 0,
+        "attack_success": False,
+        "error_message": "",
+    }
     task = asyncio.create_task(
         _execute_scan_background(
             session_id=session_id,
@@ -726,10 +766,32 @@ async def scan_status(
     except ValueError:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
 
-    sess = await db.scalar(select(TestSession).where(TestSession.id == sid))
+    summary = SCAN_SUMMARIES.get(session_id) or {}
+    try:
+        sess = await db.scalar(select(TestSession).where(TestSession.id == sid))
+    except SQLAlchemyError as exc:
+        logger.exception("[scan:%s] status session lookup failed; memory fallback", session_id)
+        return {
+            "session_id":       session_id,
+            "status":           summary.get("status") or "running",
+            "phase":            1,
+            "total_tests":      int(summary.get("expected_phase1_total") or 0),
+            "completed_tests":  0,
+            "stored_results_count": 0,
+            "vulnerable_count": 0,
+            "safe_count":       0,
+            "ambiguous_count":  0,
+            "elapsed_seconds":  None,
+            "termination_reason": summary.get("termination_reason"),
+            "attempted_count": summary.get("attempted_count"),
+            "failed_attempts": summary.get("failed_attempts"),
+            "attack_success": summary.get("attack_success"),
+            "error_message": summary.get("error_message") or f"status_db_unavailable:{exc.__class__.__name__}",
+        }
     if not sess:
         raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
 
+    selected_categories = _decode_categories(getattr(sess, "categories", None)) or summary.get("categories")
     try:
         total_rows = await db.scalar(
             select(func.count()).select_from(TestResult).where(TestResult.session_id == sid)
@@ -767,7 +829,11 @@ async def scan_status(
             max_phase = max(max_phase, 3)
 
         from backend.core.phase1_scanner import estimate_phase1_total
-        expected_phase1_total = await estimate_phase1_total()
+        expected_phase1_total = await estimate_phase1_total(categories=selected_categories)
+        _scan_summary(session_id).update({
+            "expected_phase1_total": expected_phase1_total,
+            "categories": selected_categories,
+        })
     except Exception:
         logger.exception("[scan:%s] status aggregation failed; fallback response", session_id)
         total_rows = 0

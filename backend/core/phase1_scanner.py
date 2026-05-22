@@ -167,21 +167,25 @@ _load_attacks = _load_attack_patterns
 async def load_phase1_attack_patterns(
     category: str = "ALL",
     max_attacks: Optional[int] = None,
+    categories: Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """Expose Phase 1 attack list for APIs/UI (same sources as run_phase1: DB, then file)."""
     import backend.core.phase1_scanner as _self
 
-    return await _self._load_attacks(category, max_attacks)
+    return await _self._load_attacks(category, max_attacks, categories=categories)
 
 
-async def estimate_phase1_total(category: str = "ALL") -> int:
+async def estimate_phase1_total(
+    category: str = "ALL",
+    categories: Optional[List[str]] = None,
+) -> int:
     """Return the number of Phase 1 attacks visible to the scanner.
 
     The status API uses this for progress before rows are persisted. Keep this
     on the same loader path as run_phase1 so DB/file fallback cannot diverge.
     """
     try:
-        return len(await load_phase1_attack_patterns(category))
+        return len(await load_phase1_attack_patterns(category, categories=categories))
     except Exception as exc:
         logger.warning("[Phase1] total estimate failed: %s", exc)
         return 0

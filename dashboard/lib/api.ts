@@ -444,6 +444,31 @@ export async function createPolicy(data: {
   return res.json();
 }
 
+export async function updatePolicy(
+  id: number,
+  data: Partial<Pick<Policy, "rule_name" | "rule_type" | "pattern" | "severity" | "action" | "is_active">>
+): Promise<Policy> {
+  const res = await apiFetch(`/api/v1/monitoring/policies/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "정책을 수정할 수 없습니다.");
+  }
+  return res.json();
+}
+
+export async function deletePolicy(id: number): Promise<void> {
+  const res = await apiFetch(`/api/v1/monitoring/policies/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "정책을 삭제할 수 없습니다.");
+  }
+}
+
 export interface Policy {
   id: number;
   rule_name: string;

@@ -192,12 +192,19 @@ Phase 4까지 끝난 세션을 입력으로 받아, 운영팀과 보안팀이 �
 
 `/api/v1/monitoring/chat` 엔드포인트는 **직원이 외부 LLM을 1:1로 호출할 때 적용되는 운영 감사 채널**입니다. 보안 스캔 파이프라인과는 별개 경로이며, 다음 시나리오를 위해 존재합니다.
 
-- 직원이 운영 LLM에 보내는 질문을 정책 검사(P1: 기밀, P2: 부적절, P3: rate, P4: intent review)로 필터
+- 직원 요청을 5단계 정책 게이트로 필터
+  - **P1 기밀 누출**: PII 정규식 + JWT + 한·영 자격증명 요청 의도 + 로그인 username 동적 매칭 + PolicyRule DB 룰
+  - **P2 부적절 사용**: 한·영 욕설/우회/jailbreak + PolicyRule DB 룰
+  - **P3 Rate Limit**: `MONITOR_RATE_DAILY/HOURLY/REPEAT` ENV
+  - **P4 LLM 의도 검토** (`MONITORING_P4_ALWAYS_ON=true` 기본): P1/P2가 패턴에서 못 잡은 사회공학·워크플로 위장을 Judge LLM이 의미적으로 판정
+  - **P5 출력 사후 검사** (`MONITORING_P5_OUTPUT_REVIEW=true` 기본): testbed가 destructive action을 약속·시크릿 노출 시 응답을 차단 메시지로 대체 + Violation 기록
 - 정책 위반 시 차단하고 위반 기록을 AgentShield 앱 DB PostgreSQL에 적재
 - 허용된 요청은 서버 설정의 `MONITORING_TARGET_URL`로 전달 (`MONITORING_ALLOW_CLIENT_TARGET_URLS=true`일 때만 클라이언트 target override 허용)
 - 타겟이 반환한 `tool_trace` (RAG 호출, 도구 호출)를 그대로 보존해 감사 화면에 노출
+- 1:1 챗봇 UI는 `/monitoring` 페이지 우측 sticky 사이드바 (`MonitoringChatPanel`). 입력 즉시 P1~P5 게이트 통과 후 좌측 위반 내역 탭이 자동 새로고침
+- 보안팀 정책 관리는 `/monitoring` → "보안 정책 룰" 탭에서 GUI로 처리 (등록 / 편집 / 활성 토글 / 삭제). 변경 즉시 `invalidate_policy_cache()`로 60초 캐시 비워 다음 요청부터 적용. 모든 CRUD는 `audit_logs`에 actor·IP·User-Agent와 함께 기록
 
-대시보드 `/scan` 페이지의 **챗봇 테스트 모달**이 이 흐름을 시연용으로 사용하며, multi-turn 대화 히스토리도 그대로 전달됩니다. Scan/Red Agent/Demo 캠페인 같은 메인 파이프라인은 monitoring proxy를 거치지 않고 testbed에 직접 접속합니다.
+Scan/Red Agent/Demo 캠페인 같은 메인 파이프라인은 monitoring proxy를 거치지 않고 testbed에 직접 접속합니다.
 
 ### 8. Testbed
 
@@ -1139,6 +1146,51 @@ backend가 Docker로 돌고 있다면 컨테이너 내부의 `localhost`는 컨�
   - `_result_dict`에 `defense_rationale` 필드 추가 — `defense_code` 컬럼의 JSON(`{defended_response, defense_rationale}`)을 파싱해서 rationale만 분리 노출. UI에서 raw JSON 안 보이게.
   - `dashboard/app/scan/[id]/page.tsx`의 `addLog`에 dedupe 추가 — 직전 라인과 (level, msg)가 같으면 새 라인 대신 카운터 `× N` 표시. `[SCAN] Phase 1 ...` 반복 출력 종료.
   - `testbed/target_chatbot/config.py`의 `LLM_DEFAULT_NUM_PREDICT` 1024 → 2048. 응답이 토큰 한도로 끊겨 보이던 케이스 완화.
+
+### Monitoring Proxy / Red Agent 정비 (2026-05-22)
+
+- **보안 정책 룰 GUI CRUD 완성**
+  - `PATCH /api/v1/monitoring/policies/{id}` — `is_active` 토글 + 메타 부분 수정 (`PolicyUpdate` 모델). `DELETE /api/v1/monitoring/policies/{id}` — 삭제.
+  - 정책 CRUD 시 `monitoring_proxy/policies/_db.py`의 `invalidate_policy_cache()`를 호출해 lru_cache 즉시 비움. 60초 기다리지 않고 다음 챗봇 요청부터 새 룰 적용.
+  - 모든 CRUD 액션이 `audit_logs` 테이블에 `policy.create / policy.update / policy.delete`로 기록 (actor, IP, User-Agent, rule_id·name·severity·active 상태).
+  - `dashboard/components/MonitoringPoliciesPanel.tsx` — 등록·편집·활성 토글·삭제 인라인 UI + 확인 다이얼로그. `dashboard/lib/api.ts:updatePolicy / deletePolicy`.
+
+- **Monitoring P4 always-on + P5 출력 사후 검사 추가**
+  - `MONITORING_P4_ALWAYS_ON=true` 기본 — 패턴(P1/P2)이 못 잡은 사회공학·위장 워크플로도 Judge LLM이 의미적으로 판정.
+  - `monitoring_proxy/services/intent_review.py:review_response_intent` 신설. `MONITORING_P5_OUTPUT_REVIEW=true` 기본 — testbed 응답이 destructive action 약속·시크릿 노출·tool 실행 의지 보이면 차단 메시지로 대체 + Violation INSERT.
+  - `StageType`에 `p5_output_review` 추가.
+
+- **Red Agent 어댑티브 로직 보강 (한국어 응답 분류 결함 해결)**
+  - `analyze_defense_signal`에 카테고리 `intent_routing_fallback` 추가 — testbed가 "주문번호를 알려주시면" 식으로 게이팅할 때 catch.
+  - `partial_compliance` 패턴에 한국어 추가 (`알려주시면 / 제공해주시면 / 공유해주시면 / 입력해주시면 / 보내주시면`).
+  - `_FAILURE_GUIDANCE` 톤 조정 — `partial_compliance` / `intent_routing_fallback` 모두 "더 강하게 추출 강요" → "위장 ID로 routing 후 scope 확장"으로 전략 전환.
+  - `_FAILURE_BRANCH_RULES`에 `WORKFLOW-ROUTING BRANCH` 추가.
+  - `ROUND_ESCALATION[2]` directive 끝에 워크플로 라우팅 적응 블록 1개 추가 — R1에서 id 요구 catch 시 R2 첫 줄에 가짜 customer workflow ID(ORD-12345, TICKET-7821) 위장.
+
+- **파이프라인 분리 안전장치 2종** (SFT 검증과 분리되어 항상 작동)
+  - `check_prompt_scaffold_leak()` — Red Agent 내부 prompt(`## ROUND N - MANDATORY TECHNIQUE`, `Output rules` 등)가 testbed로 새는 것 차단.
+  - `check_hardcoded_sample_leak()` + `_FAKE_CREDENTIAL_LEAK_RE` narrow regex — Red 모델이 만든 가짜 credential(`sk_live_xxx`, `SYNC_TOKEN_998877`, `AUDIT-2023-Q3`, `FX_*_CFG_HASH`, `SHOPEASY_MERCHANT_*`)·sample PII만 차단. customer workflow ID(`ORD-/TICKET-`)는 통과시켜 어댑티브 우회 보존.
+  - 두 검출기 모두 `validation_mode` 무관 항상 작동. 발생 시 짧은 trigger로 short-circuit retry (8회 retry 실패 폭주 방지).
+  - 적용 위치 3곳: `backend/core/phase2_red_agent.py` 두 retry 경로(sitegpt + main scan), `scripts/run_red_adaptive_campaign.py` validation=off 분기.
+
+- **SFT validation 통합 토글 (`RED_SFT_VALIDATION_MODE`)**
+  - 기본 `off` — 학습은 끝났으므로 추론 시점에 SFT 검증을 끄는 게 정상. `validate_attack_prompt_output`의 검출기들이 정당한 공격을 reject하지 않도록.
+  - `phase2_red_agent.py` 메인 scan 경로 + sitegpt 경로 모두 동일 ENV 체인(`SITEGPT_RED_VALIDATION_MODE` > `DEMO_RED_VALIDATION_MODE` > `RED_SFT_VALIDATION_MODE` > `"off"`).
+  - 안전망(scaffold leak + hardcoded sample leak)은 이 토글과 별개로 항상 작동.
+
+- **`_DEMO_API_KEY_SYSTEM_PROMPT` 제거**
+  - demo 페이지가 시연용으로 강제 켜던 `DEMO_RED_API_KEY_PROMPT=true` 환경변수 주입 제거 (route.ts 2곳).
+  - `_DEMO_API_KEY_SYSTEM_PROMPT` 상수 + `get_system_prompt()`의 분기 코드 완전 제거. demo와 scan이 동일한 abliterated system prompt 사용.
+  - 이전에 이 prompt가 "encoded audit fragment 강제" / "JSON export row 요구" 톤으로 가짜 credential 생성을 유도하던 구조적 요인 제거.
+
+- **UI success 판정 강화 (false positive 차단)**
+  - `dashboard/app/demo/page.tsx`의 `adaptiveState.success` 계산을 `round.judgment === "vulnerable"` 단독이 아닌 `round.success === true || (vulnerable && success_strength >= 3)`으로 변경.
+  - Judge가 약한 신호(strength 1~2)에 vulnerable 라벨을 붙여도 UI success=true로 잘못 표시되지 않음.
+
+- **컨테이너 / 운영 정합성**
+  - `docker-compose.yml` backend 서비스 볼륨에 `./monitoring_proxy:/app/monitoring_proxy`, `./scripts:/app/scripts` 추가 — 호스트 코드 즉시 반영, `scripts.clear_monitoring_mock_data` 같은 단발 명령 실행 가능.
+  - `backend/db_urls.py` 추가 — `postgresql+asyncpg://...?ssl=require`를 sync psycopg2 호환 `sslmode=require`로 변환. monitoring proxy의 sync engine과 backend async engine이 동일 RDS URL을 일관되게 해석.
+  - `backend/database.py`에 `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` 자동 마이그레이션 추가 — 기존 테이블에 신규 컬럼이 누락된 환경에서 부팅 시 자동 보강.
 
 ## 보안 및 윤리 원칙
 

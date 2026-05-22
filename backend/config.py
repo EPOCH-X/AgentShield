@@ -40,6 +40,10 @@ class AppSettings:
         or os.getenv("DATABASE_URL", "").strip()
         or "postgresql+asyncpg://agentshield:agentshield@localhost:5432/agentshield"
     )
+    DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", 20))
+    DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", 40))
+    DB_POOL_TIMEOUT: int = int(os.getenv("DB_POOL_TIMEOUT", 60))
+    DB_POOL_RECYCLE: int = int(os.getenv("DB_POOL_RECYCLE", 1800))
 
     # JWT — 운영에서는 ENV(JWT_SECRET_KEY)가 반드시 설정되어야 한다.
     # 빈 값/기본 시드/너무 짧은 값(32자 미만)을 받으면 부팅을 거부한다.
