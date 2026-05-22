@@ -201,6 +201,61 @@ async def list_violations(
     ]
 
 
+@router.get("/violations/{violation_id}/context")
+async def violation_context(
+    violation_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(get_current_user),
+):
+    """위반 1건의 채팅 기록(요청/응답 원문)과 메타. 상세 드로어에서 사용."""
+    v = await db.get(Violation, violation_id)
+    if not v:
+        raise HTTPException(status_code=404, detail="위반 내역을 찾을 수 없습니다.")
+
+    emp = await db.get(Employee, v.employee_id) if v.employee_id else None
+    log = await db.get(UsageLog, v.evidence_log_id) if v.evidence_log_id else None
+
+    return {
+        "violation": {
+            "id":             v.id,
+            "violation_type": v.violation_type,
+            "severity":       v.severity,
+            "description":    v.description,
+            "sanction":       v.sanction,
+            "resolved":       v.resolved,
+            "created_at":     v.created_at.isoformat() if v.created_at else None,
+        },
+        "employee": {
+            "employee_id": emp.employee_id if emp else None,
+            "name":        emp.name        if emp else None,
+            "department":  emp.department  if emp else None,
+            "role":        emp.role        if emp else None,
+        } if emp else None,
+        "chat": {
+            "request_content":  log.request_content  if log else None,
+            "response_content": log.response_content if log else None,
+            "action_taken":     log.action_taken     if log else None,
+            "target_service":   log.target_service   if log else None,
+            "request_at":       log.request_at.isoformat() if log and log.request_at else None,
+        } if log else None,
+    }
+
+
+@router.patch("/violations/{violation_id}/resolve")
+async def resolve_violation(
+    violation_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: UserInfo = Depends(get_current_user),
+):
+    """검토 완료 처리 — 상세 드로어에서 호출."""
+    v = await db.get(Violation, violation_id)
+    if not v:
+        raise HTTPException(status_code=404, detail="위반 내역을 찾을 수 없습니다.")
+    v.resolved = True
+    await db.commit()
+    return {"id": v.id, "resolved": v.resolved}
+
+
 # ── 직원 목록 ─────────────────────────────────────────────────────────────────
 
 @router.get("/employees")

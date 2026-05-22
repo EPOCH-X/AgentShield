@@ -94,6 +94,7 @@ class OperationalRecordPlan:
     action_taken: str
     should_create_violation: bool
     violation_type: Optional[str] = None
+    sanction: Optional[str] = None
 
 
 def extract_request_context(payload: MonitorChatRequest) -> RequestContext:
@@ -259,12 +260,22 @@ def append_ambiguous_review_reason(
     return review_note
 
 
+_STAGE_SANCTION_MAP: dict[str, str] = {
+    "p1_confidential_scan": "masked",
+    "p2_inappropriate_use": "blocked",
+    "p3_rate_limit": "rate_limited",
+    "p4_intent_review": "blocked",
+    "p5_output_review": "output_blocked",
+}
+
+
 def build_blocked_record_plan(stage: StageType) -> OperationalRecordPlan:
     return OperationalRecordPlan(
         policy_violation=stage,
         action_taken="blocked_rate_limit" if stage == "p3_rate_limit" else "blocked",
         should_create_violation=True,
         violation_type=stage,
+        sanction=_STAGE_SANCTION_MAP.get(stage, "blocked"),
     )
 
 
@@ -332,7 +343,7 @@ def finalize_response(
             evidence=context.latest_message,
             evidence_log_id=getattr(saved_log, "id", None),
             reference=context.target_url,
-            sanction="blocked",
+            sanction=record_plan.sanction or "blocked",
         )
         create_violation_record_fn(record)
     return response

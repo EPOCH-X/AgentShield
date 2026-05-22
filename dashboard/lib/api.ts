@@ -408,6 +408,45 @@ export interface Violation {
   created_at: string;
 }
 
+export interface ViolationContext {
+  violation: {
+    id: number;
+    violation_type: string;
+    severity: string;
+    description: string;
+    sanction: string;
+    resolved: boolean;
+    created_at: string | null;
+  };
+  employee: {
+    employee_id: string | null;
+    name: string | null;
+    department: string | null;
+    role: string | null;
+  } | null;
+  chat: {
+    request_content: string | null;
+    response_content: string | null;
+    action_taken: string | null;
+    target_service: string | null;
+    request_at: string | null;
+  } | null;
+}
+
+export async function getViolationContext(violationId: number): Promise<ViolationContext> {
+  const res = await apiFetch(`/api/v1/monitoring/violations/${violationId}/context`);
+  if (!res.ok) throw new Error("위반 상세 정보를 가져올 수 없습니다.");
+  return res.json();
+}
+
+export async function resolveViolation(violationId: number): Promise<{ id: number; resolved: boolean }> {
+  const res = await apiFetch(`/api/v1/monitoring/violations/${violationId}/resolve`, {
+    method: "PATCH",
+  });
+  if (!res.ok) throw new Error("검토 완료 처리에 실패했습니다.");
+  return res.json();
+}
+
 export async function getEmployees(): Promise<Employee[]> {
   const res = await apiFetch("/api/v1/monitoring/employees");
   if (!res.ok) throw new Error("직원 목록을 가져올 수 없습니다.");
