@@ -270,6 +270,7 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
   const logRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const statusInFlightRef = useRef(false);
   const elapsedRef = useRef(0);
   const [elapsed, setElapsed] = useState("00:00:00");
 
@@ -330,6 +331,8 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
   }
 
   const fetchStatus = useCallback(async () => {
+    if (statusInFlightRef.current) return;
+    statusInFlightRef.current = true;
     try {
       const s = await getScanStatus(sessionId);
       setStatus(s);
@@ -386,6 +389,8 @@ export default function ScanDetailPage({ params }: { params: { id: string } }) {
       }
     } catch (err) {
       addLog("ERROR", err instanceof Error ? err.message : "상태를 가져올 수 없습니다.");
+    } finally {
+      statusInFlightRef.current = false;
     }
   }, [sessionId]);
 

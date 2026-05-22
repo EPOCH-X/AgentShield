@@ -13,7 +13,9 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
   const method = req.method;
   const bodyText = method !== "GET" && method !== "HEAD" ? await req.text() : "";
   const tail = segments.join("/");
-  const timeoutMs = tail.startsWith("scan/sitegpt/red-mutation")
+  const timeoutMs = /^scan\/[^/]+\/(?:status|results)$/.test(tail)
+    ? 120000
+    : tail.startsWith("scan/sitegpt/red-mutation")
     ? 180000
     : tail.startsWith("scan/sitegpt/")
       ? 90000
@@ -55,7 +57,13 @@ async function handler(req: NextRequest, { params }: { params: { path: string[] 
       status: res.status,
       headers: { "Content-Type": contentType || "application/json" },
     });
-  } catch {
+  } catch (err) {
+    console.error("[api proxy] backend request failed", {
+      method,
+      tail,
+      timeoutMs,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return NextResponse.json({ detail: "백엔드 연결 실패" }, { status: 502 });
   }
 }

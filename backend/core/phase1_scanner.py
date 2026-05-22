@@ -155,6 +155,9 @@ async def _load_attack_patterns(
                 raise ValueError("DB에 유효한 attack_prompt 없음")
             return patterns
     except Exception as e:
+        if not settings.PHASE1_ALLOW_FILE_FALLBACK:
+            logger.warning("[Phase1] DB load failed and file fallback disabled: %s", e)
+            return []
         logger.warning(f"[Phase1] DB load failed → file fallback: {e}")
         return await _load_attack_patterns_from_file(category, max_attacks, categories=categories)
 
@@ -212,10 +215,11 @@ async def _load_attack_patterns_from_file(
         if configured_path.exists():
             candidates = [configured_path]
         else:
-            logger.warning(
-                "[Phase1] ATTACK_PATTERN_PATH 가리키는 파일이 없어 data/attack_patterns 탐색으로 폴백합니다: %s",
+            logger.error(
+                "[Phase1] ATTACK_PATTERN_PATH 파일이 없습니다. 파인튜닝 원본 데이터로 조용히 폴백하지 않습니다: %s",
                 configured_path,
             )
+            return []
     if not candidates:
         if original_attack_data.exists():
             candidates = [original_attack_data]
